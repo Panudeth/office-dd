@@ -86,8 +86,10 @@ function paintCarpet(g: G, v: number, base: string, dark: string, lite: string, 
 }
 function paintWall(g: G, v: number) {
   P(g, 0, 0, 16, 16, '#f0e4c8');
-  dith4(g, 0, 5, 16, 7, '#e4d4b4', v);
-  P(g, 0, 0, 16, 5, '#c8b088'); P(g, 0, 0, 16, 1, '#e0cca4'); P(g, 0, 5, 16, 1, '#a88c64');
+  dith4(g, 0, 6, 16, 6, '#e4d4b4', v);
+  // แถบบนเป็นสีอิฐ ทำหน้าที่เป็นคิ้วของอาคาร ทำให้ห้องมีขอบชัดแทนที่จะจืดไปทั้งแผง
+  P(g, 0, 0, 16, 5, '#c2564f'); P(g, 0, 0, 16, 1, '#d8706a'); P(g, 0, 4, 16, 1, '#8f3f3c');
+  P(g, 0, 5, 16, 1, '#e8dcc0');
   P(g, 0, 12, 16, 1, '#a88c64'); P(g, 0, 13, 16, 3, '#8c6e4c'); P(g, 0, 15, 16, 1, '#6b5236');
 }
 
@@ -258,13 +260,109 @@ function drawShelf(): Sprite {
   P(g, 1, 24, 14, 2, '#5e3c1c');
   return { c: o.c, oy: 10 };
 }
-function drawSofa(part: number): Sprite {
+/** โซฟา v=0 แดง, 1 เหลือง, 2 ฟ้า - ให้แต่ละมุมห้องมีชุดรับแขกคนละสี */
+const SOFA_COLS: [string, string, string, string, string][] = [
+  ['#8f3f3c', '#c2564f', '#d8706a', '#d96a5e', '#e88a7d'],
+  ['#a8791c', '#e8bc48', '#f8dc84', '#f0c65c', '#fbe8a4'],
+  ['#2f5c86', '#4a86bc', '#74aede', '#5c96cc', '#8cc2ec'],
+];
+function drawSofa(part: number, v = 0): Sprite {
   const o = mk(16, 22), g = o.g;
-  P(g, 0, 0, 16, 10, '#8f3f3c'); P(g, 0, 1, 16, 8, '#c2564f'); P(g, 0, 1, 16, 1, '#d8706a');
-  P(g, 0, 10, 16, 9, '#8f3f3c'); P(g, 0, 10, 16, 7, '#d96a5e'); P(g, 0, 10, 16, 1, '#e88a7d');
-  if (part === 0) { P(g, 0, 4, 3, 14, '#a54a45'); P(g, 0, 4, 3, 1, '#c2564f'); }
-  if (part === 2) { P(g, 13, 4, 3, 14, '#a54a45'); P(g, 13, 4, 3, 1, '#c2564f'); }
-  P(g, 2, 19, 2, 3, '#5e2b28'); P(g, 12, 19, 2, 3, '#5e2b28');
+  const [D, M, HL, S, SHL] = SOFA_COLS[v % SOFA_COLS.length];
+
+  // พนักพิง มุมบนตัดเฉียงหนึ่งพิกเซล ให้ดูเป็นเบาะนุ่มไม่ใช่กล่อง
+  P(g, 0, 1, 16, 9, D); P(g, 1, 0, 14, 1, D);
+  P(g, 1, 1, 14, 8, M); P(g, 1, 1, 14, 1, HL);
+  // กระดุมยึดเบาะพนัก
+  P(g, 4, 4, 1, 1, D); P(g, 8, 4, 1, 1, D); P(g, 12, 4, 1, 1, D);
+  P(g, 0, 9, 16, 1, D);
+
+  // เบาะนั่ง สองใบ มีร่องกลางกับขอบหน้าเป็นเส้นปิดริม
+  P(g, 0, 10, 16, 8, D); P(g, 1, 10, 14, 6, S); P(g, 1, 10, 14, 1, SHL);
+  P(g, 8, 11, 1, 5, D);
+  P(g, 1, 16, 14, 1, HL); P(g, 0, 17, 16, 2, D);
+
+  // ที่วางแขน เฉพาะชิ้นหัวกับท้าย ยกสูงกว่าเบาะและมีไฮไลต์ด้านบน
+  if (part === 0) {
+    P(g, 0, 3, 4, 15, D); P(g, 1, 4, 2, 13, M); P(g, 1, 4, 2, 1, HL);
+    P(g, 3, 5, 1, 12, D);
+  }
+  if (part === 2) {
+    P(g, 12, 3, 4, 15, D); P(g, 13, 4, 2, 13, M); P(g, 13, 4, 2, 1, HL);
+    P(g, 12, 5, 1, 12, D);
+  }
+
+  P(g, 2, 19, 2, 3, '#5e3a24'); P(g, 12, 19, 2, 3, '#5e3a24');
+  P(g, 2, 19, 2, 1, '#7d5232'); P(g, 12, 19, 2, 1, '#7d5232');
+  return { c: o.c, oy: 6 };
+}
+
+/** กระถางเล็กตั้งพื้น ใช้แทรกตามมุมให้ห้องแน่นขึ้นโดยไม่กินที่เท่าปาล์ม */
+function drawPot(v: number): Sprite {
+  const o = mk(16, 20), g = o.g;
+  P(g, 5, 13, 6, 6, '#a8562e'); P(g, 6, 14, 4, 4, '#c46a3c'); P(g, 6, 14, 4, 1, '#dc8450');
+  P(g, 4, 11, 8, 3, '#c46a3c'); P(g, 4, 11, 8, 1, '#dc8450'); P(g, 5, 19, 6, 1, '#7e3f21');
+  const L = v === 0 ? '#4ea058' : '#5cbc60';
+  const D = v === 0 ? '#2c6c36' : '#38843e';
+  ([[4, 7], [9, 7], [6, 4], [3, 9], [10, 9], [7, 9]] as const).forEach(([x, y], i) => {
+    P(g, x, y, 3, 3, i % 2 ? L : D);
+    P(g, x, y + 3, 3, 1, D);
+  });
+  P(g, 5, 6, 6, 5, L); P(g, 6, 5, 4, 1, L); P(g, 5, 11, 6, 1, D);
+  return { c: o.c, oy: 6 };
+}
+
+/** ปาล์มกระถาง สูงกว่า plant เดิม ใบแผ่เป็นแฉกแทนที่จะเป็นพุ่ม */
+function drawPalm(v: number): Sprite {
+  const o = mk(16, 32), g = o.g;
+  // กระถางดินเผา
+  P(g, 3, 22, 10, 9, '#a8562e'); P(g, 4, 23, 8, 7, '#c46a3c'); P(g, 4, 23, 8, 1, '#dc8450');
+  P(g, 2, 20, 12, 3, '#c46a3c'); P(g, 2, 20, 12, 1, '#dc8450'); P(g, 3, 30, 10, 1, '#7e3f21');
+  P(g, 5, 21, 6, 1, '#5e3418');
+  // ลำต้น
+  P(g, 7, 10, 2, 11, '#7a5a2c'); P(g, 7, 10, 1, 11, '#96703a');
+  const L = '#3f9c4c', L2 = '#5cbc60', D = '#28703a';
+  // ใบแผ่ออกเป็นแฉก มุมต่างกันตาม v
+  const fronds: [number, number, number, number][] = v === 0
+    ? [[1, 6, 6, 3], [9, 6, 6, 3], [2, 2, 5, 3], [9, 2, 5, 3], [0, 10, 5, 2], [11, 10, 5, 2]]
+    : [[0, 5, 7, 3], [9, 5, 7, 3], [3, 1, 4, 3], [9, 1, 4, 3], [1, 9, 5, 2], [10, 9, 5, 2]];
+  fronds.forEach(([x, y, w, h], i) => {
+    P(g, x, y, w, h, i % 2 ? L : L2);
+    P(g, x, y + h, w, 1, D);
+    P(g, x + (i % 2 ? 0 : w - 1), y - 1, 1, 1, D);
+  });
+  P(g, 5, 4, 6, 6, L2); P(g, 6, 3, 4, 1, L); P(g, 5, 10, 6, 1, D);
+  return { c: o.c, oy: 16 };
+}
+
+/** ตู้กดน้ำ - ของสูงที่ช่วยเบรกผนังยาว ๆ ไม่ให้โล่ง */
+function drawVending(): Sprite {
+  const o = mk(16, 28), g = o.g;
+  P(g, 1, 2, 14, 24, '#8f3f3c'); P(g, 2, 3, 12, 22, '#c2564f'); P(g, 2, 3, 12, 1, '#d8706a');
+  // ตู้กระจกโชว์สินค้า
+  P(g, 3, 5, 8, 14, '#2a3540'); P(g, 4, 6, 6, 12, '#6fa8d0'); P(g, 4, 6, 6, 2, '#a8d4f0');
+  const cans = ['#e8d84c', '#4ac86c', '#e86c6c', '#6c9ce8'];
+  for (let row = 0; row < 3; row++) {
+    for (let i = 0; i < 3; i++) {
+      P(g, 4 + i * 2, 9 + row * 3, 2, 2, cans[(i + row) % 4]);
+    }
+  }
+  P(g, 11, 6, 3, 5, '#3a4048'); P(g, 12, 7, 1, 1, '#5ad06a'); P(g, 12, 9, 1, 1, '#e8d84c');
+  P(g, 11, 13, 3, 4, '#8d99a3'); P(g, 3, 20, 8, 3, '#3a4048'); P(g, 4, 21, 6, 1, '#6f7c86');
+  P(g, 1, 26, 14, 2, '#5e2b28');
+  return { c: o.c, oy: 12 };
+}
+
+/** โต๊ะโชว์แจกันดอกไม้ กลางพรมโซนพัก */
+function drawVaseTable(): Sprite {
+  const o = mk(16, 22), g = o.g;
+  P(g, 1, 8, 14, 6, '#8c6e4c'); P(g, 2, 9, 12, 4, '#c9ab7e'); P(g, 2, 9, 12, 1, '#e2c79c');
+  P(g, 3, 14, 2, 7, '#6b5236'); P(g, 11, 14, 2, 7, '#6b5236');
+  // แจกันแก้ว
+  P(g, 6, 4, 4, 5, '#8fb8cc'); P(g, 7, 4, 2, 5, '#c4e0ec'); P(g, 6, 8, 4, 1, '#6d94a8');
+  // ช่อดอก
+  P(g, 5, 1, 2, 2, '#e05868'); P(g, 8, 0, 2, 2, '#f0a048'); P(g, 9, 2, 2, 2, '#e05868');
+  P(g, 6, 3, 2, 1, '#3f8f4a'); P(g, 8, 3, 1, 2, '#3f8f4a');
   return { c: o.c, oy: 6 };
 }
 function drawCoffeeTable(): Sprite {
@@ -375,7 +473,12 @@ export function objSprite(o: MapObject): Sprite {
     case 'cooler': s = drawCooler(); break;
     case 'printer': s = drawPrinter(); break;
     case 'shelf': s = drawShelf(); break;
-    case 'sofa': s = drawSofa(o.part ?? 0); break;
+    case 'sofa': s = drawSofa(o.part ?? 0, o.v ?? 0); break;
+    case 'sofa2': s = drawSofa(o.part ?? 0, o.v ?? 2); break;
+    case 'palm': s = drawPalm(o.v ?? 0); break;
+    case 'pot': s = drawPot(o.v ?? 0); break;
+    case 'vending': s = drawVending(); break;
+    case 'vasetable': s = drawVaseTable(); break;
     case 'ctable': s = drawCoffeeTable(); break;
     case 'counter': s = drawCounter(); break;
     case 'pine': s = drawPine(o.v ?? 0); break;
@@ -408,8 +511,128 @@ export function decorSprite(type: string): HTMLCanvasElement {
   } else if (type === 'clock') {
     P(g, 5, 5, 6, 6, '#3a3f4b'); P(g, 6, 6, 4, 4, '#f4f6f8');
     P(g, 8, 7, 1, 2, '#3a3f4b'); P(g, 8, 8, 2, 1, '#d9534f');
+  } else if (type === 'frame0' || type === 'frame1') {
+    // รูปแขวนผนัง สองแบบ - แบบ 0 เป็นวิว แบบ 1 เป็นกราฟ
+    P(g, 2, 3, 12, 11, '#6b4520'); P(g, 3, 4, 10, 9, '#8a5a2a');
+    P(g, 4, 5, 8, 7, type === 'frame0' ? '#a8d4f0' : '#f6f2e4');
+    if (type === 'frame0') {
+      P(g, 4, 9, 8, 3, '#5cac4c'); P(g, 4, 9, 8, 1, '#78c45c');
+      P(g, 6, 6, 3, 3, '#f0e08c'); P(g, 9, 7, 2, 2, '#e8f4ff');
+    } else {
+      P(g, 5, 10, 2, 2, '#4a7fd0'); P(g, 7, 8, 2, 4, '#3fa06a'); P(g, 9, 6, 2, 6, '#e0a13f');
+      P(g, 4, 12, 8, 1, '#b0a48c');
+    }
+    P(g, 2, 13, 12, 1, '#4e3116');
+  } else if (type === 'screen') {
+    // จอใหญ่ติดผนัง สำหรับขึ้นตัวเลขบริษัท
+    P(g, 0, 2, 16, 12, '#2a3540'); P(g, 1, 3, 14, 9, '#3f7fb0');
+    P(g, 1, 3, 14, 3, '#5ca4d4'); P(g, 2, 4, 4, 1, '#a8d4f0');
+    P(g, 2, 7, 6, 1, '#cfe8fa'); P(g, 2, 9, 9, 1, '#cfe8fa'); P(g, 9, 7, 4, 1, '#a8d4f0');
+    P(g, 0, 12, 16, 2, '#1d2831'); P(g, 6, 14, 4, 1, '#3a4048');
+  } else if (type === 'hangplant') {
+    // กระถางแขวน ใบห้อยลงมา ช่วยให้ผนังไม่แบน
+    P(g, 7, 0, 1, 3, '#6b5236'); P(g, 4, 3, 8, 4, '#a8562e');
+    P(g, 5, 4, 6, 2, '#c46a3c'); P(g, 4, 3, 8, 1, '#dc8450');
+    const L = '#3f9c4c', L2 = '#5cbc60', D = '#28703a';
+    ([[3, 6, 3], [6, 7, 5], [9, 6, 4], [11, 7, 3], [5, 8, 2]] as const)
+      .forEach(([x, y, len], i) => {
+        P(g, x, y, 2, len, i % 2 ? L : L2);
+        P(g, x, y + len, 2, 1, D);
+      });
+    P(g, 5, 6, 6, 2, L2); P(g, 5, 6, 6, 1, L);
   }
   decorCache.set(type, o.c);
+  return o.c;
+}
+
+/* ---------------- ลวดลายบนพื้น ----------------
+   วาดทับ tile หลังปูพื้นเสร็จ ก่อนวางของ
+   แยกเป็น layer ของตัวเองเพราะกินหลายช่อง ทำเป็น tile ไม่ได้ */
+const decalCache = new Map<string, HTMLCanvasElement>();
+
+export interface FloorDecal {
+  type: 'rug' | 'emblem' | 'mat';
+  x: number; y: number; w: number; h: number;
+  color?: string;
+}
+
+/** พรมสี่เหลี่ยม
+   ถ้าเทสีเรียบ ๆ แล้วตีกรอบ มันจะอ่านเป็นสระน้ำ ไม่ใช่ผ้า
+   เลยต้องมีลายทอสลับฟันหนู ขอบสามชั้น และชายครุยที่หัวท้าย */
+function paintRug(g: G, w: number, h: number, color: string) {
+  const dark = shade(color, 0.74);
+  const mid = shade(color, 0.88);
+  const lite = shade(color, 1.18);
+
+  P(g, 0, 0, w, h, color);
+  // ลายทอ: เส้นแนวนอนถี่ ๆ สลับกับจุดประ ให้ผิวไม่เรียบ
+  for (let y = 0; y < h; y += 2) P(g, 0, y, w, 1, mid);
+  for (let y = 1; y < h; y += 4) {
+    for (let x = (y % 8 === 1 ? 0 : 2); x < w; x += 4) P(g, x, y, 2, 1, lite);
+  }
+
+  // ขอบสามชั้น เข้ม/สว่าง/เข้ม ทำให้ขอบพรมดูหนาเป็นผ้าทบ
+  P(g, 0, 0, w, 1, dark); P(g, 0, h - 1, w, 1, dark);
+  P(g, 0, 0, 1, h, dark); P(g, w - 1, 0, 1, h, dark);
+  P(g, 1, 1, w - 2, 2, lite); P(g, 1, h - 3, w - 2, 2, lite);
+  P(g, 1, 1, 2, h - 2, lite); P(g, w - 3, 1, 2, h - 2, lite);
+  P(g, 3, 3, w - 6, 1, dark); P(g, 3, h - 4, w - 6, 1, dark);
+  P(g, 3, 3, 1, h - 6, dark); P(g, w - 4, 3, 1, h - 6, dark);
+
+  // ชายครุย
+  for (let x = 2; x < w - 2; x += 3) {
+    P(g, x, 0, 1, 1, lite);
+    P(g, x, h - 1, 1, 1, lite);
+  }
+}
+
+/** วงรีตัน วาดทีละแถวแบบพิกเซล ไม่ใช้ arc เพราะ arc จะได้ขอบเบลอ */
+function fillEllipse(g: G, cx: number, cy: number, rx: number, ry: number, color: string) {
+  g.fillStyle = color;
+  for (let y = 0; y < cy * 2 + ry; y++) {
+    const dy = (y + 0.5 - cy) / ry;
+    if (Math.abs(dy) > 1) continue;
+    const half = rx * Math.sqrt(1 - dy * dy);
+    const x0 = Math.round(cx - half);
+    const wpx = Math.round(cx + half) - x0;
+    if (wpx > 0) g.fillRect(x0, y, wpx, 1);
+  }
+}
+
+/** ตราบริษัทฝังพื้นล็อบบี้
+   วงแหวนซ้อนกันโดยวาดวงรีตันทับกันจากนอกเข้าใน สลับเข้ม/สว่าง
+   ทำให้เห็นเป็นเส้นวงแหวนโดยไม่ต้องคำนวณขอบวง */
+function paintEmblem(g: G, w: number, h: number) {
+  const cx = w / 2, cy = h / 2;
+  const rx = w / 2 - 2, ry = h / 2 - 2;
+  // สีต้องต่างจากพื้นกระเบื้อง (#d0dce4) พอให้อ่านออก แต่ไม่ถึงกับเด้งออกมาลอย
+  const rings: [number, string][] = [
+    [1.0, '#9fb6c8'], [0.94, '#eaf2f7'], [0.66, '#9fb6c8'], [0.58, '#dce8f0'],
+    [0.24, '#8aa4ba'], [0.16, '#eaf2f7'],
+  ];
+  for (const [k, col] of rings) fillEllipse(g, cx, cy, rx * k, ry * k, col);
+  // แถบแนวนอนบาง ๆ พาดกลาง ทำให้อ่านออกว่าเป็นตรา ไม่ใช่แค่วงกลมซ้อน
+  P(g, Math.round(cx - rx), Math.round(cy) - 1, Math.round(rx * 2), 2, '#8aa4ba');
+}
+
+export function decalSprite(d: FloorDecal): HTMLCanvasElement {
+  const w = d.w * 16, h = d.h * 16;
+  const key = `${d.type}|${w}x${h}|${d.color ?? ''}`;
+  const hit = decalCache.get(key);
+  if (hit) return hit;
+
+  const o = mk(w, h), g = o.g;
+  if (d.type === 'rug') {
+    paintRug(g, w, h, d.color ?? '#7fb4d8');
+  } else if (d.type === 'emblem') {
+    paintEmblem(g, w, h);
+  } else {
+    // พรมเช็ดเท้าหน้าประตู
+    P(g, 0, 0, w, h, '#8f3f3c'); P(g, 1, 1, w - 2, h - 2, '#c2564f');
+    P(g, 1, 1, w - 2, 1, '#d8706a');
+    for (let x = 3; x < w - 3; x += 3) P(g, x, 3, 1, h - 6, '#a54a45');
+  }
+  decalCache.set(key, o.c);
   return o.c;
 }
 

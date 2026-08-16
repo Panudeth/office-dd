@@ -15,10 +15,12 @@ export const GROUND: string[] = [
   '#wwwwwwwwwwwwww#rrrrrrr#ggppppgggg',
   '#wwwwwwwwwwwwww#rrrrrrr#gggppggggg',
   '#wwwwwwwwwwwwww#rrrrrrr#gggppggggg',
-  '#wwwwwwwwwwwwwwtrrrrrrr#gggppggggg',
+  // แถว 6-9 ฝั่งออฟฟิศเป็นกระเบื้องทั้งหมด เพื่อให้เกิดล็อบบี้สูง 4 แถว
+  // ไว้ฝังตราบริษัทลงพื้น ไม่ใช่ทางเดินแคบ ๆ 2 แถวแบบเดิม
+  '#tttttttttttttttrrrrrrr#gggppggggg',
   '#ttttttttttttttttttttttt' + 'pppppppggg',
   '#ttttttttttttttttttttttt' + 'pppppppggg',
-  '#wwwwwwwwwwwwww#lllllll#gggppsssss',
+  '#tttttttttttttt#lllllll#gggppsssss',
   '#wwwwwwwwwwwwww#lllllll#gggpps~~~s',
   '#wwwwwwwwwwwwww#lllllll#gggpps~~~s',
   // แถว 12/14 กั้นผนังมุมล่างซ้ายเป็น "ห้องผู้บริหาร" (cols 1-3, rows 13-14)
@@ -100,13 +102,14 @@ for (let ty = 3; ty <= 4; ty++) {
 }
 BOSS_DESK.forEach((t, i) => add('bossdesk', t.x, t.y, { v: i }));
 add('chair', BOSS_HOME.x, BOSS_HOME.y);
-SOFA_SEATS.forEach((s, i) => add('sofa', s.x, s.y, { part: i }));
+SOFA_SEATS.forEach((s, i) => add('sofa', s.x, s.y, { part: i, v: 1 }));
 add('ctable', 18, 13);
 add('cooler', 21, 10);
 add('printer', 16, 10);
 add('shelf', 13, 9);
 add('counter', 18, 14);
-([[13, 1], [11, 6], [1, 6], [16, 1], [22, 6], [16, 14], [22, 9], [1, 14]] as const)
+// (11,6) กับ (1,6) เดิมถูกย้ายออก เพราะตอนนี้เป็นล็อบบี้กับตราบนพื้น
+([[13, 1], [16, 1], [22, 6], [16, 14], [22, 9], [1, 14]] as const)
   .forEach(([x, y]) => add('plant', x, y));
 
 /* ---------- โซนกลางแจ้ง ---------- */
@@ -124,16 +127,42 @@ add('sign', 24, 6);
 add('lamp', 26, 6);
 add('lamp', 29, 6);
 
+/* ---------- ของตกแต่งในร่มชุดใหม่ ----------
+   ปาล์มวางที่มุมล็อบบี้ ไม่วางกลางตรา และเว้นแถว 7-8 ไว้เป็นทางเดินเสมอ */
+([[1, 6, 0], [1, 9, 1], [14, 9, 0], [5, 14, 1], [9, 4, 0], [1, 4, 1]] as const)
+  .forEach(([x, y, v]) => add('palm', x, y, { v }));
+([[12, 4, 0], [13, 12, 1], [16, 9, 0], [22, 14, 1]] as const)
+  .forEach(([x, y, v]) => add('pot', x, y, { v }));
+add('vending', 14, 12);
+add('vasetable', 9, 14);
+add('vasetable', 21, 13);
+
+// ชุดรับแขกสีฟ้าบนพรมม่วง เป็นของตกแต่งล้วน ไม่ใช่ที่นั่งของ sim
+// จึงใช้ type แยกเพื่อให้ใส่ใน BLOCKING ได้ โดยไม่ไปบล็อก SOFA_SEATS ที่ agent ต้องเดินไปนั่งจริง
+([8, 9, 10] as const).forEach((x, i) => add('sofa2', x, 13, { part: i, v: 2 }));
+
 export const WALL_DECOR = [
   { type: 'board', x: 18, y: 0 }, { type: 'board', x: 19, y: 0 }, { type: 'board', x: 20, y: 0 },
+  { type: 'frame0', x: 17, y: 0 }, { type: 'frame1', x: 21, y: 0 },
   { type: 'window', x: 3, y: 0 }, { type: 'window', x: 4, y: 0 },
   { type: 'window', x: 9, y: 0 }, { type: 'window', x: 10, y: 0 },
+  { type: 'screen', x: 6, y: 0 },
   { type: 'clock', x: 7, y: 0 },
+  { type: 'frame0', x: 2, y: 0 }, { type: 'frame1', x: 12, y: 0 },
+  { type: 'hangplant', x: 1, y: 0 }, { type: 'hangplant', x: 14, y: 0 },
+];
+
+/** ลวดลายพื้น วาดทับ tile ก่อนวางของ ไม่มีผลกับการเดิน */
+export const FLOOR_DECALS = [
+  { type: 'emblem' as const, x: 4, y: 6, w: 8, h: 4 },
+  { type: 'rug' as const, x: 7, y: 12, w: 6, h: 3, color: '#a888bc' },
+  { type: 'rug' as const, x: 2, y: 4, w: 6, h: 2, color: '#8fb0c8' },
+  { type: 'mat' as const, x: 15, y: 6, w: 1, h: 1 },
 ];
 
 const BLOCKING = new Set([
   'desk', 'bossdesk', 'table', 'plant', 'cooler', 'printer', 'shelf', 'ctable', 'counter',
-  'pine', 'bush', 'rock', 'sign', 'lamp',
+  'pine', 'bush', 'rock', 'sign', 'lamp', 'palm', 'pot', 'vending', 'vasetable', 'sofa2',
 ]);
 
 export const WALKABLE: boolean[][] = [];

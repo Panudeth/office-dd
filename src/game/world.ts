@@ -1,8 +1,9 @@
 import { DEPT_BY_ID, ROLES, ROLE_ORDER, type Department } from '@/lib/departments';
-import { decorSprite, drawBubble, mk, objSprite, shade, tileSprite, type Surface } from './art';
+import { decalSprite, decorSprite, drawBubble, mk, objSprite, shade, tileSprite, type Surface } from './art';
 import { DIRS, buildAtlas, makePalette } from './character';
 import {
-  BENCH_SEATS, BH, BOSS_DESK, BOSS_HOME, BOSS_SEAT, BW, COOLER_STAND, DESK_SEATS, GROUND, IDLE_SPOTS,
+  BENCH_SEATS, BH, BOSS_DESK, BOSS_HOME, BOSS_SEAT, BW, COOLER_STAND, DESK_SEATS, FLOOR_DECALS,
+  GROUND, IDLE_SPOTS,
   MEET_SEATS, MH, MW, OBJECTS, PANTRY_TABLE, PODS, POND_SPOTS, REPORT_SPOTS,
   SOFA_SEATS, TS, WALL_DECOR, findPath, tileFree,
 } from './map';
@@ -76,7 +77,7 @@ export class World {
     this.employees.push({
       id: 'boss',
       name: 'คุณ',
-      title: '👑 ผู้บริหาร',
+      title: 'ผู้บริหาร',
       deptId: '__boss__',
       role: 'proposer',
       lens: '',
@@ -632,6 +633,8 @@ export class World {
     for (let y = 0; y < MH; y++) {
       for (let x = 0; x < MW; x++) ctx.drawImage(tileSprite(GROUND[y][x], x, y, wf), x * TS, y * TS);
     }
+    // ลายพื้นต้องมาหลังปูกระเบื้อง แต่ก่อนเงาผนังกับของทุกชิ้น
+    FLOOR_DECALS.forEach((d) => ctx.drawImage(decalSprite(d), d.x * TS, d.y * TS));
     WALL_DECOR.forEach((d) => ctx.drawImage(decorSprite(d.type), d.x * TS, d.y * TS));
 
     ctx.fillStyle = 'rgba(20,10,0,.13)';
