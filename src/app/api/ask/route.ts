@@ -1,8 +1,9 @@
 import { NextRequest } from 'next/server';
 import { DEPT_BY_ID, ROLES } from '@/lib/departments';
-import { ask, defaultModelFor, resolveCreds, type Creds } from '@/lib/llm';
-import { loadSkill } from '@/lib/skills';
-import type { AskAgent, AskEvent, AskRequest } from '@/lib/protocol';
+import { ask, effectiveModel, resolveCreds, type Creds } from '@/lib/llm';
+import { loadSkill, type LoadedSkill } from '@/lib/skills';
+import { companyBlock, companyStats, type CompanyContext } from '@/lib/company';
+import { MAX_ATTENDEES, type AskAgent, type AskEvent, type AskRequest, type SkillFile } from '@/lib/protocol';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,23 +11,42 @@ export const maxDuration = 300;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** ความเห็นหนึ่งก้อนที่เอาไปวางใน prompt ของคนถัดไป */
+interface Said {
+  name: string;
+  roleTh: string;
+  deptName: string;
+  text: string;
+}
+
+const asSaid = (a: AskAgent, text: string): Said => ({
+  name: a.name,
+  roleTh: ROLES[a.role].th,
+  deptName: a.deptName,
+  text,
+});
+
+const dumpSaid = (rows: Said[]) =>
+  rows.map((o) => `### ${o.name} (${o.roleTh} - ${o.deptName})\n${o.text}`).join('\n\n');
+
 /**
  * system prompt ของ agent หนึ่งตัว =
- *   skill.md ที่ "เรียนมา"  +  หน้าที่ตามบทบาท  +  มุมมองเฉพาะแผนก
+ *   skill.md ของ "แผนกตัวเอง"  +  หน้าที่ตามบทบาท  +  มุมมองเฉพาะแผนก
  *
- * ตัวที่ทำให้ agent จากโมเดลเดียวกันเห็นต่างจริงคือ "หน้าที่" กับ "เกณฑ์ประเมิน"
- * ไม่ใช่บุคลิก - ผู้เสนอถูกห้ามสรุปว่าอย่าทำ ผู้ค้านถูกห้ามลงท้ายว่าเห็นด้วย
- * สองข้อนี้ทำให้ทั้งคู่ไปถึงจุดหมายคนละที่ตั้งแต่ยังไม่เห็นหน้ากัน
+ * ประชุมข้ามแผนกใช้ skill คนละไฟล์กัน คนของกฎหมายอ่าน legal.md คนของบัญชีอ่าน finance.md
+ * ถ้าให้ทุกคนอ่านไฟล์เดียวกัน ความต่างระหว่างแผนกจะหายไปทันที
  */
-function agentSystem(skill: string, deptName: string, a: AskAgent): string {
+function agentSystem(skill: string, a: AskAgent, roomNote: string, company?: CompanyContext): string {
   const role = ROLES[a.role];
+  // ชั้นข้อเท็จจริงของบริษัทวางต่อจาก skill - skill บอกวิธีคิด ข้อมูลบริษัทบอกว่าคิดกับอะไร
+  const facts = companyBlock(company, a.deptId);
   return `${skill}
-
+${facts ? `\n---\n\n${facts}\n` : ''}
 ---
 
 ## บทบาทของคุณในห้องประชุมนี้
 
-คุณคือ **${a.name}** ทำหน้าที่ **${role.th}** ของ${deptName}
+คุณคือ **${a.name}** ทำหน้าที่ **${role.th}** ของ${a.deptName}
 
 ${role.mandate}
 
@@ -34,51 +54,62 @@ ${role.mandate}
 
 ## กติกาห้องประชุม
 
-- คุณกำลังนั่งกับเพื่อนร่วมทีมที่เรียนสกิลเดียวกัน แต่ **ถูกประเมินคนละเกณฑ์กับคุณ**
+${roomNote}
+- พูดจากมุมของ${a.deptName}ให้สุด แม้จะรู้ว่าแผนกอื่นจะไม่ชอบ
 - ห้ามพยายามหาข้อสรุปร่วมกันเอง หน้าที่สรุปเป็นของประธาน ไม่ใช่ของคุณ
-- ทีมที่เห็นตรงกันหมดตั้งแต่รอบแรก คือทีมที่ยังไม่มีใครทำงาน
-- พูดจากมุมของคุณให้สุด แม้จะรู้ว่าคนอื่นจะไม่ชอบ`;
+- คุณ **ไม่ใช่ผู้เชี่ยวชาญของแผนกอื่น** เรื่องที่อยู่นอกความรับผิดชอบของคุณ
+  ให้บอกว่าต้องให้แผนกไหนตอบ อย่าเดาแทนเขา`;
 }
 
-async function round1(skill: string, deptName: string, a: AskAgent, question: string, creds: Creds) {
+const ROOM_CROSS =
+  '- ในห้องนี้มีคนจาก **หลายแผนก** แต่ละแผนกเรียนคนละสกิลและถูกประเมินคนละเกณฑ์\n' +
+  '- ทีมที่เห็นตรงกันหมดตั้งแต่รอบแรก คือทีมที่ยังไม่มีใครทำงาน';
+
+const ROOM_SAME =
+  '- คุณกำลังนั่งกับเพื่อนร่วมทีมที่เรียนสกิลเดียวกัน แต่ **ถูกประเมินคนละเกณฑ์กับคุณ**\n' +
+  '- ทีมที่เห็นตรงกันหมดตั้งแต่รอบแรก คือทีมที่ยังไม่มีใครทำงาน';
+
+/* ============================================================
+   โหมดโต๊ะกลม - ทุกแผนกนั่งพร้อมกัน
+   ============================================================ */
+
+function round1(skill: string, a: AskAgent, question: string, room: string, creds: Creds, company?: CompanyContext) {
   const role = ROLES[a.role];
   return ask({
-    system: agentSystem(skill, deptName, a),
+    system: agentSystem(skill, a, room, company),
     user: `หัวหน้าถามเข้ามาว่า:
 
 """
 ${question}
 """
 
-รอบแรก - คุณยังไม่เห็นความเห็นของใคร พูดจากหน้าที่ ${role.th} ของคุณเท่านั้น
+รอบแรก - คุณยังไม่เห็นความเห็นของใคร พูดจากหน้าที่ ${role.th} ของ${a.deptName}เท่านั้น
 
 ${role.round1}
 
 เขียนไม่เกิน 6 บรรทัด ห้ามเกริ่นนำ ห้ามทวนคำถาม เริ่มที่เนื้อเลย
-ห้ามเขียนคำตอบแบบรอบด้านที่ครอบคลุมทุกมุม - นั่นเป็นงานของทั้งทีมรวมกัน ไม่ใช่ของคุณคนเดียว`,
+ห้ามเขียนคำตอบแบบรอบด้านที่ครอบคลุมทุกมุม - นั่นเป็นงานของทั้งห้องรวมกัน ไม่ใช่ของคุณคนเดียว`,
     maxTokens: 6000,
     effort: role.effort,
   }, creds);
 }
 
-async function round2(
-  skill: string, deptName: string, a: AskAgent, question: string,
-  others: { name: string; roleTh: string; text: string }[], creds: Creds,
+function round2(
+  skill: string, a: AskAgent, question: string, others: Said[], room: string, creds: Creds,
+  company?: CompanyContext,
 ) {
   const role = ROLES[a.role];
-  const peers = others.map((o) => `### ${o.name} (${o.roleTh})\n${o.text}`).join('\n\n');
-
   return ask({
-    system: agentSystem(skill, deptName, a),
+    system: agentSystem(skill, a, room, company),
     user: `คำถามเดิม:
 
 """
 ${question}
 """
 
-ตอนนี้คุณได้ยินเพื่อนร่วมทีมพูดแล้ว:
+ตอนนี้คุณได้ยินคนอื่นในห้องพูดแล้ว:
 
-${peers}
+${dumpSaid(others)}
 
 รอบสอง - ${role.round2}
 
@@ -90,8 +121,8 @@ ${peers}
 
 กติกาเข้ม:
 - **ห้ามเขียนว่า "เห็นด้วยกับทุกคน" หรือ "ไม่มีข้อค้าน"** ถ้าคุณหาข้อค้านไม่เจอ แปลว่ายังอ่านไม่ละเอียดพอ
+- ถ้ามีคนจากแผนกอื่นพูดเรื่องที่ทับกับงานของคุณและพูดผิด **ให้ค้านตรงนั้นก่อน**
 - ถ้าคุณจะเปลี่ยนจุดยืนตามคนอื่น ต้องระบุว่า **ข้อเท็จจริงหรือหลักฐานอะไร** ทำให้เปลี่ยน
-  การเขียนว่า "ฟังดูมีเหตุผล" หรือ "คุณ X พูดถูก" โดยไม่ระบุเหตุ ถือว่ายังไม่ได้ทำงาน
 - ค้านให้ตรงตัวบุคคลและตรงข้อ ห้ามค้านลอย ๆ ที่ใช้ได้กับทุกเรื่อง`,
     maxTokens: 6000,
     effort: role.effort,
@@ -99,36 +130,32 @@ ${peers}
 }
 
 /**
- * สรุปโดย "ประธาน" - เป็นบทบาทที่แยกจากผู้ถกทั้งสามคน
+ * สรุปโดย "ประธาน" - เป็นบทบาทที่แยกจากผู้ถก
  * ประธานถูกสั่งห้ามเกลี่ยให้ทุกคนถูก เพราะการเกลี่ยคือวิธีที่คำตอบจะกลายเป็นน้ำ
  */
-async function synthesize(
-  skill: string, deptName: string, chair: AskAgent, question: string,
-  r1: { name: string; roleTh: string; text: string }[],
-  r2: { name: string; roleTh: string; text: string }[],
-  creds: Creds,
+function synthesize(
+  skill: string, chair: AskAgent, question: string, deptNames: string[],
+  r1: Said[], r2: Said[], creds: Creds, company?: CompanyContext,
 ) {
   const dump = [
-    '## รอบแรก (ต่างคนต่างพูด)',
-    ...r1.map((o) => `**${o.name} - ${o.roleTh}:**\n${o.text}`),
-    '',
-    '## รอบสอง (หลังได้ยินกัน)',
-    ...r2.map((o) => `**${o.name} - ${o.roleTh}:**\n${o.text}`),
+    '## รอบแรก (ต่างคนต่างพูด)', dumpSaid(r1),
+    '', '## รอบสอง (หลังได้ยินกัน)', dumpSaid(r2),
   ].join('\n\n');
 
   return ask({
     system: `${skill}
-
+${companyBlock(company, chair.deptId) ? `\n---\n\n${companyBlock(company, chair.deptId)}\n` : ''}
 ---
 
 ## บทบาทของคุณ
 
-ตอนนี้คุณคือ **ประธานที่ประชุม**ของ${deptName} - ไม่ใช่ผู้ถก
-คุณเพิ่งฟังทีมเถียงกันสองรอบ และกำลังจะเดินไปสรุปให้หัวหน้าบริษัทฟัง
+ตอนนี้คุณคือ **ประธานที่ประชุม** - ไม่ใช่ผู้ถก
+ในห้องมีคนจาก ${deptNames.join(' / ')} คุณเพิ่งฟังทุกคนเถียงกันสองรอบ
+และกำลังจะเดินไปสรุปให้หัวหน้าบริษัทฟัง
 
 หน้าที่ของคุณคือ **ตัดสิน** ไม่ใช่รวบรวม:
-- ถ้าสองฝ่ายขัดกัน ให้บอกว่าฝั่งไหนมีน้ำหนักกว่าและเพราะอะไร
-- **ห้ามเกลี่ยให้ทุกคนถูก** และห้ามเขียนข้อสรุปแบบกว้าง ๆ ที่ไม่ได้เลือกอะไรเลย
+- ถ้าสองแผนกขัดกัน ให้บอกว่าฝั่งไหนมีน้ำหนักกว่าและเพราะอะไร
+- **ห้ามเกลี่ยให้ทุกแผนกถูก** และห้ามเขียนข้อสรุปแบบกว้าง ๆ ที่ไม่ได้เลือกอะไรเลย
 - ถ้าตัดสินไม่ได้จริงเพราะข้อมูลไม่พอ ให้บอกตรง ๆ ว่าต้องรู้อะไรก่อน
 - ข้อค้านที่ยังไม่มีใครตอบได้ ต้องขึ้นมาอยู่ในคำตอบ ห้ามกลบ`,
     user: `คำถามของหัวหน้า:
@@ -145,8 +172,8 @@ ${dump}
 
 **สรุป** - ตอบตรง ๆ 2-3 บรรทัด ว่าควรทำอะไร (ต้องเลือกข้าง ห้ามตอบว่า "ขึ้นอยู่กับ")
 **เหตุผล** - 2-3 ข้อสั้น ๆ
-**ข้อค้านที่ยังค้างอยู่** - ข้อที่ผู้ค้านยกมาแล้วยังไม่มีใครตอบได้ ถ้าถูกตอบครบแล้วให้เขียนว่า "ตอบครบแล้ว"
-**ทีมเห็นต่างตรงไหน** - ระบุชื่อและจุดที่ยังไม่ลงรอย ถ้าลงรอยกันจริงให้เขียนว่า "ทีมเห็นตรงกัน"
+**ข้อค้านที่ยังค้างอยู่** - ข้อที่ยังไม่มีใครตอบได้ ถ้าถูกตอบครบแล้วให้เขียนว่า "ตอบครบแล้ว"
+**แต่ละแผนกเห็นต่างตรงไหน** - ระบุชื่อแผนกและจุดที่ยังไม่ลงรอย ถ้าลงรอยกันจริงให้เขียนว่า "ทุกแผนกเห็นตรงกัน"
 **ต้องการจากหัวหน้า** - ข้อมูลหรือการตัดสินใจที่ยังขาด ถ้าไม่มีให้ตัดหัวข้อนี้ทิ้ง
 
 ห้ามเกริ่นนำ เริ่มที่ **สรุป** ทันที`,
@@ -155,17 +182,169 @@ ${dump}
   }, creds);
 }
 
+/* ============================================================
+   โหมดสายพาน - เจ้าของเรื่องถือคำถามไว้ เดินไปถามทีละแผนก
+   ============================================================ */
+
+/** เจ้าของเรื่องตั้งคำถามเฉพาะเจาะจงให้อีกแผนก - ไม่ใช่ส่งคำถามเดิมต่อดิบ ๆ */
+function relayAsk(
+  skill: string, owner: AskAgent, question: string, target: AskAgent,
+  gathered: { deptName: string; text: string }[], creds: Creds, company?: CompanyContext,
+) {
+  const sofar = gathered.length
+    ? `\n\nสิ่งที่คุณได้มาจากแผนกก่อนหน้าแล้ว:\n\n${gathered
+        .map((g) => `### ${g.deptName}\n${g.text}`)
+        .join('\n\n')}`
+    : '';
+
+  return ask({
+    system: agentSystem(skill, owner, ROOM_CROSS, company),
+    user: `หัวหน้ามอบเรื่องนี้ให้${owner.deptName}เป็นเจ้าของเรื่อง:
+
+"""
+${question}
+"""${sofar}
+
+ตอนนี้คุณกำลังจะเดินไปหา **${target.name}** จาก${target.deptName}
+
+เขียน **คำถามที่คุณจะถามเขา** - ไม่ใช่ส่งคำถามของหัวหน้าต่อไปดิบ ๆ
+ถามเฉพาะสิ่งที่ **${target.deptName}เท่านั้นที่ตอบได้** และที่คุณต้องรู้จริง ๆ
+เพื่อเอามาทำงานของ${owner.deptName}ต่อ
+
+ถ้าได้ข้อมูลจากแผนกก่อนหน้ามาแล้ว ให้ใช้มันตั้งคำถามที่เจาะกว่าเดิม
+
+เขียนไม่เกิน 4 บรรทัด เป็นคำถามล้วน ๆ ห้ามเกริ่นนำ ห้ามอธิบายว่าทำไมถึงถาม`,
+    maxTokens: 2000,
+    effort: 'low',
+  }, creds);
+}
+
+/** แผนกที่ถูกถามตอบกลับ - ตอบเฉพาะที่ถูกถาม ไม่ใช่ตอบคำถามใหญ่ของหัวหน้า */
+function relayAnswer(
+  skill: string, a: AskAgent, bigQuestion: string, asked: string, owner: AskAgent, creds: Creds,
+  company?: CompanyContext,
+) {
+  return ask({
+    system: agentSystem(skill, a, ROOM_CROSS, company),
+    user: `บริบท - หัวหน้าถามบริษัทว่า:
+
+"""
+${bigQuestion}
+"""
+
+เรื่องนี้${owner.deptName}เป็นเจ้าของเรื่อง และ **${owner.name}** เดินมาถามคุณว่า:
+
+"""
+${asked}
+"""
+
+ตอบคำถามของเขาในฐานะ${a.deptName}
+
+กติกา:
+- ตอบ **เฉพาะที่เขาถาม** ไม่ต้องไปตอบคำถามใหญ่ของหัวหน้าแทนเขา
+- ระบุให้ชัดว่าอะไรคือข้อกำหนดที่ต้องทำแน่ ๆ อะไรคือข้อควรระวัง
+- ถ้ามีตัวเลข เงื่อนไข หรือขั้นตอนที่เป็นของแผนกคุณโดยตรง ให้ใส่มาเลย
+- ถ้าคำถามของเขามีสมมติฐานที่ผิด **ให้แก้ให้เขาก่อน** แล้วค่อยตอบ
+- ถ้าเรื่องนี้เกินขอบเขตของ${a.deptName} ให้บอกว่าต้องไปถามแผนกไหนต่อ
+
+เขียนไม่เกิน 8 บรรทัด ห้ามเกริ่นนำ`,
+    maxTokens: 6000,
+    effort: ROLES[a.role].effort,
+  }, creds);
+}
+
+/** เจ้าของเรื่องสรุปเอง - ต่างจากโต๊ะกลมตรงที่คนสรุปคือคนที่เดินไปถามมาเองทั้งสาย */
+function relaySummary(
+  skill: string, owner: AskAgent, question: string,
+  steps: { deptName: string; asked: string; text: string }[], creds: Creds, company?: CompanyContext,
+) {
+  const dump = steps
+    .map((s, i) => `## ทอดที่ ${i + 1} - ${s.deptName}\n\n**คุณถามว่า:** ${s.asked}\n\n**เขาตอบว่า:**\n${s.text}`)
+    .join('\n\n');
+
+  return ask({
+    system: `${skill}
+${companyBlock(company, owner.deptId) ? `\n---\n\n${companyBlock(company, owner.deptId)}\n` : ''}
+---
+
+## บทบาทของคุณ
+
+คุณคือ **${owner.name}** จาก${owner.deptName} และคุณเป็น **เจ้าของเรื่องนี้**
+คุณเพิ่งเดินไปถามแผนกอื่นมาครบทุกแผนกด้วยตัวเอง และกำลังจะไปรายงานหัวหน้า
+
+หน้าที่ของคุณคือ **ประกอบคำตอบเป็นแผนเดียว** ไม่ใช่เอาคำตอบของแต่ละแผนกมาเรียงต่อกัน:
+- ถ้าแผนกหนึ่งบอกว่าทำได้ อีกแผนกบอกว่ามีเงื่อนไข ต้องรวมเป็นขั้นตอนเดียวที่ทำตามได้จริง
+- ข้อกำหนดที่แผนกอื่นบอกว่าเป็นเรื่องบังคับ **ห้ามตัดทิ้ง** แม้จะทำให้แผนดูยุ่งขึ้น
+- ถ้าคำตอบของสองแผนกขัดกัน ให้บอกตรง ๆ ว่าขัดกันตรงไหน อย่ากลบ`,
+    user: `คำถามของหัวหน้า:
+
+"""
+${question}
+"""
+
+บันทึกที่คุณเดินไปเก็บมา:
+
+${dump}
+
+รายงานหัวหน้า ตามโครงนี้ (ใช้หัวข้อตามนี้เป๊ะ):
+
+**สรุป** - ตอบตรง ๆ 2-3 บรรทัด ว่าทำได้หรือไม่ได้ และต้องทำอะไร
+**ขั้นตอน** - ลำดับที่ต้องทำจริง เรียง 1-2-3 ระบุด้วยว่าขั้นไหนเป็นของแผนกไหน
+**ข้อกำหนดที่ห้ามพลาด** - เงื่อนไขบังคับที่แต่ละแผนกยืนยันมา ระบุชื่อแผนกกำกับ
+**จุดที่แต่ละแผนกให้ข้อมูลขัดกัน** - ถ้าไม่มีให้เขียนว่า "ไม่มี"
+**ต้องการจากหัวหน้า** - ข้อมูลหรือการตัดสินใจที่ยังขาด ถ้าไม่มีให้ตัดหัวข้อนี้ทิ้ง
+
+ห้ามเกริ่นนำ เริ่มที่ **สรุป** ทันที`,
+    maxTokens: 12000,
+    effort: 'medium',
+  }, creds);
+}
+
+/* ============================================================
+   โหมดตอบตรง - คำถามข้อเท็จจริง คนเดียวตอบจากข้อมูลบริษัท ไม่ต้องประชุม
+   ============================================================ */
+
+function directAnswer(skill: string, a: AskAgent, question: string, creds: Creds, company?: CompanyContext) {
+  return ask({
+    system: agentSystem(skill, a, '- ไม่มีการประชุม คุณตอบคนเดียวจากข้อมูลบริษัทที่มี', company),
+    user: `หัวหน้าถามว่า:
+
+"""
+${question}
+"""
+
+ตอบตรง ๆ จาก **ข้อมูลบริษัท** ที่ให้ไว้ ถ้าเป็นการขอให้ร่างข้อความ ให้ร่างจริงพร้อมใช้
+ถ้าข้อมูลบริษัทไม่มีเรื่องที่ถาม ให้บอกว่าไม่มีในข้อมูล และแนะนำว่าควรกรอกเพิ่มที่หัวข้อไหน
+ห้ามเดาข้อเท็จจริงเรื่องบริษัทที่ไม่ได้ให้มา
+ถ้าเรื่องนี้ควรเข้าประชุมมากกว่าตอบตรง (มีความเสี่ยง ต้องตัดสินใจ) ให้บอกว่าควรตั้งเป็นวาระประชุม
+
+ห้ามเกริ่นนำ เริ่มที่คำตอบทันที`,
+    maxTokens: 6000,
+    effort: 'low',
+  }, creds);
+}
+
 /* ---------- โหมดสาธิต: ไม่มี API key ก็ยังเล่นดู animation ได้ ---------- */
+
 function mockText(a: AskAgent, round: number) {
   const role = ROLES[a.role];
   if (round === 1) {
-    return `[โหมดสาธิต] ในฐานะ${role.th} ผมมองเรื่องนี้จากมุม: ${a.lens}\n(ตั้งค่า ANTHROPIC_API_KEY เพื่อให้ agent ตอบจริง)`;
+    return `[โหมดสาธิต] ในฐานะ${role.th}ของ${a.deptName} ผมมองเรื่องนี้จากมุม: ${a.lens}\n(ใส่ API key เพื่อให้ agent ตอบจริง)`;
   }
   return `ค้าน: [โหมดสาธิต] ผมไม่เห็นด้วยกับข้อเสนอที่เร็วที่สุด เพราะยังไม่ได้ประเมินความเสี่ยง\nตกหล่น: ยังไม่มีใครพูดถึงต้นทุนเวลาจริง\nจุดยืน: เดินหน้าได้แต่ต้องมีเงื่อนไขกำกับ`;
 }
+
+const mockAsk = (owner: AskAgent, t: AskAgent) =>
+  `[โหมดสาธิต] ${owner.deptName}ขอถาม${t.deptName}ว่าเรื่องนี้ติดข้อกำหนดอะไรบ้าง และต้องเตรียมอะไรก่อน`;
+
+const mockAnswer = (a: AskAgent) =>
+  `[โหมดสาธิต] ${a.deptName}ตอบว่าเรื่องนี้มีเงื่อนไขที่ต้องทำก่อน และมีจุดที่ต้องระวัง\n(ใส่ API key เพื่อให้ agent ตอบจริง)`;
+
 function mockFinal(question: string) {
-  return `**สรุป**\n[โหมดสาธิต] ยังไม่มี API key ระบบจึงตอบด้วยข้อความตัวอย่างแทนคำตอบจริงของ agent\n\n**เหตุผล**\n- ทีมเดินไปประชุมและถกครบทั้งสองรอบตามปกติแล้ว (ดูได้จาก animation)\n- เหลือแค่ใส่คีย์เพื่อให้เนื้อหาเป็นของจริง\n\n**ข้อค้านที่ยังค้างอยู่**\n- ตอบครบแล้ว\n\n**ทีมเห็นต่างตรงไหน**\n- ทีมเห็นตรงกัน (โหมดสาธิตไม่ได้ถกจริง)\n\n**ต้องการจากหัวหน้า**\n- กดปุ่ม 🔑 คีย์ของฉัน บนแถบบน แล้วใส่คีย์ Claude หรือ Gemini (คำถามที่ถามมา: "${question.slice(0, 50)}")`;
+  return `**สรุป**\n[โหมดสาธิต] ยังไม่มี API key ระบบจึงตอบด้วยข้อความตัวอย่างแทนคำตอบจริงของ agent\n\n**เหตุผล**\n- ทีมเดินเข้าประชุมและถกครบทุกรอบตามปกติแล้ว (ดูได้จาก animation)\n- เหลือแค่ใส่คีย์เพื่อให้เนื้อหาเป็นของจริง\n\n**ข้อค้านที่ยังค้างอยู่**\n- ตอบครบแล้ว\n\n**แต่ละแผนกเห็นต่างตรงไหน**\n- โหมดสาธิตไม่ได้ถกจริง\n\n**ต้องการจากหัวหน้า**\n- กดปุ่ม คีย์ของฉัน บนแถบบน แล้วใส่คีย์ (คำถามที่ถามมา: "${question.slice(0, 50)}")`;
 }
+
+/* ============================================================ */
 
 export async function POST(req: NextRequest) {
   let body: AskRequest;
@@ -175,18 +354,24 @@ export async function POST(req: NextRequest) {
     return new Response('bad request', { status: 400 });
   }
 
-  const dept = DEPT_BY_ID.get(body.departmentId);
-  const agents = (body.agents ?? []).slice(0, 3);
-  if (!dept || !agents.length || !body.question?.trim()) {
-    return new Response('missing question / department / agents', { status: 400 });
+  const agents = (body.agents ?? []).slice(0, MAX_ATTENDEES);
+  const question = body.question?.trim();
+  if (!agents.length || !question) {
+    return new Response('missing question / agents', { status: 400 });
   }
 
+  const mode = body.mode === 'relay' ? 'relay' : body.mode === 'direct' ? 'direct' : 'roundtable';
+  // ข้อมูลบริษัทที่ client โหลดมาให้ - ไม่มีก็ทำงานเหมือนเดิม (agent ตอบจากความรู้ทั่วไป)
+  const company: CompanyContext | undefined = body.company;
+  const deptIds = [...new Set(agents.map((a) => a.deptId))];
+  const ownerDeptId = deptIds.includes(body.ownerDeptId) ? body.ownerDeptId : deptIds[0];
+
   // คีย์ของผู้ใช้มาทาง header ไม่ใช่ body - จะได้ไม่ติดไปกับ log ของ request body
-  // ใช้เฉพาะภายในคำขอนี้ ไม่เก็บลงดิสก์ ไม่ส่งกลับไปที่ client
   const creds = resolveCreds({
     provider: req.headers.get('x-llm-provider'),
     apiKey: req.headers.get('x-llm-key'),
     model: req.headers.get('x-llm-model'),
+    baseUrl: req.headers.get('x-llm-base-url'),
   });
 
   const encoder = new TextEncoder();
@@ -200,59 +385,146 @@ export async function POST(req: NextRequest) {
       const roleTh = (a: AskAgent) => ROLES[a.role].th;
 
       try {
-        const loaded = await loadSkill(dept.skill);
-        const skill = loaded.text;
-        const question = body.question.trim();
         const live = creds !== null;
 
+        // แต่ละแผนกอ่านสกิลของตัวเอง - โหลดทีเดียวแล้วแจกตาม deptId
+        const skills = new Map<string, LoadedSkill>();
+        await Promise.all(
+          deptIds.map(async (id) => {
+            const d = DEPT_BY_ID.get(id);
+            if (d) skills.set(id, await loadSkill(d.skill));
+          }),
+        );
+        const skillOf = (a: AskAgent) => skills.get(a.deptId)?.text ?? '';
+        const room = deptIds.length > 1 ? ROOM_CROSS : ROOM_SAME;
+
+        const files: SkillFile[] = deptIds.map((id) => {
+          const s = skills.get(id);
+          const d = DEPT_BY_ID.get(id);
+          return {
+            deptId: id,
+            deptName: d?.nameTh ?? id,
+            file: s?.file ?? '',
+            bytes: s?.bytes ?? 0,
+            missing: s?.missing ?? true,
+          };
+        });
+
         // ส่งหลักฐานให้ผู้ใช้ตรวจได้ว่า skill ถูกอ่านและประกอบเป็น system prompt จริง
-        // (skill ถูกโหลด "ตอนนี้" ไม่ใช่ตอนกดจ้าง - agent ไม่มี state ค้างระหว่างคำถาม)
         send({
           type: 'skill',
           proof: {
-            file: loaded.file,
-            bytes: loaded.bytes,
-            missing: loaded.missing,
-            systemPrompt: agentSystem(skill, dept.nameTh, agents[0]),
+            files,
+            systemPrompt: agentSystem(skillOf(agents[0]), agents[0], room, company),
+            company: companyStats(company, agents[0].deptId),
             agentName: agents[0].name,
-            model: creds?.model || (creds ? defaultModelFor(creds.provider) : 'โหมดสาธิต'),
+            model: creds ? await effectiveModel(creds) : 'โหมดสาธิต',
             provider: creds?.provider ?? 'mock',
           },
         });
 
-        /* ---------- รอบ 1: ต่างคนต่างพูดจากหน้าที่ของตัวเอง ---------- */
-        send({ type: 'phase', phase: 'round1', label: 'แต่ละบทบาทให้ความเห็นของตัวเอง' });
-        const r1: { name: string; roleTh: string; text: string }[] = [];
+        if (mode === 'direct') {
+          /* ---------- ตอบตรง ---------- */
+          const who = agents.find((a) => a.deptId === ownerDeptId) ?? agents[0];
+          send({ type: 'phase', phase: 'direct', label: `${who.name} ตอบจากข้อมูลบริษัท` });
+          const text = live
+            ? await directAnswer(skillOf(who), who, question, creds, company)
+            : (await sleep(1200), `[โหมดสาธิต] ${who.deptName}ตอบจากข้อมูลบริษัท (ใส่ API key เพื่อให้ตอบจริง)`);
+          send({ type: 'final', text, leadAgentId: who.id, leadAgentName: who.name });
+          send({ type: 'done' });
+          return;
+        }
+
+        if (mode === 'relay') {
+          /* ---------- สายพาน ---------- */
+          const owner = agents.find((a) => a.deptId === ownerDeptId) ?? agents[0];
+          // แผนกอื่นส่งตัวแทนแผนกละคน - สายพานคุยกันทีละคน ไม่ใช่ประชุม
+          const targets = deptIds
+            .filter((id) => id !== owner.deptId)
+            .map((id) => agents.find((a) => a.deptId === id))
+            .filter((a): a is AskAgent => !!a);
+
+          const steps: { deptName: string; asked: string; text: string }[] = [];
+
+          for (let i = 0; i < targets.length; i++) {
+            const t = targets[i];
+            const step = i + 1;
+            send({ type: 'phase', phase: 'consult', label: `${owner.name} ไปถาม${t.deptName}` });
+
+            const asked = live
+              ? await relayAsk(skillOf(owner), owner, question, t, steps, creds, company)
+              : (await sleep(1200), mockAsk(owner, t));
+            send({
+              type: 'consult',
+              step,
+              fromAgentId: owner.id, fromName: owner.name,
+              toAgentId: t.id, toName: t.name, toDeptId: t.deptId,
+              text: asked.trim(),
+            });
+
+            const answer = live
+              ? await relayAnswer(skillOf(t), t, question, asked, owner, creds, company)
+              : (await sleep(1500), mockAnswer(t));
+            send({
+              type: 'opinion',
+              agentId: t.id, agentName: t.name, agentRole: roleTh(t), deptId: t.deptId,
+              round: 1, step, askedBy: owner.name, text: answer,
+            });
+
+            steps.push({ deptName: t.deptName, asked: asked.trim(), text: answer });
+          }
+
+          send({ type: 'phase', phase: 'synthesis', label: `${owner.name} ประกอบคำตอบก่อนไปรายงาน` });
+          const final = live
+            ? await relaySummary(skillOf(owner), owner, question, steps, creds, company)
+            : (await sleep(1500), mockFinal(question));
+
+          send({ type: 'final', text: final, leadAgentId: owner.id, leadAgentName: owner.name });
+          send({ type: 'done' });
+          return;
+        }
+
+        /* ---------- โต๊ะกลม ---------- */
+        send({ type: 'phase', phase: 'round1', label: 'แต่ละแผนกให้ความเห็นของตัวเอง' });
+        const r1: Said[] = [];
         await Promise.all(
           agents.map(async (a) => {
             const text = live
-              ? await round1(skill, dept.nameTh, a, question, creds)
+              ? await round1(skillOf(a), a, question, room, creds, company)
               : (await sleep(1800 + Math.random() * 1500), mockText(a, 1));
-            r1.push({ name: a.name, roleTh: roleTh(a), text });
-            send({ type: 'opinion', agentId: a.id, agentName: a.name, agentRole: roleTh(a), round: 1, text });
+            r1.push(asSaid(a, text));
+            send({
+              type: 'opinion',
+              agentId: a.id, agentName: a.name, agentRole: roleTh(a), deptId: a.deptId,
+              round: 1, text,
+            });
           }),
         );
 
-        /* ---------- รอบ 2: บังคับให้ค้าน ---------- */
-        send({ type: 'phase', phase: 'round2', label: 'ถกแย้งกัน' });
-        const r2: { name: string; roleTh: string; text: string }[] = [];
+        send({ type: 'phase', phase: 'round2', label: 'ถกแย้งกันข้ามแผนก' });
+        const r2: Said[] = [];
         await Promise.all(
           agents.map(async (a) => {
             const others = r1.filter((o) => o.name !== a.name);
             const text = live
-              ? await round2(skill, dept.nameTh, a, question, others, creds)
+              ? await round2(skillOf(a), a, question, others, room, creds, company)
               : (await sleep(1500 + Math.random() * 1500), mockText(a, 2));
-            r2.push({ name: a.name, roleTh: roleTh(a), text });
-            send({ type: 'opinion', agentId: a.id, agentName: a.name, agentRole: roleTh(a), round: 2, text });
+            r2.push(asSaid(a, text));
+            send({
+              type: 'opinion',
+              agentId: a.id, agentName: a.name, agentRole: roleTh(a), deptId: a.deptId,
+              round: 2, text,
+            });
           }),
         );
 
-        /* ---------- สรุป: ประธานตัดสิน ---------- */
         send({ type: 'phase', phase: 'synthesis', label: 'ประธานสรุปก่อนมารายงาน' });
-        // ให้ผู้ตรวจสอบ (ตัวกลาง) เป็นคนเดินมารายงาน ถ้าไม่มีค่อยใช้คนแรก
-        const chair = agents.find((a) => a.role === 'verifier') ?? agents[0];
+        // ประธานมาจากแผนกเจ้าของเรื่อง เลือกผู้ตรวจสอบก่อนเพราะเป็นบทบาทที่ไม่เข้าข้างใคร
+        const pool = agents.filter((a) => a.deptId === ownerDeptId);
+        const chair = pool.find((a) => a.role === 'verifier') ?? pool[0] ?? agents[0];
+        const deptNames = deptIds.map((id) => DEPT_BY_ID.get(id)?.nameTh ?? id);
         const final = live
-          ? await synthesize(skill, dept.nameTh, chair, question, r1, r2, creds)
+          ? await synthesize(skillOf(chair), chair, question, deptNames, r1, r2, creds, company)
           : (await sleep(1500), mockFinal(question));
 
         send({ type: 'final', text: final, leadAgentId: chair.id, leadAgentName: chair.name });

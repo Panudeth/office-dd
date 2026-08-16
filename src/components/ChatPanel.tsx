@@ -4,15 +4,13 @@ import {
   ChevronDown, ChevronRight, MessagesSquare, ReceiptText, SendHorizontal, Swords,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { DEPARTMENTS, DEPT_BY_ID } from '@/lib/departments';
-import type { ChatMessage, Opinion } from '@/lib/protocol';
+import { DEPT_BY_ID } from '@/lib/departments';
+import { MEETING_MODES, type ChatMessage, type Opinion } from '@/lib/protocol';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
 import { Hint, Panel, PanelBody, PanelHeader } from '@/components/ui/panel';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
+import { fmt } from '@/components/ui/rich-text';
 
 /**
  * นับว่ารอบ 2 มีการค้านจริงกี่ข้อ ใช้ตรวจว่าทีมถกจริงหรือแค่พยักหน้าตามกัน
@@ -32,35 +30,7 @@ interface Props {
   messages: ChatMessage[];
   busy: boolean;
   phase: string | null;
-  deptChoice: string;
-  onDeptChoice: (v: string) => void;
-  hiredDeptIds: string[];
   onSend: (q: string) => void;
-}
-
-/** ตัวจัดรูปแบบเล็ก ๆ รองรับ **ตัวหนา** และ bullet ไม่ใช้ innerHTML */
-function fmt(text: string): ReactNode {
-  return text.split('\n').map((line, i) => {
-    const bullet = /^\s*[-•]\s+/.test(line);
-    const body = bullet ? line.replace(/^\s*[-•]\s+/, '') : line;
-    const parts = body.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
-    const nodes = parts.map((p, j) =>
-      p.startsWith('**') && p.endsWith('**') ? (
-        <strong key={j} className="font-semibold text-white">{p.slice(2, -2)}</strong>
-      ) : (
-        <span key={j}>{p}</span>
-      ),
-    );
-    if (!body.trim()) return <div key={i} className="h-1.5" />;
-    return bullet ? (
-      <div key={i} className="flex gap-1.5">
-        <span className="text-carpet-lite">-</span>
-        <span>{nodes}</span>
-      </div>
-    ) : (
-      <p key={i}>{nodes}</p>
-    );
-  });
 }
 
 /** ปุ่มพับ/กางที่ใช้ซ้ำสองที่ ให้หน้าตาเหมือนกันเป๊ะ */
@@ -87,9 +57,7 @@ function Disclosure({
   );
 }
 
-export default function ChatPanel({
-  messages, busy, phase, deptChoice, onDeptChoice, hiredDeptIds, onSend,
-}: Props) {
+export default function ChatPanel({ messages, busy, phase, onSend }: Props) {
   const [draft, setDraft] = useState('');
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const endRef = useRef<HTMLDivElement>(null);
@@ -107,31 +75,18 @@ export default function ChatPanel({
   };
 
   const toggle = (k: string) => setOpen((o) => ({ ...o, [k]: !o[k] }));
-  const hired = DEPARTMENTS.filter((d) => hiredDeptIds.includes(d.id));
 
   return (
-    <Panel className="min-h-80 flex-1">
-      <PanelHeader icon={<MessagesSquare />} title="ถามทีม">
-        <Select value={deptChoice} onValueChange={onDeptChoice} disabled={busy}>
-          <SelectTrigger className="h-6 w-40 border-wood-deep bg-wood-dark text-[11px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="auto">เลือกแผนกอัตโนมัติ</SelectItem>
-            {hired.map((d) => (
-              <SelectItem key={d.id} value={d.id}>
-                {d.nameTh}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </PanelHeader>
+    <Panel className="min-h-0 flex-1">
+      {/* ไม่มีตัวเลือกแผนกตรงนี้แล้ว - เลขาฯ เสนอให้ในระเบียบวาระ แล้วแก้ได้ทีเดียวตรงนั้น */}
+      <PanelHeader icon={<MessagesSquare />} title="ถามทีม" />
 
       <PanelBody>
         <div className="flex flex-1 flex-col gap-2 overflow-y-auto pr-1">
           {messages.map((m) => {
             const dept = m.departmentId ? DEPT_BY_ID.get(m.departmentId) : undefined;
             const objections = m.transcript ? countObjections(m.transcript) : 0;
+            const relay = m.mode === 'relay';
 
             return (
               <article
@@ -145,12 +100,34 @@ export default function ChatPanel({
                 }
               >
                 {m.role !== 'user' && (
-                  <div
-                    className="mb-1 text-[11px] font-bold"
-                    style={{ color: dept?.color ?? 'var(--color-wall-mid)' }}
-                  >
-                    {m.authorName ?? 'ระบบ'}
-                    {dept && <span className="text-dim"> / {dept.nameTh}</span>}
+                  <div className="mb-1 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                    <span
+                      className="text-[11px] font-bold"
+                      style={{ color: dept?.color ?? 'var(--color-wall-mid)' }}
+                    >
+                      {m.authorName ?? 'ระบบ'}
+                      {dept && <span className="text-dim"> / {dept.nameTh}</span>}
+                    </span>
+                    {m.mode && (
+                      <Badge variant="brass">
+                        {MEETING_MODES.find((x) => x.id === m.mode)?.th}
+                      </Badge>
+                    )}
+                    {/* แผนกที่เข้าประชุมจริง - จุดสีเดียวกับเสื้อพนักงานบนแผนที่ */}
+                    {m.deptIds?.map((id) => {
+                      const d = DEPT_BY_ID.get(id);
+                      if (!d) return null;
+                      return (
+                        <span
+                          key={id}
+                          className="flex items-center gap-1 text-[10px] text-dim"
+                          title={d.nameTh}
+                        >
+                          <i className="size-2 rounded-[2px]" style={{ background: d.color }} />
+                          {d.shortTh}
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
 
@@ -170,24 +147,52 @@ export default function ChatPanel({
                       open={!!open[`p${m.id}`]}
                       onToggle={() => toggle(`p${m.id}`)}
                       icon={<ReceiptText />}
-                      label="skill ที่ส่งไปจริง"
+                      label={`skill ที่ส่งไปจริง (${m.proof.files.length} ไฟล์)`}
                       tail={
-                        <Badge variant={m.proof.missing ? 'bad' : 'good'}>
-                          {m.proof.missing
-                            ? 'ไม่พบไฟล์'
-                            : `${m.proof.bytes.toLocaleString()} bytes`}
+                        <Badge variant={m.proof.files.some((f) => f.missing) ? 'bad' : 'good'}>
+                          {m.proof.files.some((f) => f.missing)
+                            ? 'มีไฟล์ที่หาไม่เจอ'
+                            : `${m.proof.files
+                                .reduce((n, f) => n + f.bytes, 0)
+                                .toLocaleString()} bytes`}
                         </Badge>
                       }
                     />
                     {open[`p${m.id}`] && (
                       <div className="mt-1">
                         <Hint className="mb-1.5">
-                          นี่คือ system prompt ตัวจริงที่ถูกส่งไปที่ <code>{m.proof.provider}</code>{' '}
-                          <code>{m.proof.model}</code> ในนามของ{' '}
-                          <b className="text-parchment">{m.proof.agentName}</b> ประกอบจากไฟล์{' '}
-                          <code>{m.proof.file}</code> บวกบทบาท บวกมุมมองของแผนก
+                          ประชุมนี้อ่านสกิลของแต่ละแผนกแยกไฟล์กัน คนของแผนกไหนอ่านของแผนกนั้น
+                          <br />
+                          {m.proof.files.map((f) => (
+                            <span key={f.deptId} className="mt-0.5 block">
+                              {f.deptName}: <code>{f.file}</code>{' '}
+                              {f.missing ? (
+                                <b className="text-brass">ไม่พบไฟล์ ใช้ข้อความสำรอง</b>
+                              ) : (
+                                `${f.bytes.toLocaleString()} bytes`
+                              )}
+                            </span>
+                          ))}
+                        </Hint>
+                        <Hint className="mb-1.5">
+                          ด้านล่างคือ system prompt ตัวจริงที่ถูกส่งไปที่{' '}
+                          <code>{m.proof.provider}</code> <code>{m.proof.model}</code> ในนามของ{' '}
+                          <b className="text-parchment">{m.proof.agentName}</b> ประกอบจากสกิลของแผนกเขา
+                          บวกบทบาท บวกมุมมองของแผนก
                           <br />
                           skill ถูกอ่าน<b className="text-parchment">ตอนถามคำถามนี้</b> ไม่ใช่ตอนกดจ้าง
+                          {m.proof.company && (
+                            <>
+                              <br />
+                              ข้อมูลบริษัทที่แนบไป:{' '}
+                              {m.proof.company.profileChars > 0 ? `โปรไฟล์ ${m.proof.company.profileChars.toLocaleString()} ตัวอักษร` : 'ไม่มีโปรไฟล์'}
+                              {m.proof.company.noteChars > 0 && ` · โน้ตแผนก ${m.proof.company.noteChars.toLocaleString()} ตัวอักษร`}
+                              {m.proof.company.chunkCount > 0 && ` · เอกสาร ${m.proof.company.chunkCount} ชิ้น`}
+                              {m.proof.company.profileChars === 0 && (
+                                <b className="text-brass"> - กรอกที่ปุ่มข้อมูลบริษัทแล้ว agent จะรู้ว่าเราเป็นใคร</b>
+                              )}
+                            </>
+                          )}
                         </Hint>
                         <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-box border border-ink-600 bg-ink-900 p-2 font-mono text-[11px] leading-relaxed text-wall-top">
                           {m.proof.systemPrompt}
@@ -203,42 +208,98 @@ export default function ChatPanel({
                       open={!!open[m.id]}
                       onToggle={() => toggle(m.id)}
                       icon={<Swords />}
-                      label={`บันทึกการถกกัน (${m.transcript.length} ความเห็น)`}
+                      label={
+                        relay
+                          ? `บันทึกการเดินสาย (${m.transcript.length} แผนก)`
+                          : `บันทึกการถกกัน (${m.transcript.length} ความเห็น)`
+                      }
                       tail={
-                        <Badge variant={objections > 0 ? 'brass' : 'default'}>
-                          {objections > 0 ? `ค้านกัน ${objections} ข้อ` : 'ไม่มีใครค้าน'}
-                        </Badge>
+                        relay ? (
+                          <Badge variant="brass">ส่งต่อ {m.transcript.length} ทอด</Badge>
+                        ) : (
+                          <Badge variant={objections > 0 ? 'brass' : 'default'}>
+                            {objections > 0 ? `ค้านกัน ${objections} ข้อ` : 'ไม่มีใครค้าน'}
+                          </Badge>
+                        )
                       }
                     />
                     {open[m.id] && (
                       <div className="mt-1 flex flex-col gap-1.5">
-                        {[1, 2].map((r) => {
-                          const rows = m.transcript!.filter((o) => o.round === r);
-                          if (!rows.length) return null;
-                          return (
-                            <div key={r}>
-                              <h4 className="mb-1 text-[11px] font-semibold uppercase text-brass">
-                                {r === 1
-                                  ? 'รอบ 1 ต่างคนต่างพูดจากหน้าที่ตัวเอง'
-                                  : 'รอบ 2 บังคับให้ค้าน'}
-                              </h4>
-                              {rows.map((o, i) => (
-                                <div
-                                  key={`${o.agentId}-${i}`}
-                                  className="mb-1 rounded-box border border-ink-600 bg-ink-800 px-2 py-1.5 text-[12px]"
-                                >
-                                  <div className="mb-0.5 flex items-center gap-1.5">
-                                    <b className="text-[11px] font-semibold text-wall-mid">
-                                      {o.agentName}
-                                    </b>
-                                    <Badge>{o.agentRole}</Badge>
+                        {relay
+                          ? /* สายพาน: จับคู่คำถามที่ส่งต่อกับคำตอบของทอดนั้น จะได้เห็นที่มา */
+                            m.transcript!.map((o, i) => {
+                              const c = m.consults?.find((x) => x.step === o.step);
+                              const od = o.deptId ? DEPT_BY_ID.get(o.deptId) : undefined;
+                              return (
+                                <div key={`${o.agentId}-${i}`}>
+                                  <h4 className="mb-1 text-[11px] font-semibold uppercase text-brass">
+                                    ทอดที่ {o.step ?? i + 1}
+                                    {od && ` - ${od.nameTh}`}
+                                  </h4>
+                                  {c && (
+                                    <div className="mb-1 rounded-box border border-dashed border-wood-dark bg-wood-deep/40 px-2 py-1.5 text-[12px] text-parchment-2">
+                                      <div className="mb-0.5 text-[11px] font-semibold text-brass-lite">
+                                        {c.fromName} เดินไปถาม {c.toName}
+                                      </div>
+                                      <div>{fmt(c.text)}</div>
+                                    </div>
+                                  )}
+                                  <div className="mb-1 rounded-box border border-ink-600 bg-ink-800 px-2 py-1.5 text-[12px]">
+                                    <div className="mb-0.5 flex items-center gap-1.5">
+                                      <b className="text-[11px] font-semibold text-wall-mid">
+                                        {o.agentName}
+                                      </b>
+                                      <Badge>{o.agentRole}</Badge>
+                                      {od && (
+                                        <span className="text-[10px] text-dim">{od.shortTh}</span>
+                                      )}
+                                    </div>
+                                    <div>{fmt(o.text)}</div>
                                   </div>
-                                  <div>{fmt(o.text)}</div>
                                 </div>
-                              ))}
-                            </div>
-                          );
-                        })}
+                              );
+                            })
+                          : [1, 2].map((r) => {
+                              const rows = m.transcript!.filter((o) => o.round === r);
+                              if (!rows.length) return null;
+                              return (
+                                <div key={r}>
+                                  <h4 className="mb-1 text-[11px] font-semibold uppercase text-brass">
+                                    {r === 1
+                                      ? 'รอบ 1 ต่างคนต่างพูดจากหน้าที่ตัวเอง'
+                                      : 'รอบ 2 บังคับให้ค้าน'}
+                                  </h4>
+                                  {rows.map((o, i) => {
+                                    const od = o.deptId ? DEPT_BY_ID.get(o.deptId) : undefined;
+                                    return (
+                                      <div
+                                        key={`${o.agentId}-${i}`}
+                                        className="mb-1 rounded-box border border-ink-600 bg-ink-800 px-2 py-1.5 text-[12px]"
+                                      >
+                                        <div className="mb-0.5 flex items-center gap-1.5">
+                                          <b className="text-[11px] font-semibold text-wall-mid">
+                                            {o.agentName}
+                                          </b>
+                                          <Badge>{o.agentRole}</Badge>
+                                          {od && (
+                                            <span
+                                              className="flex items-center gap-1 text-[10px] text-dim"
+                                            >
+                                              <i
+                                                className="size-2 rounded-[2px]"
+                                                style={{ background: od.color }}
+                                              />
+                                              {od.shortTh}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div>{fmt(o.text)}</div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            })}
                       </div>
                     )}
                   </div>

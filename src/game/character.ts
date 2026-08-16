@@ -127,6 +127,71 @@ export function drawChar(g: G, pal: Palette, dir: Dir, pose: Pose, frame: number
   g.restore();
 }
 
+/**
+ * ของในมือตอนไปประชุม - วาดทับตัวละครทีหลัง ไม่ได้อยู่ใน atlas
+ * (จะได้ไม่ต้องสร้าง atlas ใหม่ทุกครั้งที่หยิบ/วาง)
+ * แต่ละคนถือไม่เหมือนกัน กำหนดจาก seed จะได้ไม่เปลี่ยนไปมาระหว่างเดิน
+ *   laptop = โน้ตบุ๊กพับครึ่งถือแนบตัว   tablet = แท็บเล็ตถือมือเดียว   notes = สมุดกับปากกา
+ */
+export type Gadget = 'laptop' | 'tablet' | 'notes';
+export const GADGETS: Gadget[] = ['laptop', 'tablet', 'notes'];
+
+export function drawGadget(g: G, gadget: Gadget, dir: Dir, pose: Pose, frame: number) {
+  // ตำแหน่งมือ - อิงจากตำแหน่งแขนใน drawChar
+  const sit = pose === 'sit';
+  const bob = pose === 'walk' && (frame === 1 || frame === 3) ? -1 : 0;
+  const dy = (sit ? 2 : 0) + bob;
+  const walkSwing = pose === 'walk' ? (frame === 0 ? -1 : frame === 2 ? 1 : 0) : 0;
+
+  g.save();
+  if (dir === 'left') { g.translate(16, 0); g.scale(-1, 1); }
+  const d: Dir = dir === 'left' ? 'right' : dir;
+
+  if (d === 'up') {
+    // หันหลัง - ของอยู่หลังตัว มองไม่เห็น วาดแค่ขอบโผล่ข้างเอวนิดเดียว
+    if (gadget !== 'notes') { P(g, 2, 14 + dy, 1, 4, '#3a424c'); P(g, 13, 14 + dy, 1, 4, '#3a424c'); }
+    g.restore();
+    return;
+  }
+
+  if (sit) {
+    // นั่งประชุม - วางบนตักหรือบนโต๊ะข้างหน้า เห็นชัดที่สุด
+    if (gadget === 'laptop') {
+      // โน้ตบุ๊กกางบนตัก: ฝาบนตั้งขึ้น เห็นหลังฝา + คีย์บอร์ดเล็ก
+      P(g, 3, 13 + dy, 10, 6, '#2a3038'); P(g, 4, 14 + dy, 8, 4, '#3a424c'); P(g, 7, 15 + dy, 2, 1, '#5c6a78');
+      P(g, 3, 19 + dy, 10, 2, '#4a545e'); P(g, 4, 19 + dy, 8, 1, '#8a96a2');
+    } else if (gadget === 'tablet') {
+      P(g, 4, 15 + dy, 8, 5, '#2a3038'); P(g, 5, 16 + dy, 6, 3, '#6fa8d0'); P(g, 5, 16 + dy, 6, 1, '#a8d4f0');
+    } else {
+      P(g, 4, 16 + dy, 7, 4, '#f4f0e0'); P(g, 4, 16 + dy, 7, 1, '#ffffff'); P(g, 5, 17 + dy, 5, 1, '#b9b3a2'); P(g, 5, 18 + dy, 4, 1, '#b9b3a2');
+      P(g, 11, 15 + dy, 1, 4, '#d9534f'); P(g, 11, 15 + dy, 1, 1, '#2f3742');
+    }
+    g.restore();
+    return;
+  }
+
+  // ยืน/เดิน หันหน้าหรือหันข้าง - ถือแนบตัวด้านขวา (ฝั่งที่ไม่ mirror)
+  if (d === 'down') {
+    if (gadget === 'laptop') {
+      P(g, 9, 13 + dy + walkSwing, 5, 6, '#2a3038'); P(g, 10, 14 + dy + walkSwing, 3, 4, '#3a424c'); P(g, 11, 15 + dy + walkSwing, 1, 1, '#5c6a78');
+    } else if (gadget === 'tablet') {
+      P(g, 10, 13 + dy + walkSwing, 4, 6, '#2a3038'); P(g, 11, 14 + dy + walkSwing, 2, 4, '#6fa8d0');
+    } else {
+      P(g, 10, 14 + dy + walkSwing, 4, 5, '#f4f0e0'); P(g, 10, 14 + dy + walkSwing, 4, 1, '#ffffff'); P(g, 11, 16 + dy + walkSwing, 2, 1, '#b9b3a2');
+    }
+  } else {
+    // หันข้าง (right) - ของยื่นออกมาข้างหน้าตัวเล็กน้อย
+    if (gadget === 'laptop') {
+      P(g, 10, 14 + dy + walkSwing, 5, 5, '#2a3038'); P(g, 11, 15 + dy + walkSwing, 3, 3, '#3a424c');
+    } else if (gadget === 'tablet') {
+      P(g, 11, 13 + dy + walkSwing, 3, 6, '#2a3038'); P(g, 12, 14 + dy + walkSwing, 1, 4, '#6fa8d0');
+    } else {
+      P(g, 11, 14 + dy + walkSwing, 4, 5, '#f4f0e0'); P(g, 11, 14 + dy + walkSwing, 4, 1, '#ffffff'); P(g, 12, 16 + dy + walkSwing, 2, 1, '#b9b3a2');
+    }
+  }
+  g.restore();
+}
+
 /** atlas ต่อ 1 คน: 4 ทิศ x (walk 4 เฟรม + sit 4 เฟรม) */
 export function buildAtlas(pal: Palette): HTMLCanvasElement {
   const a = mk(16 * 8, 24 * 4);

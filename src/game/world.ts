@@ -1,11 +1,11 @@
 import { DEPT_BY_ID, ROLES, ROLE_ORDER, type Department } from '@/lib/departments';
 import { decalSprite, decorSprite, drawBubble, mk, objSprite, shade, tileSprite, type Surface } from './art';
-import { DIRS, buildAtlas, makePalette } from './character';
+import { DIRS, GADGETS, buildAtlas, drawGadget, makePalette } from './character';
 import {
-  BENCH_SEATS, BH, BOSS_DESK, BOSS_HOME, BOSS_SEAT, BW, COOLER_STAND, DESK_SEATS, FLOOR_DECALS,
-  GROUND, IDLE_SPOTS,
-  MEET_SEATS, MH, MW, OBJECTS, PANTRY_TABLE, PODS, POND_SPOTS, REPORT_SPOTS,
-  SOFA_SEATS, TS, WALL_DECOR, findPath, tileFree,
+  BENCH_SEATS, BH, BOSS_DESK, BOSS_HOME, BOSS_SEAT, BW, COOLER_STAND, DESK_SEATS,
+  FLOOR_DECALS, GROUND, IDLE_SPOTS, MEET_SEATS, MH, MW, OBJECTS, PANTRY_TABLE, POND_SPOTS,
+  PR_SEATS, REPORT_SPOTS, ROOMS, ROOM_OF_DEPT, SECRETARY_NAME, SECRETARY_PAL, SECRETARY_TITLE, SEC_HOME,
+  SOFA2_SEATS, SOFA_SEATS, TS, WALL_DECOR, findPath, roomOfSeat, tileFree,
 } from './map';
 import type {
   AgentState, BubbleIcon, Dir, Employee, EmployeeSnapshot, PersistedEmployee, Pose, Tile,
@@ -24,6 +24,13 @@ const STATE_TH: Record<AgentState, string> = {
 export const stateLabel = (s: AgentState) => STATE_TH[s] ?? s;
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
+/**
+ * หันหน้าไปทางไหนตอนนั่งโต๊ะตัวเอง - โต๊ะห้องแผนกอยู่เหนือที่นั่ง (หันขึ้น)
+ * เคาน์เตอร์ PR อยู่ใต้ที่นั่ง (หันลงหาล็อบบี้)
+ */
+const seatDir = (t: Tile): Dir => (PR_SEATS.some((p) => p.x === t.x && p.y === t.y) ? 'down' : 'up');
+/** แฮชง่าย ๆ จาก id - เอาไว้เลือกของประจำตัวให้คงที่ต่อคน */
+const hashId = (id: string) => { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); };
 const rnd = <T,>(a: T[]): T => a[(Math.random() * a.length) | 0];
 
 export class World {
@@ -34,7 +41,6 @@ export class World {
 
   employees: Employee[] = [];
   /** pod index -> deptId ที่จับจองไว้ */
-  private podDept: (string | null)[] = PODS.map(() => null);
   private nextId = 1;
   private selected: Employee | null = null;
 
@@ -51,6 +57,12 @@ export class World {
   /** คิวคำพูด - พูดทีละคน ไม่ให้แย่งกัน */
   private speechQueue: { id: string; text: string; sec: number; onStart?: () => void }[] = [];
   private speechGap = 0;
+  /**
+   * จำนวนตัวอักษรที่ใส่ในหน้าปัจจุบันของฟองแต่ละคนได้ - renderSpeech เป็นคนคำนวณ
+   * (ขึ้นกับซูมและความกว้างฟอง) แล้ว update ใช้ตัดสินว่าพิมพ์ครบหน้าหรือยัง
+   */
+  private pageLen = new Map<string, number>();
+  private blinkT = 0;
 
   private raf = 0;
   private last = 0;
@@ -65,6 +77,7 @@ export class World {
     this.base = mk(BW, BH);
     this.ctx = this.base.g;
     this.spawnBoss();
+    this.spawnSecretary();
     this.bindInput();
     this.resize();
     this.last = performance.now();
@@ -91,14 +104,100 @@ export class World {
       speed: 44,
       path: null, after: null,
       bubble: null, bubbleT: 0,
-      sayFull: '', sayChars: 0, sayT: 0,
+      sayFull: '', sayChars: 0, sayT: 0, sayPage: 0, sayHold: 0,
+      gadget: null,
       busy: true,
       isBoss: true,
       owner: 'sim',
     });
   }
 
+  /**
+   * เลขานุการ - เกิดเองทุกออฟฟิศเหมือนบอส ผู้ใช้ไม่ต้องจ้าง
+   * ยืนประจำหน้าห้องประชุม เป็นคนที่ผู้ใช้กดดูประวัติการประชุมผ่านไอคอนบนแถบบน
+   */
+  private spawnSecretary() {
+    const pal = { ...SECRETARY_PAL };
+    this.employees.push({
+      id: 'secretary',
+      name: SECRETARY_NAME,
+      title: SECRETARY_TITLE,
+      deptId: '__secretary__',
+      role: 'verifier',
+      lens: '',
+      pal,
+      atlas: buildAtlas(pal),
+      seat: { x: SEC_HOME.x, y: SEC_HOME.y },
+      tx: SEC_HOME.x, ty: SEC_HOME.y,
+      px: SEC_HOME.x * TS + 8, py: SEC_HOME.y * TS + TS,
+      dir: SEC_HOME.dir, pose: 'sit', frame: 0, animT: 0,
+      state: 'work', timer: 3,
+      speed: 40,
+      path: null, after: null,
+      bubble: null, bubbleT: 0,
+      sayFull: '', sayChars: 0, sayT: 0, sayPage: 0, sayHold: 0,
+      gadget: null,
+      // ไม่ busy - ให้ decideSecretary() คุมพฤติกรรมของเธอเองแทน AI ทั่วไป
+      busy: false,
+      isSecretary: true,
+      owner: 'sim',
+    });
+  }
+
+  /**
+   * กิจวัตรของเลขาฯ - แยกจาก AI ทั่วไป เพราะเธอต้องอยู่แถวห้องประชุมเสมอ
+   * ไม่ไปนั่งโซฟา ไม่ไปชมบ่อน้ำ แต่ก็ต้องไม่ยืนแข็งเป็นรูปปั้น
+   * ระหว่างประชุมเธอจะยืนจดอยู่หน้าห้อง ไม่เดินไปไหน
+   */
+  private decideSecretary(e: Employee) {
+    const meeting = this.employees.some((o) => o.state === 'meet' || o.state === 'think');
+    if (meeting) {
+      // ประชุมอยู่ - ยืนจดที่จุดประจำ หันหน้าเข้าห้อง
+      if (e.tx !== SEC_HOME.x || e.ty !== SEC_HOME.y) {
+        this.goTo(e, SEC_HOME.x, SEC_HOME.y, () => {
+          this.sitAt(e, SEC_HOME.x, SEC_HOME.y, SEC_HOME.dir, 'work', 4);
+        });
+        return;
+      }
+      this.sitAt(e, SEC_HOME.x, SEC_HOME.y, SEC_HOME.dir, 'work', 4);
+      e.gadget = 'notes';
+      e.bubble = 'type'; e.bubbleT = 2.5;
+      e.timer = 4 + Math.random() * 3;
+      return;
+    }
+
+    e.gadget = null; // ไม่มีประชุมก็วางสมุด
+    const roll = Math.random();
+    if (roll < 0.45) {
+      // กลับมาประจำที่ แล้วมองซ้ายขวาเหมือนคอยรับแขก
+      this.goTo(e, SEC_HOME.x, SEC_HOME.y, () => {
+        this.sitAt(e, SEC_HOME.x, SEC_HOME.y, SEC_HOME.dir, 'work', 6 + Math.random() * 6);
+        if (Math.random() < 0.5) { e.bubble = 'type'; e.bubbleT = 2; }
+      });
+    } else if (roll < 0.7) {
+      // เดินเช็คตามโต๊ะใกล้ ๆ ในโถงกลาง แล้วเดินกลับ
+      const spot = rnd(IDLE_SPOTS.filter((s) => Math.abs(s.x - SEC_HOME.x) <= 6 && Math.abs(s.y - SEC_HOME.y) <= 3));
+      if (spot) {
+        this.goTo(e, spot.x, spot.y, () => {
+          e.pose = 'stand'; e.state = 'idle'; e.timer = 2 + Math.random() * 3;
+        });
+      } else e.timer = 3;
+    } else if (roll < 0.85) {
+      // ไปกดน้ำแล้วกลับ
+      this.goTo(e, COOLER_STAND.x, COOLER_STAND.y, () => {
+        e.pose = 'stand'; e.dir = 'up'; e.state = 'coffee';
+        e.timer = 3 + Math.random() * 3; e.bubble = 'coffee'; e.bubbleT = 3;
+      });
+    } else {
+      // ยืนจดโน้ตอยู่กับที่
+      e.pose = 'stand'; e.state = 'idle';
+      e.bubble = 'type'; e.bubbleT = 2;
+      e.timer = 3 + Math.random() * 3;
+    }
+  }
+
   get bossId() { return 'boss'; }
+  get secretaryId() { return 'secretary'; }
   private get boss() { return this.employees.find((e) => e.isBoss)!; }
 
   destroy() {
@@ -111,7 +210,7 @@ export class World {
      จ้าง / เลิกจ้าง
      ============================================================ */
   /** พนักงานที่จ้างมาจริง (ไม่รวมตัวผู้บริหาร) */
-  private get staff() { return this.employees.filter((e) => !e.isBoss); }
+  private get staff() { return this.employees.filter((e) => !e.isBoss && !e.isSecretary); }
 
   seatsLeft(): number {
     const taken = new Set(this.staff.map((e) => `${e.seat.x},${e.seat.y}`));
@@ -122,25 +221,28 @@ export class World {
     return this.staff.filter((e) => e.deptId === deptId).length;
   }
 
+  /**
+   * จองที่นั่งให้แผนก - แต่ละแผนกมีห้องประจำ (ROOM_OF_DEPT) จึงนั่งในห้องตัวเองก่อน
+   * ห้องเต็มค่อยไปห้องสำรอง (ห้องที่ไม่มีแผนกไหนเป็นเจ้าของ) แล้วค่อยที่ว่างที่ไหนก็ได้
+   */
+  /** ที่นั่งประจำของแผนก - PR นั่งเคาน์เตอร์กลางล็อบบี้ นอกนั้นนั่งในห้องของตัวเอง */
+  private seatsOf(deptId: string): Tile[] {
+    if (deptId === 'pr') return PR_SEATS;
+    return ROOMS[ROOM_OF_DEPT[deptId] ?? -1]?.seats ?? [];
+  }
+
   private claimSeat(deptId: string): Tile | null {
     const taken = new Set(this.staff.map((e) => `${e.seat.x},${e.seat.y}`));
-    const free = (t: Tile) => !taken.has(`${t.x},${t.y}`);
+    // นั่งได้เฉพาะที่ของแผนกตัวเอง - เต็มคือจ้างเพิ่มไม่ได้ ไม่ไปเบียดแผนกอื่น
+    // (ป้ายห้องจะได้ตรงกับคนข้างในเสมอ และ HirePanel รู้จาก seatsLeftFor() ว่าปุ่มควรปิดเมื่อไร)
+    return this.seatsOf(deptId).find((t) => !taken.has(`${t.x},${t.y}`)) ?? null;
+  }
 
-    // 1) pod ของแผนกนี้ที่ยังมีที่ว่าง
-    for (let i = 0; i < PODS.length; i++) {
-      if (this.podDept[i] !== deptId) continue;
-      const s = PODS[i].find(free);
-      if (s) return s;
-    }
-    // 2) pod ที่ยังไม่มีเจ้าของ
-    for (let i = 0; i < PODS.length; i++) {
-      if (this.podDept[i] !== null) continue;
-      this.podDept[i] = deptId;
-      const s = PODS[i].find(free);
-      if (s) return s;
-    }
-    // 3) ที่ว่างที่ไหนก็ได้
-    return DESK_SEATS.find(free) ?? null;
+  /** ที่นั่งว่างของแผนกนี้ - ปุ่มจ้างใช้ตัดสินว่ากดได้ไหม */
+  seatsLeftFor(deptId: string): number {
+    const taken = new Set(this.staff.map((e) => `${e.seat.x},${e.seat.y}`));
+    const home = { seats: this.seatsOf(deptId) };
+    return home ? home.seats.filter((t) => !taken.has(`${t.x},${t.y}`)).length : 0;
   }
 
   hire(dept: Department): Employee | null {
@@ -167,15 +269,20 @@ export class World {
 
   /** สร้างพนักงานจากข้อมูลที่บันทึกไว้ (โหลดออฟฟิศกลับมา) */
   restore(rows: PersistedEmployee[]) {
-    this.employees = this.employees.filter((e) => e.isBoss);
-    this.podDept = PODS.map(() => null);
+    // บอสกับเลขาฯ ไม่ได้มาจากฐานข้อมูล จึงต้องรอดจากการล้างตอนสลับออฟฟิศ
+    this.employees = this.employees.filter((e) => e.isBoss || e.isSecretary);
+    const taken = new Set<string>();
     for (const r of rows) {
       const dept = DEPT_BY_ID.get(r.deptId);
       if (!dept) continue;
-      this.spawn(r, dept);
-      // จองโซนโต๊ะคืนให้ตรงกับตอนก่อนรีเฟรช
-      const pod = PODS.findIndex((p) => p.some((s) => s.x === r.seat.x && s.y === r.seat.y));
-      if (pod >= 0 && !this.podDept[pod]) this.podDept[pod] = r.deptId;
+      // ที่นั่งจากผังเก่าอาจไม่มีในผังนี้ (หรือซ้ำกัน) - หาที่ใหม่ให้แทนที่จะวางทับกัน
+      const known = DESK_SEATS.some((s) => s.x === r.seat.x && s.y === r.seat.y);
+      const key = `${r.seat.x},${r.seat.y}`;
+      let seat = known && !taken.has(key) ? r.seat : this.claimSeat(r.deptId);
+      if (!seat) continue;
+      seat = { ...seat };
+      taken.add(`${seat.x},${seat.y}`);
+      this.spawn({ ...r, seat }, dept);
     }
   }
 
@@ -192,12 +299,13 @@ export class World {
       seat: { ...rec.seat },
       tx: rec.seat.x, ty: rec.seat.y,
       px: rec.seat.x * TS + 8, py: rec.seat.y * TS + TS,
-      dir: 'down', pose: 'sit', frame: 0, animT: 0,
+      dir: seatDir(rec.seat), pose: 'sit', frame: 0, animT: 0,
       state: 'work', timer: 3 + Math.random() * 6,
       speed: 40 + Math.random() * 12,
       path: null, after: null,
       bubble: 'idea', bubbleT: 2,
-      sayFull: '', sayChars: 0, sayT: 0,
+      sayFull: '', sayChars: 0, sayT: 0, sayPage: 0, sayHold: 0,
+      gadget: null,
       busy: false,
       owner: 'sim',
     };
@@ -226,25 +334,22 @@ export class World {
   }
 
   fire(deptId?: string): boolean {
-    // ห้ามไล่ตัวผู้บริหารออก
+    // ห้ามไล่ตัวผู้บริหารกับเลขาฯ ออก - สองคนนี้ไม่ใช่พนักงานที่จ้างมา
+    const fixed = (e: Employee) => e.isBoss || e.isSecretary;
     const idx = deptId
-      ? this.employees.map((e) => (e.isBoss ? '' : e.deptId)).lastIndexOf(deptId)
-      : this.employees.map((e) => !e.isBoss).lastIndexOf(true);
+      ? this.employees.map((e) => (fixed(e) ? '' : e.deptId)).lastIndexOf(deptId)
+      : this.employees.map((e) => !fixed(e)).lastIndexOf(true);
     if (idx < 0) return false;
     const [gone] = this.employees.splice(idx, 1);
     if (this.selected?.id === gone.id) this.selected = null;
     if (this.follow === gone.id) this.follow = null;
-    // ปล่อย pod คืนถ้าไม่มีคนของแผนกนั้นเหลือแล้ว
-    if (!this.employees.some((e) => e.deptId === gone.deptId)) {
-      this.podDept = this.podDept.map((d) => (d === gone.deptId ? null : d));
-    }
     return true;
   }
 
   roster(): EmployeeSnapshot[] {
     return this.staff.map((e) => ({
       id: e.id, name: e.name, title: e.title, deptId: e.deptId, role: e.role,
-      state: e.state, color: e.pal.shirt,
+      state: e.state, color: e.pal.shirt, palette: e.pal,
     }));
   }
 
@@ -291,10 +396,9 @@ export class World {
     if (!t) return;
     // ไม่ตัดคิวทิ้งแล้ว - ทุกคนต้องได้พูด ไม่งั้นเห็นแค่คนแรกคนเดียว
     // การประชุมจะยาวเท่าที่บทสนทนายาว (page.tsx รอ waitForSpeech() ก่อนสรุป)
-    this.speechQueue.push({
-      id, text: t, onStart,
-      sec: sec ?? clamp(2.5 + t.length * 0.055, 4.5, 9),
-    });
+    // sec ที่ส่งมาคือเวลาค้างหลังพิมพ์จบ (อ่านหน้าสุดท้าย) ไม่ใช่อายุทั้งฟอง
+    // ข้อความยาวจะถูกแบ่งหน้าแล้วพลิกเองจนครบ ไม่โดนตัดกลางคันเหมือนเดิม
+    this.speechQueue.push({ id, text: t, onStart, sec: sec ?? 3 });
   }
 
   /** พูดทันทีโดยไม่ต้องรอคิว (ใช้ตอนมารายงานที่โต๊ะ) */
@@ -304,10 +408,13 @@ export class World {
     const e = this.employees.find((x) => x.id === id);
     const t = text.trim();
     if (!e || !t) return;
-    this.employees.forEach((o) => { o.sayFull = ''; o.sayChars = 0; o.sayT = 0; });
+    this.employees.forEach((o) => { o.sayFull = ''; o.sayChars = 0; o.sayT = 0; o.sayPage = 0; o.sayHold = 0; });
     e.sayFull = t;
     e.sayChars = 0;
-    e.sayT = sec ?? clamp(3 + t.length * 0.07, 6, 14);
+    e.sayPage = 0;
+    e.sayHold = sec ?? 4;
+    this.pageLen.delete(e.id); // ความยาวหน้าเป็นของข้อความก่อน - ต้องวัดใหม่ตอนวาด
+    e.sayT = Number.POSITIVE_INFINITY; // จบเองเมื่อพิมพ์ครบทุกหน้าและค้างครบ
     e.bubble = null;
     e.bubbleT = 0;
   }
@@ -321,14 +428,23 @@ export class World {
     const next = this.speechQueue[0];
     const e = this.employees.find((x) => x.id === next.id);
     if (!e) { this.speechQueue.shift(); return; }
-    // คนพูดยังเดินอยู่ - รอให้นั่งลงก่อน ไม่งั้นจะกลายเป็น "เดินไปพูดไป"
-    // ถือคิวไว้ทั้งแถวเพื่อรักษาลำดับการสนทนา
-    if (e.path) return;
+    // คนพูดยังเดินอยู่ - อย่าบล็อกทั้งคิว ข้ามไปหาคนถัดไปที่พร้อมพูด (คนที่เดินจะได้พูดเมื่อถึงที่)
+    // ถ้าไม่มีใครพร้อมเลย ค่อยรอ
+    if (e.path) {
+      const readyIdx = this.speechQueue.findIndex((q) => { const o = this.employees.find((x) => x.id === q.id); return o && !o.path; });
+      if (readyIdx < 0) return;
+      const [ready] = this.speechQueue.splice(readyIdx, 1);
+      this.speechQueue.unshift(ready);
+      return; // รอบหน้าจะหยิบตัวนี้
+    }
 
     this.speechQueue.shift();
     e.sayFull = next.text;
     e.sayChars = 0;
-    e.sayT = next.sec;
+    e.sayPage = 0;
+    e.sayHold = next.sec;
+    this.pageLen.delete(e.id); // ความยาวหน้าเป็นของข้อความก่อน - ต้องวัดใหม่ตอนวาด
+    e.sayT = Number.POSITIVE_INFINITY; // จบเองเมื่อพิมพ์ครบทุกหน้าและค้างครบ
     e.bubble = null; // กันฟองไอคอนซ้อนกับฟองข้อความ
     e.bubbleT = 0;
     next.onStart?.(); // เช่น หันไปหาคนที่กำลังค้าน + ให้คนนั้นมีปฏิกิริยา
@@ -400,6 +516,8 @@ export class World {
       e.after = null;
       const s = MEET_SEATS[i % MEET_SEATS.length];
       e.bubble = 'board'; e.bubbleT = 2.5;
+      // หยิบโน้ตบุ๊ก/แท็บเล็ต/สมุดติดมือไปประชุม - แต่ละคนถือประจำตัวไม่เปลี่ยน
+      e.gadget = GADGETS[hashId(e.id) % GADGETS.length];
       return this.walk(e, s.x, s.y).then(() => {
         this.sitAt(e, s.x, s.y, s.dir, 'meet', 9999);
       });
@@ -464,8 +582,9 @@ export class World {
       e.after = null;
       // goTo เรียก callback เสมอ ไม่ว่าจะเดินถึงหรือหาเส้นทางไม่เจอ - busy จึงถูกปลดแน่นอน
       this.goTo(e, e.seat.x, e.seat.y, () => {
-        this.sitAt(e, e.seat.x, e.seat.y, 'down', 'work', 8 + Math.random() * 10);
+        this.sitAt(e, e.seat.x, e.seat.y, seatDir(e.seat), 'work', 8 + Math.random() * 10);
         e.busy = false;
+        e.gadget = null; // ถึงโต๊ะแล้ววางของ
       });
     });
   }
@@ -475,11 +594,12 @@ export class World {
      ============================================================ */
   private decide(e: Employee) {
     if (e.busy) { e.timer = 5; return; }
+    if (e.isSecretary) { this.decideSecretary(e); return; }
     const roll = Math.random();
 
     if (roll < 0.36) {
       this.goTo(e, e.seat.x, e.seat.y, () => {
-        this.sitAt(e, e.seat.x, e.seat.y, 'down', 'work', 10 + Math.random() * 16);
+        this.sitAt(e, e.seat.x, e.seat.y, seatDir(e.seat), 'work', 10 + Math.random() * 16);
         if (Math.random() < 0.5) { e.bubble = 'type'; e.bubbleT = 2; }
       });
     } else if (roll < 0.5) {
@@ -494,7 +614,7 @@ export class World {
         e.timer = 5 + Math.random() * 6; e.bubble = 'food'; e.bubbleT = 4;
       });
     } else if (roll < 0.72) {
-      const free = SOFA_SEATS.filter((s) => !this.employees.some((o) => o !== e && o.tx === s.x && o.ty === s.y));
+      const free = [...SOFA_SEATS, ...SOFA2_SEATS].filter((s) => !this.employees.some((o) => o !== e && o.tx === s.x && o.ty === s.y));
       if (free.length) {
         const s = rnd(free);
         this.goTo(e, s.x, s.y, () => {
@@ -567,11 +687,29 @@ export class World {
         continue;
       }
       if (e.sayT > 0) {
-        e.sayT -= dt;
-        e.sayChars = Math.min(e.sayFull.length, e.sayChars + dt * 42); // ~42 ตัวอักษร/วินาที
-        if (e.sayT <= 0) {
-          e.sayFull = ''; e.sayChars = 0;
-          this.speechGap = 0.5; // เว้นจังหวะก่อนคนถัดไปพูด
+        /**
+         * กล่องข้อความแบบเกม Pokémon: พิมพ์ทีละตัวจนเต็มหน้า -> ค้างให้อ่าน -> พลิกหน้า
+         * ความยาวหน้าถูกคำนวณตอนวาด (renderSpeech เก็บไว้ที่ this.pageLen) เพราะขึ้นกับซูม
+         * ถ้ายังไม่เคยวาด (คนพูดอยู่นอกจอ) ให้พิมพ์ต่อไปเรื่อย ๆ จนจบแล้วค้างตามปกติ
+         */
+        const rest = e.sayFull.length - e.sayPage;
+        const pageLen = Math.min(rest, this.pageLen.get(e.id) ?? rest);
+        if (e.sayChars < pageLen) {
+          e.sayChars = Math.min(pageLen, e.sayChars + dt * 42); // ~42 ตัวอักษร/วินาที
+        } else {
+          e.sayHold -= dt;
+          if (e.sayHold <= 0) {
+            if (e.sayPage + pageLen < e.sayFull.length) {
+              // ยังมีหน้าถัดไป - พลิก
+              e.sayPage += pageLen;
+              e.sayChars = 0;
+              e.sayHold = 2.2;
+            } else {
+              e.sayFull = ''; e.sayChars = 0; e.sayPage = 0; e.sayT = 0;
+              this.pageLen.delete(e.id);
+              this.speechGap = 0.5; // เว้นจังหวะก่อนคนถัดไปพูด
+            }
+          }
         }
       }
 
@@ -668,6 +806,13 @@ export class World {
         const di = DIRS.indexOf(e.dir);
         const col = (e.pose === 'sit' ? 4 : 0) + (e.pose === 'walk' || e.pose === 'sit' ? e.frame : 1);
         ctx.drawImage(e.atlas, col * 16, di * 24, 16, 24, (e.px - 8) | 0, (e.py - 24) | 0, 16, 24);
+        // ของในมือ - วาดทับตัวละครในพิกัดเดียวกัน (สไปรต์ 16x24 มุมบนซ้ายอยู่ที่ px-8, py-24)
+        if (e.gadget) {
+          ctx.save();
+          ctx.translate((e.px - 8) | 0, (e.py - 24) | 0);
+          drawGadget(ctx, e.gadget, e.dir, e.pose, e.frame);
+          ctx.restore();
+        }
         if (this.selected?.id === e.id) {
           ctx.strokeStyle = '#ffd166';
           ctx.lineWidth = 1;
@@ -697,13 +842,18 @@ export class World {
     const plateSize = clamp(Math.round(3.4 * z), 9, 30);
     s.textAlign = 'center';
     s.font = `700 ${plateSize}px "Segoe UI","Noto Sans Thai",sans-serif`;
-    this.podDept.forEach((deptId, i) => {
-      if (!deptId) return;
+    // ป้ายทุกแผนก: ห้องแถวล่างติดเหนือประตู, PR ติดเหนือเคาน์เตอร์กลางล็อบบี้
+    // แสดงแม้ยังไม่ได้จ้างใคร - บอกได้ว่าห้องนี้ของใคร
+    const plates = Object.entries(ROOM_OF_DEPT).map(([deptId, ri]) => {
+      const room = ROOMS[ri];
+      return { deptId, bx: (room.rect.x + room.rect.w / 2) * TS, by: room.rect.y * TS - 6 };
+    });
+    plates.push({ deptId: 'pr', bx: (PR_SEATS[0].x + 1) * TS, by: (PR_SEATS[0].y - 1) * TS - 2 });
+    plates.forEach(({ deptId, bx, by }) => {
       const d = DEPT_BY_ID.get(deptId);
       if (!d) return;
-      const pod = PODS[i];
-      const cx = ((pod[0].x + pod[1].x) / 2 + 0.5) * TS * z + ox;
-      const cy = (pod[0].y * TS - 4) * z + oy;
+      const cx = bx * z + ox;
+      const cy = by * z + oy;
       const label = d.shortTh;
       const w = s.measureText(label).width + plateSize;
       s.fillStyle = 'rgba(10,14,20,.72)';
@@ -714,8 +864,8 @@ export class World {
       s.fillText(label, cx, cy + plateSize * 0.3);
     });
 
-    this.renderSpeech(s, z, ox, oy);
-
+    // ป้ายชื่อต้องมาก่อนฟองคำพูดเสมอ ไม่งั้นชื่อจะไปทับข้อความในฟองจนอ่านไม่ออก
+    // ชื่อคนพูดไม่หายไปไหน เพราะฟองมีหัวข้อเป็นชื่อ+บทบาทของเขาอยู่แล้ว
     if (this.showNames) {
       const fs = clamp(Math.round(4.4 * z), 11, 40);
       s.font = `600 ${fs}px "Segoe UI","Noto Sans Thai",sans-serif`;
@@ -731,6 +881,8 @@ export class World {
         s.fillText(e.name, x, y);
       });
     }
+
+    this.renderSpeech(s, z, ox, oy);
   }
 
   /**
@@ -738,8 +890,36 @@ export class World {
    * เพราะข้อความไทยที่ 16px จะอ่านไม่ออก
    * ตัดบรรทัดทีละตัวอักษร เพราะภาษาไทยไม่มีช่องว่างระหว่างคำ
    */
+  /**
+   * แบ่งข้อความเป็นบรรทัดตามความกว้างฟอง แล้วบอกว่าหน้านี้ใส่ได้กี่ตัวอักษร
+   * ตัดทีละตัวอักษร (ไทยไม่มีช่องว่าง) คืนทั้งบรรทัดที่ได้และจำนวนตัวที่กินไป
+   */
+  private paginate(
+    s: CanvasRenderingContext2D, text: string, maxW: number, maxLines: number,
+  ): { lines: string[]; used: number } {
+    const lines: string[] = [];
+    let cur = '';
+    let used = 0;
+    for (const ch of text) {
+      if (ch === '\n') {
+        lines.push(cur); cur = ''; used++;
+        if (lines.length >= maxLines) return { lines, used };
+        continue;
+      }
+      const next = cur + ch;
+      if (s.measureText(next).width > maxW && cur) {
+        lines.push(cur);
+        if (lines.length >= maxLines) return { lines, used };
+        cur = ch;
+      } else cur = next;
+      used++;
+    }
+    if (cur) lines.push(cur);
+    return { lines, used };
+  }
+
   private renderSpeech(s: CanvasRenderingContext2D, z: number, ox: number, oy: number) {
-    const talking = this.employees.filter((e) => e.sayT > 0 && e.sayChars > 0);
+    const talking = this.employees.filter((e) => e.sayT > 0);
     if (!talking.length) return;
 
     const fs = clamp(Math.round(3.9 * z), 11, 26);
@@ -757,28 +937,28 @@ export class World {
     talking.sort((a, b) => a.py - b.py);
 
     for (const e of talking) {
-      const shown = e.sayFull.slice(0, Math.floor(e.sayChars));
-      if (!shown) continue;
       // คนพูดอยู่นอกจอ (เช่นกล้องซูมอยู่ในห้องประชุม แต่คนที่โต๊ะพูด)
       // ถ้าวาดฟองไว้ริมจอจะดูเหมือนฟองไปโผล่ผิดตัว - ข้ามไปเลย
       const sx = e.px * z + ox;
       const sy = e.py * z + oy;
-      if (sx < -20 || sx > this.canvas.width + 20 || sy < -20 || sy > this.canvas.height + 40) continue;
-
-      // ตัดบรรทัดแบบทีละตัวอักษร (ไทยไม่มีช่องว่าง) แต่ยอมตัดที่ช่องว่างถ้ามี
-      const lines: string[] = [];
-      let cur = '';
-      for (const ch of shown) {
-        if (ch === '\n') { lines.push(cur); cur = ''; continue; }
-        const next = cur + ch;
-        if (s.measureText(next).width > maxW - pad * 2 && cur) { lines.push(cur); cur = ch; }
-        else cur = next;
-        if (lines.length >= maxLines) break;
+      if (sx < -20 || sx > this.canvas.width + 20 || sy < -20 || sy > this.canvas.height + 40) {
+        // นอกจอ - ไม่วาด แต่ต้องมี pageLen ไม่งั้น update() จะรอค่าที่ไม่มีวันมา
+        if (!this.pageLen.has(e.id)) this.pageLen.set(e.id, e.sayFull.length - e.sayPage);
+        continue;
       }
-      if (lines.length < maxLines && cur) lines.push(cur);
+
+      // หน้าปัจจุบันจุได้กี่ตัวอักษร - คำนวณจากข้อความทั้งหน้า (ไม่ใช่แค่ที่พิมพ์แล้ว)
+      // จะได้ไม่มีตัวอักษรกระโดดบรรทัดตอนกำลังพิมพ์ แล้วส่งให้ update ใช้ตัดสินว่าจบหน้าหรือยัง
+      const rest = e.sayFull.slice(e.sayPage);
+      const full = this.paginate(s, rest, maxW - pad * 2, maxLines);
+      this.pageLen.set(e.id, full.used);
+      const morePages = e.sayPage + full.used < e.sayFull.length;
+      const pageDone = e.sayChars >= full.used;
+
+      const shown = rest.slice(0, Math.floor(e.sayChars));
+      if (!shown) continue;
+      const { lines } = this.paginate(s, shown, maxW - pad * 2, maxLines);
       if (!lines.length) continue;
-      const clipped = lines.length >= maxLines && Math.floor(e.sayChars) < e.sayFull.length;
-      if (clipped) lines[lines.length - 1] = lines[lines.length - 1].slice(0, -1) + '...';
 
       // แถบชื่อในฟอง - ตอนซ้อนกันหลายฟองจะได้รู้ว่าใครพูด
       const nameFs = Math.max(9, Math.round(fs * 0.82));
@@ -788,18 +968,20 @@ export class World {
       const wName = s.measureText(label).width;
       s.font = `500 ${fs}px "Segoe UI","Noto Sans Thai",sans-serif`;
 
-      const wTxt = Math.max(wName, ...lines.map((l) => s.measureText(l).width));
-      const w = Math.ceil(wTxt + pad * 2);
-      const h = nameH + lines.length * lh + pad * 2;
+      // ขนาดฟองคิดจากข้อความทั้งหน้า ไม่ใช่แค่ที่พิมพ์แล้ว - ฟองจะได้ไม่ค่อย ๆ บวมตอนพิมพ์
+      // เผื่อที่ให้ลูกศรพลิกหน้าที่มุมขวาล่างด้วย
+      const wTxt = Math.max(wName, ...full.lines.map((l) => s.measureText(l).width));
+      const w = Math.ceil(wTxt + pad * 2 + (morePages ? fs * 0.9 : 0));
+      const h = nameH + Math.max(1, full.lines.length) * lh + pad * 2;
       const H = this.canvas.height;
       const cx = e.px * z + ox;
       const headY = (e.py - 27) * z + oy; // เหนือหัวเล็กน้อย
       const footY = e.py * z + oy;
       const x0 = clamp(Math.round(cx - w / 2), 4, Math.max(4, this.canvas.width - w - 4));
 
-      // คนที่อยู่ครึ่งบนของจอ (เช่นแถวบนของโต๊ะประชุม) วางฟองไว้ใต้ตัวแทน
-      // ไม่งั้นพอซ้อนกันหลายฟองจะถูกดันหลุดขอบบนไปเลย
-      const below = footY < H * 0.45;
+      // วางเหนือหัวเป็นหลัก - ฟองอยู่ใกล้หน้าคนพูดที่สุด อ่านออกทันทีว่าใครพูด
+      // วางใต้ตัวเฉพาะเมื่อเหนือหัวไม่มีที่จริง ๆ (ชนขอบบนจอ) ไม่ใช่ตัดสินจากตำแหน่งครึ่งจอ
+      const below = headY - Math.round(fs * 0.7) - h < 4;
       const gap = 6;
       const overlaps = (a: number, b: number) =>
         placed.some((p) => x0 < p.x1 + 4 && x0 + w > p.x0 - 4 && a < p.y1 + 4 && b > p.y0 - 4);
@@ -859,15 +1041,54 @@ export class World {
       s.fillStyle = '#1b2331';
       lines.forEach((l, i) => s.fillText(l, x0 + pad, y0 + pad + nameH + i * lh));
 
+      // ลูกศรพลิกหน้าแบบเกม Pokémon - กะพริบที่มุมขวาล่างเมื่อพิมพ์ครบหน้าและยังมีหน้าต่อ
+      if (morePages && pageDone && Math.floor(this.blinkT * 2.5) % 2 === 0) {
+        const aw = Math.max(4, fs * 0.32);
+        const ax = x0 + w - pad - aw;
+        const ay = y1 - pad - aw * 0.4;
+        s.beginPath();
+        s.moveTo(ax - aw, ay - aw);
+        s.lineTo(ax + aw, ay - aw);
+        s.lineTo(ax, ay + aw * 0.4);
+        s.closePath();
+        s.fillStyle = shade(e.pal.shirt, 0.72);
+        s.fill();
+      }
+      // หน้าอื่น ๆ ก่อนหน้า - จุดเล็กบอกว่าอ่านถึงไหนแล้ว (หน้า 2/3 เป็นต้น)
+      if (e.sayPage > 0 || morePages) {
+        const total = this.countPages(s, e.sayFull, maxW - pad * 2, maxLines);
+        const cur = this.countPages(s, e.sayFull.slice(0, e.sayPage), maxW - pad * 2, maxLines) + 1;
+        s.font = `600 ${Math.max(8, Math.round(fs * 0.62))}px "Segoe UI","Noto Sans Thai",sans-serif`;
+        s.fillStyle = 'rgba(27,35,49,.45)';
+        s.textAlign = 'right';
+        s.fillText(`${Math.min(cur, total)}/${total}`, x0 + w - pad, y0 + pad * 0.6);
+        s.textAlign = 'left';
+      }
+
       placed.push({ x0, y0, x1: x0 + w, y1 });
     }
     s.textBaseline = 'alphabetic';
+  }
+
+  /** นับว่าข้อความนี้ต้องใช้กี่หน้าที่ความกว้าง/จำนวนบรรทัดนี้ */
+  private countPages(s: CanvasRenderingContext2D, text: string, maxW: number, maxLines: number): number {
+    if (!text) return 0;
+    let n = 0;
+    let at = 0;
+    while (at < text.length && n < 50) {
+      const { used } = this.paginate(s, text.slice(at), maxW, maxLines);
+      if (used <= 0) break;
+      at += used;
+      n++;
+    }
+    return n;
   }
 
   private frame = (now: number) => {
     if (this.disposed) return;
     const dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
+    this.blinkT += dt; // ลูกศรพลิกหน้ากะพริบแม้ตอนหยุดเกม
     if (this.running) this.update(dt);
 
     if (this.camTarget) {
@@ -901,15 +1122,19 @@ export class World {
   resize() {
     const parent = this.canvas.parentElement;
     if (!parent) return;
+    // กินพื้นที่ของกรอบให้เต็มทั้งกว้างและสูง
+    // เดิมคิดความสูงจากอัตราส่วนของแผนที่ (w * BH/BW) จอกว้าง ๆ จึงเหลือที่ว่างข้างล่างเป็นแถบ
     const w = Math.max(280, Math.floor(parent.clientWidth));
-    const h = Math.max(200, Math.floor(w * (BH / BW)));
+    const h = Math.max(200, Math.floor(parent.clientHeight));
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.canvas.style.width = `${w}px`;
     this.canvas.style.height = `${h}px`;
     this.canvas.width = Math.floor(w * dpr);
     this.canvas.height = Math.floor(h * dpr);
     this.sctx.imageSmoothingEnabled = false;
-    this.fitZ = this.canvas.width / BW;
+    // "พอดีจอ" ต้องเห็นแผนที่ทั้งผืน จึงต้องเอาด้านที่คับกว่าเป็นตัวกำหนด
+    // (ขอบดำที่เหลือคืออัตราส่วนแมพกับจอไม่เท่ากัน - ผู้ใช้ซูมเข้าเองได้)
+    this.fitZ = Math.min(this.canvas.width / BW, this.canvas.height / BH);
     this.minZ = this.fitZ * 0.6;
     this.maxZ = this.fitZ * 12;
     if (!this.camReady) { this.resetView(); this.camReady = true; }
@@ -921,7 +1146,8 @@ export class World {
     this.camTarget = null;
     this.savedCam = null;
     this.cam.z = this.fitZ;
-    this.cam.x = 0;
+    // จัดกลางทั้งสองแกน เพราะตอนนี้กรอบอาจกว้างหรือสูงเกินแผนที่ก็ได้
+    this.cam.x = (BW - this.canvas.width / this.cam.z) / 2;
     this.cam.y = (BH - this.canvas.height / this.cam.z) / 2;
     this.clampCam();
   }

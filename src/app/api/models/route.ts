@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
     provider: req.headers.get('x-llm-provider'),
     apiKey: req.headers.get('x-llm-key'),
     model: null,
+    baseUrl: req.headers.get('x-llm-base-url'),
   });
 
   if (!creds) {
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
     return Response.json({
       provider: creds.provider,
       source: creds.source,
-      defaultModel: defaultModelFor(creds.provider),
+      defaultModel: defaultModelFor(creds.provider, creds.baseUrl),
       models,
     });
   } catch (err) {

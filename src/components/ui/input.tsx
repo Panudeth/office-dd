@@ -23,7 +23,7 @@ export function Field({
   className,
   ...props
 }: Omit<ComponentProps<'div'>, 'children'> & {
-  label?: string;
+  label?: React.ReactNode;
   hint?: React.ReactNode;
   children: React.ReactNode;
 }) {

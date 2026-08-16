@@ -84,13 +84,75 @@ function paintCarpet(g: G, v: number, base: string, dark: string, lite: string, 
   if (mask & 4) { P(g, 0, 0, 2, 16, lite); P(g, 2, 0, 1, 16, dark); }
   if (mask & 8) { P(g, 14, 0, 2, 16, lite); P(g, 13, 0, 1, 16, dark); }
 }
-function paintWall(g: G, v: number) {
-  P(g, 0, 0, 16, 16, '#f0e4c8');
-  dith4(g, 0, 6, 16, 6, '#e4d4b4', v);
-  // แถบบนเป็นสีอิฐ ทำหน้าที่เป็นคิ้วของอาคาร ทำให้ห้องมีขอบชัดแทนที่จะจืดไปทั้งแผง
-  P(g, 0, 0, 16, 5, '#c2564f'); P(g, 0, 0, 16, 1, '#d8706a'); P(g, 0, 4, 16, 1, '#8f3f3c');
-  P(g, 0, 5, 16, 1, '#e8dcc0');
-  P(g, 0, 12, 16, 1, '#a88c64'); P(g, 0, 13, 16, 3, '#8c6e4c'); P(g, 0, 15, 16, 1, '#6b5236');
+/**
+ * ผนังกระจกกั้นห้องบอส - มองทะลุเห็นพื้นข้างหลัง (วาดพื้นกระเบื้องก่อนแล้วทับด้วยกรอบ+กระจก)
+ * เดินผ่านไม่ได้ (WALKABLE กันไว้) แต่ต้องดูโปร่งไม่งั้นห้องบอสจะเป็นกล่องทึบ
+ */
+function paintGlass(g: G, v: number) {
+  P(g, 0, 0, 16, 16, '#d0dce4');
+  dith(g, 0, 0, 8, 8, '#d0dce4', '#c4d2dc', v);
+  P(g, 0, 4, 16, 10, '#a8d0e8'); dith4(g, 0, 5, 16, 8, '#c4e4f4', v);
+  P(g, 2, 6, 3, 1, '#ecf8ff'); P(g, 9, 9, 4, 1, '#ecf8ff');
+  P(g, 0, 3, 16, 1, '#5c6a78'); P(g, 0, 14, 16, 2, '#5c6a78'); P(g, 0, 15, 16, 1, '#3a4048');
+  P(g, 7, 3, 2, 13, '#5c6a78');
+}
+/**
+ * ผนัง - แยกตามทิศที่มองเห็น
+ *   face  = ผนังแนวนอนที่มีพื้นอยู่ข้างล่าง (เห็น "หน้าผนัง": คิ้วอิฐบน ผนังครีม บัวไม้ล่าง)
+ *   side  = ผนังแนวตั้ง / มุม / ผนังที่ไม่มีพื้นข้างล่าง - เห็นแค่ "สันผนัง" จากด้านบน
+ *           วาดเป็นแท่งทึบสีอิฐมีขอบเข้ม ไม่ใช่เอาหน้าผนังแนวนอนมาซ้อนกันเป็นชั้น ๆ
+ * capBelow = ผนังแนวตั้งที่มีผนัง face อยู่ข้างล่าง (มุมบนของห้อง) - ให้เชื่อมกันเป็นเนื้อเดียว
+ */
+/**
+ * ผนังบาง - ผนังกินช่องเต็ม 16px ทำให้ห้องเล็กดูทึบ จึงวาดให้ตัวผนังจริงหนาแค่ 6px
+ * ที่เหลือของช่องปล่อยให้เห็นพื้นข้างเคียง (อ่านจาก GROUND ทั้งสองฝั่ง)
+ * การเดินยังบล็อกทั้งช่องเหมือนเดิม - นี่คือเรื่องภาพอย่างเดียว
+ */
+const WALL_T = 6; // ความหนาผนังจริง (px)
+const WALL_X0 = (16 - WALL_T) / 2; // 5
+
+function paintNeighborFloor(g: G, code: string | null, x: number, y: number, w: number, h: number) {
+  // พื้นข้างผนัง - วาดเป็นสีเรียบของ tile นั้น (ไม่ต้องละเอียด เพราะโดนผนังบังไปครึ่งหนึ่ง)
+  const c = code === 'w' ? '#e0a868' : code === 't' ? '#d0dce4' : code === 'r' ? '#4c9c54'
+    : code === 'l' ? '#c07058' : code === 'b' ? '#3c5878' : code === 'g' ? '#5cac4c'
+    : code === 'p' ? '#e0cc98' : code === 's' ? '#e8d8a8' : code === 'L' ? '#7a5c98'
+    : code === 'F' ? '#4a8a5c' : code === 'E' ? '#4a6a98' : code === 'P' ? '#b08a48'
+    : code === 'M' ? '#b06a8a' : code === 'G' ? '#a8d0e8' : null;
+  if (c) P(g, x, y, w, h, c);
+}
+
+function paintWall(g: G, v: number, kind: 'face' | 'side', mask: number, tx: number, ty: number) {
+  const at = (px: number, py: number) =>
+    px < 0 || py < 0 || px >= MW || py >= MH ? null : GROUND[py][px];
+  const L = at(tx - 1, ty), R = at(tx + 1, ty), U = at(tx, ty - 1), D = at(tx, ty + 1);
+  const isWall = (c: string | null) => c === null || c === '#';
+
+  if (kind === 'face') {
+    // หน้าผนังแนวนอน: ผนังจริงอยู่ครึ่งล่างของช่อง (สูง 9px) เห็นพื้นข้างบนโผล่มาแถบหนึ่ง
+    // ถ้าข้างบนเป็นผนังด้วย (ผนังหนาสองชั้น เช่นริมแมพ) ค่อยเทเต็ม
+    if (isWall(U)) P(g, 0, 0, 16, 16, '#c2564f'); else paintNeighborFloor(g, U, 0, 0, 16, 7);
+    P(g, 0, 7, 16, 9, '#f0e4c8');
+    dith4(g, 0, 10, 16, 3, '#e4d4b4', v);
+    P(g, 0, 7, 16, 3, '#c2564f'); P(g, 0, 7, 16, 1, '#d8706a'); P(g, 0, 9, 16, 1, '#8f3f3c');
+    P(g, 0, 13, 16, 1, '#a88c64'); P(g, 0, 14, 16, 2, '#8c6e4c'); P(g, 0, 15, 16, 1, '#6b5236');
+    // ผนังแนวตั้งที่ชนเข้ามาจากซ้าย/ขวา - ต่อสันให้ถึงกัน
+    if (isWall(L)) P(g, 0, 7, WALL_X0, 9, '#c2564f');
+    if (isWall(R)) P(g, 16 - WALL_X0, 7, WALL_X0, 9, '#c2564f');
+    return;
+  }
+
+  // สันผนังแนวตั้ง: พื้นสองข้าง + แท่งอิฐบางตรงกลาง
+  paintNeighborFloor(g, L, 0, 0, WALL_X0, 16);
+  paintNeighborFloor(g, R, 16 - WALL_X0, 0, WALL_X0, 16);
+  P(g, WALL_X0, 0, WALL_T, 16, '#c2564f');
+  dith4(g, WALL_X0 + 1, 0, WALL_T - 2, 16, '#b84e48', v);
+  P(g, WALL_X0, 0, 1, 16, '#d8706a'); P(g, WALL_X0 + WALL_T - 1, 0, 1, 16, '#8f3f3c');
+  // ต่อเนื่องกับผนังบน/ล่าง - ถ้าปลายผนังให้ปิดหัว
+  if (mask & 1) P(g, WALL_X0, 0, WALL_T, 2, '#d8706a');
+  if (mask & 2) P(g, WALL_X0, 14, WALL_T, 2, '#8f3f3c');
+  // มุมที่มีผนังแนวนอนชนเข้ามาจากซ้าย/ขวา - ต่อแท่งออกไปให้ถึงขอบช่อง
+  if (isWall(L)) P(g, 0, WALL_X0, WALL_X0, WALL_T, '#c2564f');
+  if (isWall(R)) P(g, 16 - WALL_X0, WALL_X0, WALL_X0, WALL_T, '#c2564f');
 }
 
 /* ---------------- พื้นกลางแจ้ง ---------------- */
@@ -133,8 +195,9 @@ function paintWater(g: G, frame: number, mask: number) {
 }
 
 function edgeMask(code: string, x: number, y: number): number {
+  // นอกแมพถือว่าเป็นผนัง - ผนังริมแมพจะได้ไม่มี "หัวปิด" โผล่ทุกช่อง
   const at = (px: number, py: number) =>
-    px < 0 || py < 0 || px >= MW || py >= MH ? null : GROUND[py][px];
+    px < 0 || py < 0 || px >= MW || py >= MH ? (code === '#' ? '#' : null) : GROUND[py][px];
   return (at(x, y - 1) !== code ? 1 : 0) | (at(x, y + 1) !== code ? 2 : 0) |
     (at(x - 1, y) !== code ? 4 : 0) | (at(x + 1, y) !== code ? 8 : 0);
 }
@@ -142,8 +205,18 @@ function edgeMask(code: string, x: number, y: number): number {
 const tileCache = new Map<string, HTMLCanvasElement>();
 export function tileSprite(code: string, x: number, y: number, frame: number): HTMLCanvasElement {
   const v = (x * 31 + y * 17) & 3;
-  const mask = code === 'r' || code === 'l' || code === '~' ? edgeMask(code, x, y) : 0;
-  const key = `${code}${v}_${mask}_${code === '~' ? frame : 0}`;
+  let mask = 'rlb~LFEPM'.includes(code) ? edgeMask(code, x, y) : 0;
+  // ผนัง: มีพื้นเดินได้อยู่ข้างล่าง = เห็นหน้าผนัง ไม่งั้นเป็นสันผนัง (แนวตั้ง/มุม)
+  let wallKind: 'face' | 'side' = 'face';
+  if (code === '#') {
+    const below = y + 1 < MH ? GROUND[y + 1][x] : '#';
+    wallKind = below !== '#' && below !== 'G' ? 'face' : 'side';
+    if (wallKind === 'side') mask = edgeMask('#', x, y);
+  }
+  const nb = code === '#'
+    ? [GROUND[y - 1]?.[x], GROUND[y + 1]?.[x], GROUND[y]?.[x - 1], GROUND[y]?.[x + 1]].map((c) => c ?? '#').join('')
+    : '';
+  const key = `${code}${v}_${mask}_${code === '~' ? frame : 0}_${code === '#' ? wallKind + nb : ''}`;
   const hit = tileCache.get(key);
   if (hit) return hit;
 
@@ -153,11 +226,20 @@ export function tileSprite(code: string, x: number, y: number, frame: number): H
   else if (code === 't') paintTileF(t.g, r, v);
   else if (code === 'r') paintCarpet(t.g, v, '#4c9c54', '#3e8848', '#68b46c', mask);
   else if (code === 'l') paintCarpet(t.g, v, '#c07058', '#a85c48', '#d88c70', mask);
+  // พรมห้องบอสสีน้ำเงินเข้ม ต่างจากพรมประชุมสีเขียว ให้รู้ทันทีว่าคนละห้อง
+  else if (code === 'b') paintCarpet(t.g, v, '#3c5878', '#304a66', '#5878a0', mask);
+  else if (code === 'G') paintGlass(t.g, v);
+  // พื้นห้องแผนก - พรมโทนสีประจำแผนก (L กฎหมาย F การเงิน E วิศวกรรม P บุคคล M การตลาด)
+  else if (code === 'L') paintCarpet(t.g, v, '#7a5c98', '#66497f', '#9478b4', mask);
+  else if (code === 'F') paintCarpet(t.g, v, '#4a8a5c', '#3c744c', '#62a474', mask);
+  else if (code === 'E') paintCarpet(t.g, v, '#4a6a98', '#3c5880', '#6284b4', mask);
+  else if (code === 'P') paintCarpet(t.g, v, '#b08a48', '#96743a', '#c8a460', mask);
+  else if (code === 'M') paintCarpet(t.g, v, '#b06a8a', '#965874', '#c884a4', mask);
   else if (code === 'g') paintGrass(t.g, r, v);
   else if (code === 'p') paintPath(t.g, r, v);
   else if (code === 's') paintSand(t.g, r, v);
   else if (code === '~') paintWater(t.g, frame, mask);
-  else paintWall(t.g, v);
+  else paintWall(t.g, v, wallKind, mask, x, y);
 
   tileCache.set(key, t.c);
   return t.c;
@@ -166,46 +248,220 @@ export function tileSprite(code: string, x: number, y: number, frame: number): H
 /* ============================================================
    วัตถุ
    ============================================================ */
+/**
+ * โต๊ะทำงาน - คนนั่งอยู่ช่องบน (หันหน้าลง) โต๊ะอยู่ช่องนี้
+ * จอคอมจึงต้อง "หันขึ้น" หาคนนั่ง = เราเห็นด้านหลังจอ (ฝาทึบ + ขาตั้ง)
+ * ผังเก่าวาดหน้าจอโชว์มาทางกล้อง แปลว่าคนนั่งอยู่หลังจอ นั่งใช้งานผิดทาง
+ */
 function drawDesk(v: number): Sprite {
   const o = mk(16, 22), g = o.g;
-  P(g, 4, 2, 8, 7, '#2f3742'); P(g, 5, 3, 6, 5, '#59647a'); P(g, 5, 3, 6, 1, '#76839c');
-  P(g, 7, 9, 2, 1, '#2f3742'); P(g, 5, 9, 6, 1, '#39424f');
-  P(g, 0, 9, 16, 8, '#8a5a2a'); P(g, 0, 10, 16, 6, '#a9703a'); P(g, 0, 10, 16, 1, '#c48b4e');
+  // หลังจอ: ฝาทึบสีเข้ม มีโลโก้เล็ก ๆ ตรงกลาง กับขาตั้ง
+  P(g, 4, 1, 8, 7, '#2a3038'); P(g, 5, 2, 6, 5, '#3a424c'); P(g, 5, 2, 6, 1, '#4a545e');
+  P(g, 7, 4, 2, 2, '#5c6a78');
+  P(g, 7, 8, 2, 2, '#2a3038'); P(g, 5, 9, 6, 1, '#39424f');
+  // ตัวโต๊ะ
+  P(g, 0, 10, 16, 7, '#8a5a2a'); P(g, 0, 11, 16, 5, '#a9703a'); P(g, 0, 11, 16, 1, '#c48b4e');
   P(g, 0, 16, 16, 1, '#6b4520');
-  if (v === 0) { P(g, 2, 13, 7, 2, '#dfe4ea'); P(g, 2, 13, 7, 1, '#f4f7fa'); }
-  if (v === 1) { P(g, 11, 11, 3, 4, '#d9534f'); P(g, 14, 12, 1, 2, '#d9534f'); }
-  if (v === 2) { P(g, 2, 12, 5, 4, '#f2efe4'); P(g, 3, 13, 3, 1, '#b9b3a2'); P(g, 3, 14, 3, 1, '#b9b3a2'); }
+  // คีย์บอร์ดอยู่ฝั่งคนนั่ง (ด้านบนของโต๊ะ ใกล้จอ) เมาส์ข้าง ๆ
+  P(g, 4, 12, 8, 2, '#dfe4ea'); P(g, 4, 12, 8, 1, '#f4f7fa'); P(g, 5, 13, 6, 1, '#b8c0c8');
+  P(g, 13, 12, 2, 2, '#e8ecf0');
+  // ของประจำโต๊ะต่างกันเล็กน้อยให้ไม่ซ้ำ
+  if (v === 1) { P(g, 1, 12, 2, 3, '#d9534f'); P(g, 1, 12, 2, 1, '#e87070'); }
+  if (v === 2) { P(g, 1, 12, 2, 3, '#f2efe4'); P(g, 1, 13, 2, 1, '#b9b3a2'); }
   P(g, 1, 17, 2, 4, '#6b4520'); P(g, 13, 17, 2, 4, '#6b4520');
   return { c: o.c, oy: 6 };
 }
-/** โต๊ะผู้บริหาร (โต๊ะของผู้ใช้) - ใหญ่กว่า มีป้ายชื่อ */
+/**
+ * โต๊ะผู้บริหาร 3 ชิ้น (v=0 ซ้าย 1 กลาง 2 ขวา) - บอสนั่งหลังโต๊ะหันลง
+ * จอตั้งชิ้นกลางหันขึ้นหาบอสเช่นกัน แขกที่มารายงานเห็นหลังจอ
+ */
 function drawBossDesk(v: number): Sprite {
   const o = mk(16, 22), g = o.g;
-  P(g, 0, 8, 16, 9, '#6b4520'); P(g, 0, 9, 16, 7, '#8f5f34'); P(g, 0, 9, 16, 1, '#b07c48');
+  P(g, 0, 8, 16, 9, '#5a3818'); P(g, 0, 9, 16, 7, '#8f5f34'); P(g, 0, 9, 16, 1, '#b07c48');
   P(g, 0, 16, 16, 1, '#4e3116');
   if (v === 0) {
-    P(g, 3, 1, 10, 8, '#2f3742'); P(g, 4, 2, 8, 6, '#3f6f8f'); P(g, 4, 2, 8, 1, '#5c93b0');
-    P(g, 5, 3, 3, 1, '#8fd0e8'); P(g, 5, 5, 5, 1, '#8fd0e8');
-    P(g, 6, 9, 4, 1, '#2f3742');
-    P(g, 2, 12, 8, 3, '#e8eef4'); P(g, 2, 12, 8, 1, '#fbfdff');
+    // แฟ้มเอกสารกับปากกา
+    P(g, 3, 11, 8, 4, '#f0e4c8'); P(g, 3, 11, 8, 1, '#fffbf0');
+    P(g, 4, 12, 6, 1, '#8c6e4c'); P(g, 4, 13, 4, 1, '#8c6e4c');
+    P(g, 12, 10, 1, 5, '#2f3742');
+  } else if (v === 1) {
+    // หลังจอใหญ่ + คีย์บอร์ด
+    P(g, 3, 0, 10, 8, '#2a3038'); P(g, 4, 1, 8, 6, '#3a424c'); P(g, 4, 1, 8, 1, '#4a545e');
+    P(g, 7, 3, 2, 2, '#5c6a78'); P(g, 6, 8, 4, 2, '#2a3038');
+    P(g, 3, 11, 10, 2, '#e8eef4'); P(g, 3, 11, 10, 1, '#fbfdff');
   } else {
-    P(g, 2, 11, 7, 4, '#f0e4c8'); P(g, 2, 11, 7, 1, '#fffbf0');
-    P(g, 3, 12, 5, 1, '#8c6e4c'); P(g, 3, 13, 4, 1, '#8c6e4c');
-    P(g, 11, 10, 4, 5, '#c85868'); P(g, 11, 10, 4, 1, '#e07888');
+    // โทรศัพท์ + ป้ายชื่อ
+    P(g, 2, 10, 5, 5, '#2f3742'); P(g, 3, 11, 3, 3, '#4a545e'); P(g, 3, 9, 4, 1, '#2f3742');
+    P(g, 9, 12, 6, 3, '#c8a050'); P(g, 9, 12, 6, 1, '#e8c070'); P(g, 10, 13, 4, 1, '#7a5a20');
   }
   P(g, 1, 17, 2, 4, '#4e3116'); P(g, 13, 17, 2, 4, '#4e3116');
   return { c: o.c, oy: 6 };
 }
-function drawChair(back: boolean): Sprite {
+/**
+ * โต๊ะคอมพิวเตอร์ในห้องแผนก - หันหน้ามาทางกล้อง (คนนั่งอยู่ช่องล่าง หันขึ้น)
+ * ตั้งใจให้อ่านออกทันทีว่าเป็นโต๊ะทำงาน: ที่กั้นด้านหลัง จอมีภาพติดจอ คีย์บอร์ด เมาส์ แก้วกาแฟ
+ */
+function drawWorkDesk(v: number): Sprite {
+  const o = mk(16, 26), g = o.g;
+  // ที่กั้น (partition) สีเทาอมฟ้า พร้อมกระดาษโน้ตติดอยู่
+  P(g, 0, 0, 16, 10, '#5c6a78'); P(g, 1, 1, 14, 8, '#8fa0b0'); P(g, 1, 1, 14, 1, '#aebccb');
+  if (v === 0) { P(g, 2, 3, 3, 3, '#f8e070'); P(g, 11, 2, 3, 3, '#f0a0c0'); }
+  if (v === 1) { P(g, 2, 2, 4, 3, '#a8d8f0'); }
+  if (v === 2) { P(g, 11, 3, 3, 3, '#f8e070'); P(g, 2, 4, 2, 2, '#c8f0a0'); }
+  // จอคอม - เห็นหน้าจอ มีแถบเมนูกับกล่องข้อความ
+  P(g, 3, 6, 10, 9, '#2a3038'); P(g, 4, 7, 8, 7, '#3f6f8f'); P(g, 4, 7, 8, 1, '#5c93b0');
+  P(g, 5, 8, 3, 1, '#8fd0e8'); P(g, 5, 10, 5, 1, '#8fd0e8'); P(g, 5, 12, 4, 1, '#8fd0e8');
+  P(g, 7, 15, 2, 2, '#2a3038'); P(g, 5, 16, 6, 1, '#39424f');
+  // ท็อปโต๊ะสีไม้อ่อน กับขอบหน้า
+  P(g, 0, 17, 16, 6, '#c9ab7e'); P(g, 0, 17, 16, 1, '#e2c79c'); P(g, 0, 22, 16, 1, '#8c6e4c');
+  // คีย์บอร์ด เมาส์ แก้ว
+  P(g, 4, 19, 7, 2, '#e8ecf0'); P(g, 5, 19, 5, 1, '#c8d0d8'); P(g, 12, 19, 2, 2, '#f4f7fa');
+  P(g, 1, 18, 2, 3, v === 1 ? '#d9534f' : '#f2efe4'); P(g, 1, 18, 2, 1, v === 1 ? '#e87070' : '#ffffff');
+  P(g, 1, 23, 2, 3, '#8c6e4c'); P(g, 13, 23, 2, 3, '#8c6e4c');
+  return { c: o.c, oy: 10 };
+}
+/**
+ * เก้าอี้ - back=หันหลังให้กล้อง (คนนั่งหันขึ้น)
+ * v=สี 0 ฟ้า 1 หนังน้ำตาลบอส 2 ทองเลขาฯ 3 เก้าอี้สำนักงานดำ (ห้องแผนก)
+ */
+function drawChair(back: boolean, v = 0): Sprite {
   const o = mk(16, 19), g = o.g;
-  const A = back ? '#8c5f6a' : '#5f7f8c';
-  const D = back ? '#5e3d46' : '#3f5a66';
+  const pal: [string, string][] = [
+    back ? ['#8c5f6a', '#5e3d46'] : ['#5f7f8c', '#3f5a66'],
+    ['#7a4a2a', '#4e2c14'],
+    ['#b8862a', '#7a5618'],
+    ['#4a5058', '#2a3038'],
+    ['#3f8fa0', '#26606c'],
+  ];
+  const [A, D] = pal[v % pal.length];
   P(g, 4, 0, 8, 7, D); P(g, 5, 1, 6, 5, A); P(g, 5, 1, 6, 1, shade(A, 1.2));
   P(g, 7, 7, 2, 1, D);
   P(g, 2, 8, 12, 4, D); P(g, 3, 8, 10, 3, shade(A, 1.05)); P(g, 3, 8, 10, 1, shade(A, 1.25));
   P(g, 2, 9, 1, 3, D); P(g, 13, 9, 1, 3, D);
   P(g, 7, 12, 2, 3, D); P(g, 4, 15, 3, 2, '#2f3742'); P(g, 9, 15, 3, 2, '#2f3742');
   return { c: o.c, oy: 3 };
+}
+/** เคาน์เตอร์เลขาฯ 3 ชิ้น (part 0 ซ้าย 1 กลาง 2 ขวา) - หน้าเคาน์เตอร์หันลงหาล็อบบี้ */
+function drawCounter2(part: number): Sprite {
+  const o = mk(16, 24), g = o.g;
+  // ท็อปไม้เข้ม
+  P(g, 0, 6, 16, 4, '#5a3818'); P(g, 0, 7, 16, 2, '#8f5f34'); P(g, 0, 7, 16, 1, '#b07c48');
+  // หน้าเคาน์เตอร์สีครีมมีคิ้วไม้
+  P(g, 0, 10, 16, 12, '#8c6e4c'); P(g, 0, 11, 16, 10, '#efe3c8'); P(g, 0, 11, 16, 1, '#fff8e8');
+  P(g, 0, 20, 16, 2, '#6b5236');
+  if (part === 0) { P(g, 0, 6, 1, 16, '#5a3818'); P(g, 3, 13, 5, 6, '#c8a050'); P(g, 4, 14, 3, 4, '#e8c070'); }
+  if (part === 1) { P(g, 4, 2, 8, 5, '#2f3742'); P(g, 5, 3, 6, 3, '#4a545e'); P(g, 6, 7, 4, 1, '#2f3742'); P(g, 5, 13, 6, 1, '#8c6e4c'); P(g, 5, 15, 6, 1, '#8c6e4c'); }
+  if (part === 2) { P(g, 15, 6, 1, 16, '#5a3818'); P(g, 6, 1, 4, 5, '#8fb8cc'); P(g, 7, 1, 2, 5, '#c4e0ec'); P(g, 5, 0, 2, 2, '#e05868'); P(g, 9, 0, 2, 2, '#f0a048'); }
+  return { c: o.c, oy: 8 };
+}
+/** ตู้หนังสือกฎหมาย - เล่มหนาสีเข้มเรียงเป็นชุด (ห้องกฎหมาย) */
+function drawLawShelf(): Sprite {
+  const o = mk(16, 26), g = o.g;
+  P(g, 1, 0, 14, 24, '#4e3116'); P(g, 2, 1, 12, 22, '#6b4520');
+  const cols = ['#5a2838', '#3a2848', '#5a2838', '#2a3848', '#5a2838'];
+  for (let row = 0; row < 3; row++) {
+    P(g, 2, 1 + row * 8, 12, 1, '#4e3116');
+    for (let i = 0; i < 5; i++) {
+      P(g, 3 + i * 2, 2 + row * 8, 2, 6, cols[(i + row) % 5]);
+      P(g, 3 + i * 2, 4 + row * 8, 2, 1, '#c8a050');
+    }
+  }
+  P(g, 1, 24, 14, 2, '#3a2010');
+  return { c: o.c, oy: 10 };
+}
+/** ตู้เซฟ - ห้องการเงิน */
+function drawSafe(): Sprite {
+  const o = mk(16, 22), g = o.g;
+  P(g, 2, 2, 12, 18, '#2a3038'); P(g, 3, 3, 10, 16, '#4a5058'); P(g, 3, 3, 10, 1, '#6a7280');
+  P(g, 5, 7, 6, 6, '#3a4048'); P(g, 6, 8, 4, 4, '#8d99a3'); P(g, 7, 9, 2, 2, '#c8a050');
+  P(g, 11, 6, 1, 8, '#c8a050'); P(g, 2, 20, 12, 2, '#1d2228');
+  return { c: o.c, oy: 6 };
+}
+/** แร็คเซิร์ฟเวอร์ ไฟกะพริบ - ห้องวิศวกรรม */
+function drawServer(): Sprite {
+  const o = mk(16, 28), g = o.g;
+  P(g, 2, 0, 12, 26, '#1d2228'); P(g, 3, 1, 10, 24, '#2a3038');
+  for (let i = 0; i < 6; i++) {
+    P(g, 4, 2 + i * 4, 8, 3, '#3a4048'); P(g, 4, 2 + i * 4, 8, 1, '#4a5058');
+    P(g, 10, 3 + i * 4, 1, 1, i % 2 ? '#5ad06a' : '#e8d84c'); P(g, 5, 3 + i * 4, 3, 1, '#1d2228');
+  }
+  P(g, 2, 26, 12, 2, '#101418');
+  return { c: o.c, oy: 12 };
+}
+/** ขาตั้งโปสเตอร์/บอร์ดนำเสนอ - ห้องการตลาด */
+function drawEasel(): Sprite {
+  const o = mk(16, 28), g = o.g;
+  P(g, 2, 2, 12, 14, '#7a5230'); P(g, 3, 3, 10, 12, '#f8c0d8'); P(g, 3, 3, 10, 3, '#e07aa8');
+  P(g, 4, 8, 7, 1, '#7a2848'); P(g, 4, 10, 5, 1, '#7a2848'); P(g, 5, 12, 5, 2, '#f0e08c');
+  P(g, 3, 16, 2, 10, '#5a3a20'); P(g, 11, 16, 2, 10, '#5a3a20'); P(g, 7, 16, 2, 8, '#5a3a20');
+  return { c: o.c, oy: 12 };
+}
+/**
+ * เคาน์เตอร์ประชาสัมพันธ์ - แบบ Pokémon Center: ท็อปแดง ตัวเคาน์เตอร์เทาอ่อน ปลายมน
+ * มีคอมพิวเตอร์กับกระดิ่งบนเคาน์เตอร์ (ชิ้นกลาง) - หันหน้าลงหาแขก
+ */
+function drawPrCounter(part: number, total: number): Sprite {
+  const o = mk(16, 24), g = o.g;
+  const first = part === 0, last = part === total - 1;
+  P(g, 0, 4, 16, 6, '#8f2f2c'); P(g, 0, 5, 16, 4, '#d94a44'); P(g, 0, 5, 16, 1, '#f07070');
+  P(g, 0, 10, 16, 12, '#8d99a3'); P(g, 0, 11, 16, 10, '#e4ecf2'); P(g, 0, 11, 16, 1, '#f7fbfd');
+  P(g, 0, 20, 16, 2, '#6f7c86'); P(g, 0, 15, 16, 1, '#c8d4dc');
+  if (first) {
+    g.clearRect(0, 4, 3, 1); g.clearRect(0, 5, 2, 1); g.clearRect(0, 6, 1, 1);
+    g.clearRect(0, 20, 1, 2); P(g, 0, 7, 1, 13, '#8f2f2c');
+  }
+  if (last) {
+    g.clearRect(13, 4, 3, 1); g.clearRect(14, 5, 2, 1); g.clearRect(15, 6, 1, 1);
+    g.clearRect(15, 20, 1, 2); P(g, 15, 7, 1, 13, '#8f2f2c');
+  }
+  const mid = Math.floor((total - 1) / 2);
+  // คอมพิวเตอร์บนเคาน์เตอร์ (ซ้ายของกลาง) - จอหันเข้าหาคนนั่ง เห็นหลังจอ
+  if (part === mid - 1) { P(g, 4, 0, 9, 6, '#2a3038'); P(g, 5, 1, 7, 4, '#3a424c'); P(g, 7, 6, 3, 1, '#2a3038'); }
+  // กระดิ่ง + แผ่นพับ (ขวาของกลาง)
+  if (part === mid + 1) { P(g, 5, 1, 4, 3, '#c8a050'); P(g, 6, 0, 2, 1, '#e8c070'); P(g, 4, 4, 6, 1, '#7a5a20'); P(g, 11, 12, 3, 4, '#5cbc60'); }
+  // โลโก้กลม คร่อมชิ้นกลางสองชิ้น
+  if (part === mid) { P(g, 10, 13, 6, 6, '#3f7fb0'); P(g, 11, 14, 4, 4, '#8fd0e8'); }
+  if (part === mid + 1) { P(g, 0, 13, 6, 6, '#3f7fb0'); P(g, 1, 14, 4, 4, '#8fd0e8'); }
+  return { c: o.c, oy: 8 };
+}
+/**
+ * แผงหลังเคาน์เตอร์ PR - เครื่องโค้งสีน้ำเงินตั้งอยู่หลังคนนั่ง (อ้างอิง Pokémon Center)
+ * ชิ้นกลางสองชิ้นเป็นจอ/กระจกโค้ง ปลายสองข้างเป็นเสามีไฟ
+ */
+function drawPrBack(part: number, total: number): Sprite {
+  const o = mk(16, 30), g = o.g;
+  const first = part === 0, last = part === total - 1;
+  const mid = Math.floor((total - 1) / 2);
+  P(g, 0, 2, 16, 26, '#3a4048'); P(g, 1, 3, 14, 24, '#6f7c86'); P(g, 1, 3, 14, 1, '#98a4ae');
+  P(g, 0, 8, 16, 12, '#2f5c86'); P(g, 1, 9, 14, 10, '#4a86bc'); P(g, 1, 9, 14, 2, '#74aede');
+  if (part === mid || part === mid + 1) {
+    P(g, 2, 10, 12, 8, '#a8d4f0'); P(g, 3, 11, 4, 2, '#e8f4ff'); P(g, 2, 16, 12, 2, '#5c93b0');
+  } else if (!first && !last) {
+    P(g, 6, 11, 4, 6, '#3f7fb0'); P(g, 7, 12, 2, 4, '#8fd0e8');
+  }
+  if (first || last) { P(g, 6, 0, 4, 3, '#2a3038'); P(g, 7, 1, 2, 1, '#e85860'); }
+  P(g, 0, 26, 16, 2, '#2a3038'); P(g, 0, 28, 16, 2, '#1d2228');
+  return { c: o.c, oy: 14 };
+}
+/** ตู้เอกสารในห้องบอส */
+function drawCabinet(): Sprite {
+  const o = mk(16, 26), g = o.g;
+  P(g, 1, 0, 14, 24, '#4a5058'); P(g, 2, 1, 12, 22, '#78848f'); P(g, 2, 1, 12, 1, '#98a4ae');
+  for (let i = 0; i < 3; i++) {
+    P(g, 2, 2 + i * 7, 12, 6, '#8d99a3'); P(g, 2, 2 + i * 7, 12, 1, '#a8b4be');
+    P(g, 6, 5 + i * 7, 4, 1, '#3a4048');
+  }
+  P(g, 1, 24, 14, 2, '#2f3742');
+  return { c: o.c, oy: 10 };
+}
+/** ไวท์บอร์ดตั้งพื้นในห้องประชุม */
+function drawBoardStand(): Sprite {
+  const o = mk(16, 28), g = o.g;
+  P(g, 1, 0, 14, 16, '#7a5230'); P(g, 2, 1, 12, 14, '#f4f6f8'); P(g, 2, 1, 12, 1, '#ffffff');
+  P(g, 3, 4, 8, 1, '#4a86bc'); P(g, 3, 7, 6, 1, '#d9534f'); P(g, 3, 10, 9, 1, '#4a86bc');
+  P(g, 10, 6, 3, 3, '#3fa06a');
+  P(g, 3, 16, 2, 10, '#5a3a20'); P(g, 11, 16, 2, 10, '#5a3a20'); P(g, 1, 26, 14, 1, '#4a2e18');
+  return { c: o.c, oy: 12 };
 }
 function drawTable(o: MapObject): Sprite {
   const h = o.top ? 20 : 16;
@@ -467,7 +723,17 @@ export function objSprite(o: MapObject): Sprite {
   switch (o.type) {
     case 'desk': s = drawDesk(o.v ?? 0); break;
     case 'bossdesk': s = drawBossDesk(o.v ?? 0); break;
-    case 'chair': s = drawChair(!!o.back); break;
+    case 'chair': s = drawChair(!!o.back, o.v ?? 0); break;
+    case 'workdesk': s = drawWorkDesk(o.v ?? 0); break;
+    case 'counter2': s = drawCounter2(o.part ?? 0); break;
+    case 'prcounter': s = drawPrCounter(o.part ?? 0, o.v ?? 1); break;
+    case 'prback': s = drawPrBack(o.part ?? 0, o.v ?? 1); break;
+    case 'cabinet': s = drawCabinet(); break;
+    case 'lawshelf': s = drawLawShelf(); break;
+    case 'safe': s = drawSafe(); break;
+    case 'server': s = drawServer(); break;
+    case 'easel': s = drawEasel(); break;
+    case 'board': s = drawBoardStand(); break;
     case 'table': s = drawTable(o); break;
     case 'plant': s = drawPlant(); break;
     case 'cooler': s = drawCooler(); break;
@@ -540,6 +806,30 @@ export function decorSprite(type: string): HTMLCanvasElement {
         P(g, x, y + len, 2, 1, D);
       });
     P(g, 5, 6, 6, 2, L2); P(g, 5, 6, 6, 1, L);
+  } else if (type === 'scale') {
+    // ตาชั่งความยุติธรรม - ห้องกฎหมาย
+    P(g, 7, 4, 2, 9, '#c8a050'); P(g, 3, 4, 10, 1, '#c8a050'); P(g, 5, 13, 6, 1, '#7a5a20');
+    P(g, 2, 5, 1, 3, '#c8a050'); P(g, 13, 5, 1, 3, '#c8a050');
+    P(g, 1, 8, 3, 1, '#e8c070'); P(g, 12, 8, 3, 1, '#e8c070');
+  } else if (type === 'chart') {
+    // กราฟขึ้นในกรอบ - ห้องการเงิน
+    P(g, 2, 3, 12, 11, '#6b4520'); P(g, 3, 4, 10, 9, '#f6f2e4');
+    P(g, 4, 11, 1, 1, '#3fa06a'); P(g, 6, 9, 1, 3, '#3fa06a'); P(g, 8, 7, 1, 5, '#3fa06a'); P(g, 10, 5, 1, 7, '#3fa06a');
+    P(g, 4, 10, 7, 1, '#d9534f'); P(g, 2, 13, 12, 1, '#4e3116');
+  } else if (type === 'whiteboard') {
+    // ไวท์บอร์ดมีแผนผังระบบ - ห้องวิศวกรรม
+    P(g, 0, 3, 16, 12, '#9aa3ad'); P(g, 1, 4, 14, 10, '#f6f7f2');
+    P(g, 3, 6, 3, 2, '#4a7fd0'); P(g, 10, 6, 3, 2, '#4a7fd0'); P(g, 6, 7, 4, 1, '#3a4048');
+    P(g, 6, 10, 4, 2, '#e0a13f'); P(g, 7, 8, 1, 2, '#3a4048'); P(g, 0, 14, 16, 1, '#6f7982');
+  } else if (type === 'pinboard') {
+    // บอร์ดประกาศไม้ก๊อก มีกระดาษติดหลากสี - ห้องบุคคล
+    P(g, 1, 3, 14, 11, '#8c6e4c'); P(g, 2, 4, 12, 9, '#c8a878');
+    P(g, 3, 5, 3, 3, '#f8e070'); P(g, 7, 5, 3, 4, '#a8d8f0'); P(g, 11, 6, 2, 3, '#f0a0c0'); P(g, 4, 9, 4, 3, '#c8f0a0');
+    P(g, 4, 5, 1, 1, '#d9534f'); P(g, 8, 5, 1, 1, '#d9534f'); P(g, 1, 13, 14, 1, '#6b5236');
+  } else if (type === 'poster') {
+    // โปสเตอร์แคมเปญสีจัด - ห้องการตลาด
+    P(g, 3, 2, 10, 13, '#e07aa8'); P(g, 4, 3, 8, 11, '#f8c0d8'); P(g, 4, 3, 8, 3, '#e07aa8');
+    P(g, 5, 8, 6, 1, '#7a2848'); P(g, 5, 10, 4, 1, '#7a2848'); P(g, 6, 12, 4, 1, '#f0e08c');
   }
   decorCache.set(type, o.c);
   return o.c;

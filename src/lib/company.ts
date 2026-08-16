@@ -1,0 +1,127 @@
+/**
+ * ข้อมูลบริษัท - ชั้น "ข้อเท็จจริง" ที่วางทับ skill (ชั้น "วิธีคิด") ใน system prompt
+ *
+ * ไฟล์นี้ไม่แตะ Supabase และไม่แตะ LLM - เป็นแค่รูปทรงข้อมูล + ตัวประกอบข้อความ
+ * จึง import ได้ทั้งฝั่ง client (ฟอร์มกรอก) และ server (route ที่ประกอบ prompt)
+ */
+
+import { DEPT_BY_ID } from './departments';
+
+/* ---------- โปรไฟล์บริษัท ---------- */
+
+export interface ProfileField {
+  key: string;
+  label: string;
+  hint: string;
+  /** ช่องยาว (textarea) หรือบรรทัดเดียว */
+  long: boolean;
+  /** เพดานตัวอักษร - กัน prompt บวม เพราะโปรไฟล์ถูกส่งไปทุกคอล */
+  max: number;
+}
+
+/**
+ * ฟิลด์มีโครง ไม่ใช่ช่องว่างเปล่า - จะได้ไม่ลืมมิติที่แผนกต้องใช้
+ * เรียงจากที่ทุกแผนกต้องรู้ ไปหาที่เฉพาะทาง
+ */
+export const PROFILE_FIELDS: ProfileField[] = [
+  { key: 'name', label: 'ชื่อบริษัท', hint: 'ชื่อที่ใช้จริงในเอกสาร', long: false, max: 120 },
+  { key: 'what', label: 'ทำอะไร', hint: 'อธิบายในหนึ่งย่อหน้าให้คนไม่รู้จักเข้าใจ - ธุรกิจอะไร ขายอะไร ให้ใคร', long: true, max: 600 },
+  { key: 'customers', label: 'ลูกค้าคือใคร', hint: 'กลุ่มลูกค้าหลัก B2B/B2C ขนาด อุตสาหกรรม', long: true, max: 400 },
+  { key: 'revenue', label: 'รายได้มาจากไหน', hint: 'โมเดลรายได้ - ขายขาด รายเดือน คอมมิชชัน ฯลฯ และสัดส่วนคร่าว ๆ', long: true, max: 400 },
+  { key: 'size', label: 'ขนาดองค์กร', hint: 'พนักงานกี่คน สาขา/สำนักงาน ก่อตั้งปีไหน', long: false, max: 200 },
+  { key: 'entity', label: 'รูปแบบนิติบุคคล', hint: 'บจก. / หจก. / บมจ. ทุนจดทะเบียน จด VAT ไหม - ฝ่ายกฎหมายกับการเงินใช้', long: false, max: 200 },
+  { key: 'products', label: 'สินค้า/บริการหลัก', hint: '3-5 อย่าง พร้อมราคาช่วงคร่าว ๆ ถ้าบอกได้', long: true, max: 500 },
+  { key: 'redlines', label: 'เส้นแดง - สิ่งที่บริษัทไม่ทำ', hint: 'ห้ามทำเด็ดขาด เช่น ไม่รับงานภาครัฐ ไม่ให้เครดิต ไม่ทำโฆษณาเปรียบเทียบ - ทุกแผนกจะยึดตามนี้ก่อน', long: true, max: 500 },
+  { key: 'goals', label: 'เป้าหมายปีนี้', hint: 'ตัวเลขหรือเหตุการณ์ที่อยากไปให้ถึง', long: true, max: 400 },
+  { key: 'problems', label: 'ปัญหาที่กำลังเจอ', hint: 'เรื่องที่กวนใจอยู่ตอนนี้ - agent จะได้ไม่เสนอทางที่ชนกับปัญหาเดิม', long: true, max: 400 },
+  { key: 'tone', label: 'โทนการสื่อสาร', hint: 'ทางการ / เป็นกันเอง / ห้าม/ควรใช้คำแบบไหน - ฝ่ายประชาสัมพันธ์ใช้ตรง ๆ', long: false, max: 200 },
+  { key: 'contact', label: 'ช่องทางติดต่อ', hint: 'เว็บ อีเมล โทร ที่อยู่ - ประชาสัมพันธ์เอาไว้ตอบคนถาม', long: false, max: 300 },
+];
+
+export type ProfileFields = Record<string, string>;
+
+/** เพดานรวมทั้งโปรไฟล์ - โปรไฟล์ถูกส่งไปทุกคอล ประชุม 12 คน x 2 รอบ = 25 คอล */
+export const PROFILE_MAX_TOTAL = 3200;
+/** เพดานโน้ตต่อแผนก */
+export const DEPT_NOTE_MAX = 1800;
+
+export const profileLength = (f: ProfileFields) =>
+  Object.values(f).reduce((n, v) => n + (v ?? '').length, 0);
+
+/** โปรไฟล์ยังว่างอยู่ไหม - เอาไว้เตือนบนแถบบนว่ายังไม่ได้กรอก */
+export const profileIsEmpty = (f: ProfileFields | null | undefined) =>
+  !f || !PROFILE_FIELDS.some((p) => (f[p.key] ?? '').trim());
+
+/* ---------- หัวข้อแนะนำสำหรับโน้ตแผนก ---------- */
+
+export const DEPT_NOTE_HINTS: Record<string, string> = {
+  legal: 'สัญญาแม่แบบที่ใช้อยู่ · ใบอนุญาตที่ถือ · คดี/ข้อพิพาทที่ค้าง · ที่ปรึกษากฎหมายภายนอก · เรื่องที่เคยโดนแล้วไม่อยากซ้ำ',
+  finance: 'งบต่อเดือนคร่าว ๆ · รอบบัญชี/ปิดงบเมื่อไร · เงินสดตึงช่วงไหน · นโยบายอนุมัติงบ (ใครเซ็นได้ถึงเท่าไร) · เจ้าหนี้/ลูกหนี้หลัก',
+  engineering: 'ระบบที่ใช้อยู่ (stack, hosting) · หนี้เทคนิคที่รู้อยู่ · ทีมมีกี่คน ทำอะไรได้ · สิ่งที่ห้าม deploy ช่วงไหน',
+  people: 'จำนวนคนต่อแผนก · โครงสร้างเงินเดือน/สวัสดิการคร่าว ๆ · นโยบายลา/WFH · ปัญหาคนที่เจอบ่อย · วิธีรับคนเข้าที่ผ่านมา',
+  marketing: 'ช่องทางที่ใช้และได้ผล · งบต่อเดือน · แคมเปญที่เคยพัง · คู่แข่งหลัก · กลุ่มเป้าหมายที่ตอบสนองดี',
+  pr: 'จุดยืนแบรนด์ในหนึ่งประโยค · ใครเป็นโฆษก · ช่องทางทางการ · เรื่องที่เคยเป็นข่าว/ดราม่า · คำที่ห้ามใช้ · คำถามที่คนถามบ่อยและคำตอบมาตรฐาน',
+};
+
+/* ---------- ประกอบเป็นข้อความสำหรับ prompt ---------- */
+
+export interface CompanyContext {
+  profile: ProfileFields;
+  /** deptId -> body */
+  notes: Record<string, string>;
+  /** ชิ้นเอกสารที่ค้นเจอว่าเกี่ยวกับคำถามนี้ (เฟส 3) */
+  chunks?: { docName: string; seq: number; content: string }[];
+}
+
+/** ส่วนโปรไฟล์ - ทุกแผนกได้เหมือนกัน */
+export function profileBlock(profile: ProfileFields | null | undefined): string {
+  if (!profile) return '';
+  const rows = PROFILE_FIELDS
+    .map((f) => ({ f, v: (profile[f.key] ?? '').trim() }))
+    .filter(({ v }) => v);
+  if (!rows.length) return '';
+  return `## ข้อมูลบริษัท (ข้อเท็จจริง - ยึดตามนี้ก่อนความรู้ทั่วไป)
+
+${rows.map(({ f, v }) => `**${f.label}:** ${v}`).join('\n')}`;
+}
+
+/** ส่วนโน้ตแผนก - เฉพาะแผนกตัวเอง */
+export function deptNoteBlock(deptId: string, notes: Record<string, string> | null | undefined): string {
+  const body = (notes?.[deptId] ?? '').trim();
+  if (!body) return '';
+  const d = DEPT_BY_ID.get(deptId);
+  return `## ข้อมูลภายในของ${d?.nameTh ?? deptId} (เฉพาะแผนกคุณ)
+
+${body}`;
+}
+
+/** ส่วนเอกสารอ้างอิง - ชิ้นที่ค้นเจอ พร้อมบอกที่มาให้ agent cite ได้ */
+export function chunksBlock(chunks: CompanyContext['chunks']): string {
+  if (!chunks?.length) return '';
+  return `## เอกสารอ้างอิงที่เกี่ยวกับคำถามนี้ (ค้นจากคลังเอกสารบริษัท)
+
+${chunks.map((c, i) => `[อ้างอิง ${i + 1}] จาก "${c.docName}" ส่วนที่ ${c.seq + 1}\n${c.content.trim()}`).join('\n\n')}
+
+ถ้าใช้ข้อมูลจากเอกสาร ให้ระบุ [อ้างอิง N] กำกับ ถ้าเอกสารขัดกับความรู้ทั่วไป ให้ถือเอกสารเป็นหลักแต่บอกด้วยว่าขัดกัน`;
+}
+
+/**
+ * รวมทุกชั้นสำหรับ agent หนึ่งตัว
+ * เรียงลำดับ: โปรไฟล์ (ทุกคนเห็น) -> โน้ตแผนก (เฉพาะแผนก) -> เอกสาร (เฉพาะที่ค้นเจอ)
+ * คืนสตริงว่างถ้าไม่มีอะไรเลย - route จะได้ข้ามได้โดยไม่ต้องเช็คซ้ำ
+ */
+export function companyBlock(ctx: CompanyContext | null | undefined, deptId: string): string {
+  if (!ctx) return '';
+  return [profileBlock(ctx.profile), deptNoteBlock(deptId, ctx.notes), chunksBlock(ctx.chunks)]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+/** ตัวเลขไว้โชว์ใน proof ว่า agent ได้ข้อมูลบริษัทไปเท่าไร */
+export function companyStats(ctx: CompanyContext | null | undefined, deptId: string) {
+  return {
+    profileChars: profileBlock(ctx?.profile).length,
+    noteChars: deptNoteBlock(deptId, ctx?.notes).length,
+    chunkCount: ctx?.chunks?.length ?? 0,
+  };
+}

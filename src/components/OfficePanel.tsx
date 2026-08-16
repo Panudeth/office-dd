@@ -1,10 +1,11 @@
 'use client';
 
-import { Building2, LogOut, Plug, Plus } from 'lucide-react';
+import { Building2, LoaderCircle, LogOut, Plug, Plus } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import {
-  createOffice, healthCheck, listOffices, sb, sbError, signInWithGoogle,
-  supabaseConfigured, usingSecretKeyByMistake, type Office, type User,
+  accountAvatar, accountName, createOffice, healthCheck, listOffices, sb, sbError,
+  signInWithGoogle, signOut, supabaseConfigured, usingSecretKeyByMistake,
+  type Office, type User,
 } from '@/lib/supabase';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -17,28 +18,46 @@ interface Props {
   open: boolean;
   onClose: () => void;
   user: User | null;
+  /** false = ยังตอบไม่ได้ว่าล็อกอินอยู่ไหม ห้ามเดาว่า "ไม่" แล้วโชว์ฟอร์ม */
+  authReady: boolean;
   office: Office | null;
-  onUser: (u: User | null) => void;
+  /** ผลของการพยายามล็อกอินรอบที่แล้วที่ล้มเหลว - ต้องเด่นกว่าข้อความอื่นในแผง */
+  notice?: string | null;
   onOffice: (o: Office | null) => void;
 }
 
 export default function OfficePanel({
-  open, onClose, user, office, onUser, onOffice,
+  open, onClose, user, authReady, office, notice, onOffice,
 }: Props) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState<'in' | 'up'>('in');
   const [offices, setOffices] = useState<Office[]>([]);
+  const [loadingOffices, setLoadingOffices] = useState(false);
   const [newName, setNewName] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
+  // ผูกกับ user.id ไม่ใช่ตัว object เพราะ supabase สร้าง object ใหม่ทุกครั้งที่ต่ออายุ token
+  const userId = user?.id ?? null;
+
   useEffect(() => {
-    if (!open || !user) return;
+    if (!open || !userId) { setOffices([]); return; }
+    let alive = true;
+    setLoadingOffices(true);
     listOffices()
-      .then(setOffices)
-      .catch((e) => setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) }));
-  }, [open, user]);
+      .then((rows) => { if (alive) setOffices(rows); })
+      .catch((e) => {
+        if (alive) setMsg({ ok: false, text: sbError(e) });
+      })
+      .finally(() => { if (alive) setLoadingOffices(false); });
+    return () => { alive = false; };
+  }, [open, userId]);
+
+  // ปิดแล้วเปิดใหม่ไม่ควรเจอข้อความค้างจากรอบก่อน และไม่ควรมีรหัสผ่านค้างในหน่วยความจำ
+  useEffect(() => {
+    if (!open) { setMsg(null); setPassword(''); }
+  }, [open]);
 
   const auth = async (e: FormEvent) => {
     e.preventDefault();
@@ -50,12 +69,13 @@ export default function OfficePanel({
       const fn = mode === 'in' ? c.auth.signInWithPassword : c.auth.signUp;
       const { data, error } = await fn.call(c.auth, { email: email.trim(), password });
       if (error) throw error;
-      if (data.user && data.session) {
-        onUser(data.user);
-        setMsg({ ok: true, text: mode === 'up' ? 'สมัครและเข้าสู่ระบบแล้ว' : 'เข้าสู่ระบบแล้ว' });
-      } else {
-        setMsg({ ok: true, text: 'สมัครแล้ว เช็คอีเมลเพื่อยืนยันก่อนเข้าสู่ระบบ' });
-      }
+      // ไม่ต้อง setUser เอง onAuthStateChange ที่ page.tsx เป็นคนเดียวที่ประกาศสถานะนี้
+      setPassword('');
+      setMsg(
+        data.session
+          ? { ok: true, text: mode === 'up' ? 'สมัครและเข้าสู่ระบบแล้ว' : 'เข้าสู่ระบบแล้ว' }
+          : { ok: true, text: 'สมัครแล้ว เช็คอีเมลเพื่อยืนยันก่อนเข้าสู่ระบบ' },
+      );
     } catch (err) {
       setMsg({ ok: false, text: sbError(err) });
     } finally {
@@ -70,16 +90,24 @@ export default function OfficePanel({
       // สำเร็จแล้วเบราว์เซอร์จะออกจากหน้านี้ไปเลย บรรทัดถัดไปจึงไม่ได้รัน
       await signInWithGoogle();
     } catch (err) {
-      setMsg({ ok: false, text: err instanceof Error ? err.message : String(err) });
+      setMsg({ ok: false, text: sbError(err) });
       setBusy(false);
     }
   };
 
-  const signOut = async () => {
-    await sb()?.auth.signOut();
-    onUser(null);
-    onOffice(null);
-    setOffices([]);
+  const leave = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await signOut();
+      onOffice(null);
+      setOffices([]);
+    } catch (err) {
+      // ออกไม่สำเร็จแล้วเงียบคือแย่ที่สุด ผู้ใช้จะนึกว่าออกแล้วทั้งที่ session ยังอยู่
+      setMsg({ ok: false, text: sbError(err) });
+    } finally {
+      setBusy(false);
+    }
   };
 
   const create = async () => {
@@ -93,7 +121,7 @@ export default function OfficePanel({
       onOffice(o);
       onClose();
     } catch (err) {
-      setMsg({ ok: false, text: err instanceof Error ? err.message : String(err) });
+      setMsg({ ok: false, text: sbError(err) });
     } finally {
       setBusy(false);
     }
@@ -106,6 +134,14 @@ export default function OfficePanel({
         title="ออฟฟิศของฉัน"
         description="เข้าสู่ระบบและเลือกออฟฟิศที่จะใช้"
       >
+        {notice && (
+          <p className="rounded-box border-2 border-wood-dark bg-wood-deep/60 px-2 py-1.5 text-[11px] leading-relaxed text-brass-lite">
+            <b className="text-brass">เข้าสู่ระบบไม่สำเร็จ</b>
+            <br />
+            {notice}
+          </p>
+        )}
+
         {usingSecretKeyByMistake ? (
           <Hint className="text-brass">
             คีย์ที่ใส่มาเป็น <b>secret key</b> (<code>sb_secret_...</code>) อันนี้ข้าม RLS ได้ทั้งหมด
@@ -132,6 +168,12 @@ export default function OfficePanel({
             <br />
             4. รีสตาร์ท dev server
           </Hint>
+        ) : !authReady ? (
+          /* ยังไม่รู้ว่ามี session ไหม - โชว์ฟอร์มตอนนี้คือเชิญให้กดเข้าสู่ระบบซ้ำทั้งที่เข้าอยู่แล้ว */
+          <div className="flex items-center justify-center gap-2 py-8 text-[12px] text-dim">
+            <LoaderCircle className="size-4 animate-spin" />
+            กำลังตรวจสอบสถานะการเข้าสู่ระบบ
+          </div>
         ) : !user ? (
           <form onSubmit={auth} className="flex flex-col gap-3">
             {/* Google มาก่อน เพราะกดทีเดียวจบ ไม่ต้องคิดรหัสผ่านใหม่ */}
@@ -212,29 +254,37 @@ export default function OfficePanel({
           <>
             <div className="flex items-center gap-2 rounded-box border border-ink-600 bg-ink-700 px-2 py-1.5">
               {/* เข้าด้วย Google จะมีชื่อกับรูปติดมาใน user_metadata ใช้เลยจะได้รู้ว่าเป็นบัญชีไหน */}
-              {typeof user.user_metadata?.avatar_url === 'string' && (
+              {accountAvatar(user) && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={user.user_metadata.avatar_url}
+                  src={accountAvatar(user)!}
                   alt=""
                   className="size-5 shrink-0 rounded-box border border-ink-500"
                 />
               )}
-              <span className="truncate text-[12px] text-parchment">
-                {typeof user.user_metadata?.full_name === 'string'
-                  ? user.user_metadata.full_name
-                  : user.email}
+              <span className="min-w-0 flex-1 truncate text-[12px] text-parchment">
+                {accountName(user)}
               </span>
               {user.app_metadata?.provider === 'google' && (
                 <GoogleMark className="size-3 shrink-0" />
               )}
-              <Button variant="ghost" size="sm" className="ml-auto shrink-0" onClick={signOut}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="shrink-0"
+                disabled={busy}
+                onClick={leave}
+              >
                 <LogOut /> ออกจากระบบ
               </Button>
             </div>
 
             <Field label="เลือกออฟฟิศ">
-              {offices.length === 0 ? (
+              {loadingOffices ? (
+                <Hint className="flex items-center gap-1.5">
+                  <LoaderCircle className="size-3 animate-spin" /> กำลังโหลดออฟฟิศ
+                </Hint>
+              ) : offices.length === 0 ? (
                 <Hint>ยังไม่มีออฟฟิศ สร้างอันแรกด้านล่าง</Hint>
               ) : (
                 <ul className="flex flex-col gap-1">

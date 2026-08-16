@@ -1,8 +1,17 @@
 import { DEFAULT_CLAUDE_MODEL, askClaude, envClaudeKey, listClaudeModels } from './claude';
 import { GEMINI_MODEL, askGemini, hasGeminiKey, listGeminiModels } from './gemini';
+import {
+  DEFAULT_OPENAI_BASE, DEFAULT_OPENAI_MODEL, askOpenAi, defaultModelForBase, envOpenAiKey,
+  isLocalBase, listOpenAiModels, resolveLocalModel,
+} from './openai';
 
-export type Provider = 'anthropic' | 'gemini';
+export type Provider = 'anthropic' | 'gemini' | 'openai';
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+export const PROVIDER_IDS: Provider[] = ['anthropic', 'gemini', 'openai'];
+
+const isProvider = (v: unknown): v is Provider =>
+  typeof v === 'string' && (PROVIDER_IDS as string[]).includes(v);
 
 export interface AskOptions {
   system: string;
@@ -15,6 +24,8 @@ export interface Creds {
   provider: Provider;
   apiKey: string;
   model?: string;
+  /** ใช้เฉพาะ provider แบบ OpenAI-compatible - เจ้าไหนก็ได้ ต่างกันแค่ตรงนี้ */
+  baseUrl?: string;
   /** คีย์มาจากไหน - เอาไว้โชว์ใน UI ว่าใช้คีย์ของใครอยู่ */
   source: 'byok' | 'env';
 }
@@ -32,10 +43,29 @@ export const PROVIDERS: { id: Provider; label: string; defaultModel: string; key
     defaultModel: GEMINI_MODEL,
     keyHint: 'ขึ้นต้นด้วย AIza- / เอาจาก Google AI Studio -> Get API key (มี free tier)',
   },
+  {
+    id: 'openai',
+    label: 'OpenAI-compatible (Groq, OpenRouter, ...)',
+    defaultModel: DEFAULT_OPENAI_MODEL,
+    keyHint: 'ใส่ base URL ของเจ้าที่ใช้ด้วย - Groq และ Cerebras สมัครฟรีไม่ต้องผูกบัตร',
+  },
 ];
 
-export const defaultModelFor = (p: Provider) =>
-  p === 'gemini' ? GEMINI_MODEL : DEFAULT_CLAUDE_MODEL;
+export const defaultModelFor = (p: Provider, baseUrl?: string) =>
+  p === 'gemini' ? GEMINI_MODEL : p === 'openai' ? defaultModelForBase(baseUrl) : DEFAULT_CLAUDE_MODEL;
+
+/**
+ * ชื่อโมเดลที่จะถูกใช้จริงในคำขอนี้ - เอาไว้โชว์ใน proof ให้ผู้ใช้ตรวจได้
+ * ปลายทางในเครื่องที่ไม่ระบุโมเดล ต้องไปถามเครื่องก่อนถึงจะรู้ชื่อจริง
+ */
+export async function effectiveModel(creds: Creds): Promise<string> {
+  if (creds.model) return creds.model;
+  if (creds.provider === 'openai') {
+    const base = creds.baseUrl || DEFAULT_OPENAI_BASE;
+    if (isLocalBase(base)) return (await resolveLocalModel(base, creds.apiKey)) ?? defaultModelForBase(base);
+  }
+  return defaultModelFor(creds.provider, creds.baseUrl);
+}
 
 /**
  * เลือกคีย์ที่จะใช้: คีย์ที่ผู้ใช้ส่งมาจากเบราว์เซอร์มาก่อน ถ้าไม่มีค่อยใช้ของ .env
@@ -45,22 +75,27 @@ export function resolveCreds(byok: {
   provider?: string | null;
   apiKey?: string | null;
   model?: string | null;
+  baseUrl?: string | null;
 }): Creds | null {
-  const wanted = (byok.provider === 'gemini' || byok.provider === 'anthropic'
-    ? byok.provider
-    : null) as Provider | null;
+  const wanted = isProvider(byok.provider) ? byok.provider : null;
 
-  if (wanted && byok.apiKey) {
+  // ปกติต้องมีคีย์ถึงจะนับว่าผู้ใช้เอาของตัวเองมา ยกเว้น OpenAI-compatible ที่ชี้ปลายทางเอง
+  // เพราะเซิร์ฟเวอร์ที่รันในเครื่อง (Ollama, LM Studio) ไม่มีคีย์ให้กรอกตั้งแต่แรก
+  const byokReady = wanted && (byok.apiKey || (wanted === 'openai' && byok.baseUrl));
+
+  if (wanted && byokReady) {
     return {
       provider: wanted,
-      apiKey: byok.apiKey,
+      apiKey: byok.apiKey ?? '',
       model: byok.model || undefined,
+      baseUrl: byok.baseUrl || undefined,
       source: 'byok',
     };
   }
 
-  const envProvider = (process.env.LLM_PROVIDER as Provider | undefined) ?? null;
+  const envProvider = isProvider(process.env.LLM_PROVIDER) ? process.env.LLM_PROVIDER : null;
   const claudeKey = envClaudeKey();
+  const openAiKey = envOpenAiKey();
 
   if (envProvider === 'gemini' && hasGeminiKey()) {
     return { provider: 'gemini', apiKey: geminiEnvKey(), source: 'env' };
@@ -68,9 +103,15 @@ export function resolveCreds(byok: {
   if (envProvider === 'anthropic' && claudeKey) {
     return { provider: 'anthropic', apiKey: claudeKey, source: 'env' };
   }
+  if (envProvider === 'openai' && openAiKey) {
+    return { provider: 'openai', apiKey: openAiKey, baseUrl: DEFAULT_OPENAI_BASE, source: 'env' };
+  }
   // ไม่ได้ระบุ LLM_PROVIDER - ใช้อันที่มีคีย์
   if (claudeKey) return { provider: 'anthropic', apiKey: claudeKey, source: 'env' };
   if (hasGeminiKey()) return { provider: 'gemini', apiKey: geminiEnvKey(), source: 'env' };
+  if (openAiKey) {
+    return { provider: 'openai', apiKey: openAiKey, baseUrl: DEFAULT_OPENAI_BASE, source: 'env' };
+  }
   return null;
 }
 
@@ -79,9 +120,13 @@ function geminiEnvKey() {
 }
 
 export function ask(opts: AskOptions, creds: Creds): Promise<string> {
-  return creds.provider === 'gemini' ? askGemini(opts, creds) : askClaude(opts, creds);
+  if (creds.provider === 'gemini') return askGemini(opts, creds);
+  if (creds.provider === 'openai') return askOpenAi(opts, creds);
+  return askClaude(opts, creds);
 }
 
 export function listModels(creds: Creds): Promise<{ id: string; label: string }[]> {
-  return creds.provider === 'gemini' ? listGeminiModels(creds) : listClaudeModels(creds);
+  if (creds.provider === 'gemini') return listGeminiModels(creds);
+  if (creds.provider === 'openai') return listOpenAiModels(creds);
+  return listClaudeModels(creds);
 }
