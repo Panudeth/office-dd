@@ -9,10 +9,24 @@ import type { Palette } from '@/game/types';
    ถ้าไม่ได้ตั้งค่า env แอปจะรันโหมด local เหมือนเดิมทุกอย่าง
    ============================================================ */
 
+/**
+ * Supabase เปลี่ยนชื่อคีย์ฝั่ง client จาก anon key (JWT) เป็น publishable key
+ * (sb_publishable_...) รับทั้งสองชื่อ ใครมีอันไหนก็ใช้ได้
+ * ทั้งคู่ปลอดภัยที่จะให้เบราว์เซอร์เห็น เพราะ RLS ยังบังคับอยู่
+ *
+ * NEXT_PUBLIC_* ถูก inline ตอน build — อ้างชื่อเต็มตรง ๆ เท่านั้น
+ * เขียนเป็น process.env[ตัวแปร] จะได้ undefined
+ */
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+const anonKey =
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+  '';
 
 export const supabaseConfigured = Boolean(url && anonKey);
+
+/** กันเผลอเอา secret key มาใส่ช่องที่เบราว์เซอร์เห็นได้ */
+export const usingSecretKeyByMistake = anonKey.startsWith('sb_secret_');
 
 let client: SupabaseClient | null = null;
 export function sb(): SupabaseClient | null {
@@ -64,6 +78,26 @@ export function sbError(err: unknown): string {
   if (low.includes('failed to fetch'))
     return 'ต่อ Supabase ไม่ได้ — ตรวจ NEXT_PUBLIC_SUPABASE_URL';
   return raw.length > 220 ? `${raw.slice(0, 220)}…` : raw;
+}
+
+/**
+ * ตรวจว่าต่อ Supabase ได้และรัน schema.sql แล้วหรือยัง
+ * ยิง select ที่ไม่ต้องล็อกอิน — RLS จะคืน 0 แถวถ้าตารางมีจริง
+ * แยกให้ออกว่า "config ผิด" / "ยังไม่ได้สร้างตาราง" / "พร้อมใช้"
+ */
+export async function healthCheck(): Promise<{ ok: boolean; text: string }> {
+  const c = sb();
+  if (!c) return { ok: false, text: 'ยังไม่ได้ตั้งค่า NEXT_PUBLIC_SUPABASE_URL / PUBLISHABLE_KEY' };
+  if (usingSecretKeyByMistake) return { ok: false, text: 'คีย์ที่ใส่เป็น secret key — ต้องใช้ publishable key' };
+
+  const { error } = await c.from('office').select('id', { head: true, count: 'exact' });
+  if (!error) return { ok: true, text: 'ต่อ Supabase ได้ และตารางครบแล้ว' };
+
+  const msg = String(error.message ?? '').toLowerCase();
+  if (msg.includes('does not exist') || msg.includes('schema cache') || error.code === '42P01') {
+    return { ok: false, text: 'ต่อได้ แต่ยังไม่มีตาราง — เอา supabase/schema.sql ไปรันใน SQL Editor ก่อน' };
+  }
+  return { ok: false, text: sbError(error) };
 }
 
 /* ---------- ออฟฟิศ ---------- */

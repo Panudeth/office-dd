@@ -2,8 +2,8 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import {
-  createOffice, listOffices, sb, sbError, supabaseConfigured,
-  type Office, type User,
+  createOffice, healthCheck, listOffices, sb, sbError, supabaseConfigured,
+  usingSecretKeyByMistake, type Office, type User,
 } from '@/lib/supabase';
 
 interface Props {
@@ -88,7 +88,15 @@ export default function OfficePanel({ open, onClose, user, office, onUser, onOff
           <button className="ghost" onClick={onClose}>✕</button>
         </header>
 
-        {!supabaseConfigured ? (
+        {usingSecretKeyByMistake ? (
+          <p className="hint" style={{ color: 'var(--acc2)' }}>
+            ⚠️ <b>คีย์ที่ใส่มาเป็น secret key</b> (<code>sb_secret_…</code>) — อันนี้ข้าม RLS ได้ทั้งหมด
+            และห้ามให้เบราว์เซอร์เห็นเด็ดขาด
+            <br /><br />
+            เปลี่ยนเป็น <b>publishable key</b> (<code>sb_publishable_…</code>) จาก
+            Project Settings → API keys แล้วรีสตาร์ท dev server
+          </p>
+        ) : !supabaseConfigured ? (
           <p className="hint">
             ยังไม่ได้ตั้งค่า Supabase — ตอนนี้แอปทำงานแบบ <b>ในเครื่องอย่างเดียว</b>{' '}
             (จ้างพนักงานแล้วรีเฟรชจะหาย)
@@ -97,11 +105,24 @@ export default function OfficePanel({ open, onClose, user, office, onUser, onOff
             <br />1. สร้างโปรเจกต์ที่ supabase.com
             <br />2. เอา <code>supabase/schema.sql</code> ไปรันใน SQL Editor
             <br />3. ใส่ <code>NEXT_PUBLIC_SUPABASE_URL</code> และ{' '}
-            <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> ใน <code>.env.local</code>
+            <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code> ใน <code>.env.local</code>
             <br />4. รีสตาร์ท dev server
           </p>
         ) : !user ? (
           <form onSubmit={auth}>
+            <div className="field">
+              <button
+                type="button" className="ghost check" disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  setMsg(await healthCheck());
+                  setBusy(false);
+                }}
+              >
+                {busy ? 'กำลังตรวจ…' : '🔌 ตรวจการเชื่อมต่อ + ตาราง'}
+              </button>
+              <small>กดก่อนสมัครได้ จะได้รู้ว่ารัน schema.sql แล้วหรือยัง</small>
+            </div>
             <label className="field">
               <span>อีเมล</span>
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
