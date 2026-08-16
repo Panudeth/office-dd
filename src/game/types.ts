@@ -73,6 +73,27 @@ export interface Employee {
   busy: boolean;
   /** ตัวผู้บริหาร (ตัวผู้ใช้) — นั่งหัวโต๊ะประชุม ไม่ใช่ agent ที่จ้างมา */
   isBoss?: boolean;
+
+  /**
+   * ใครเป็นเจ้าของการเคลื่อนที่ของตัวนี้
+   *   sim    = เครื่องนี้คำนวณเอง (ค่าเริ่มต้น ทั้ง agent และบอสของเรา)
+   *   remote = คนอื่นเป็นเจ้าของ เครื่องนี้แค่ interpolate เข้าหาค่าที่ได้รับ
+   * เฟสนี้ยังไม่มีใครเป็น remote — วางไว้เพื่อให้เฟส sync ตำแหน่งเป็นการ "เพิ่ม" ไม่ใช่ "รื้อ"
+   */
+  owner: 'sim' | 'remote';
+  /** เป้าหมายที่ได้รับจาก network (ใช้เฉพาะ owner === 'remote') */
+  remote?: { px: number; py: number; dir: Dir; pose: Pose };
+}
+
+/** ข้อมูลพนักงานที่บันทึกลง DB แล้วเอากลับมาสร้างใหม่ได้ */
+export interface PersistedEmployee {
+  id: string;
+  name: string;
+  title: string;
+  deptId: string;
+  role: AgentRole;
+  palette: Palette;
+  seat: Tile;
 }
 
 /** สรุปสถานะพนักงานสำหรับฝั่ง React (ไม่ส่ง canvas/closure ออกไป) */

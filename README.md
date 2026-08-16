@@ -48,6 +48,43 @@ SSE, animation) เป็น prompt กับ orchestration ล้วน ไม�
 > `thinking_level` เป็นของรุ่น 3 ขึ้นไป — โค้ดจะส่ง `thinkingConfig.thinkingLevel` เฉพาะเมื่อชื่อโมเดล
 > เป็นรุ่น 3+ และมี fallback ถอดออกถ้าโมเดลไม่รับ
 
+## Supabase — Sign In + Create My Office (ไม่ใส่ก็รันได้)
+
+ไม่ตั้งค่า = แอปทำงานแบบ **ในเครื่องอย่างเดียว** (จ้างพนักงานแล้วรีเฟรชหาย) เหมือนเดิมทุกอย่าง
+
+เปิดใช้:
+
+1. สร้างโปรเจกต์ที่ [supabase.com](https://supabase.com)
+2. เอา [`supabase/schema.sql`](supabase/schema.sql) ไปวางใน **SQL Editor** แล้ว Run (รันซ้ำได้ ไม่พัง)
+3. คัด `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` จาก Project Settings → API ใส่ `.env.local`
+4. รีสตาร์ท dev server → กดปุ่ม 🏢 บนแถบบน → สมัคร/เข้าสู่ระบบ → สร้างออฟฟิศ
+
+> ตอนทดสอบให้ปิด **Confirm email** ที่ Authentication → Providers → Email ไม่งั้นต้องยืนยันอีเมลก่อนถึงจะเข้าได้
+
+**anon key ไม่ใช่ความลับ** — ขึ้นต้นด้วย `NEXT_PUBLIC_` ให้เบราว์เซอร์เห็นได้ถูกต้องแล้ว
+ความปลอดภัยอยู่ที่ **RLS ใน Postgres** ไม่ใช่ที่โค้ดฝั่ง client
+(**ห้ามเอา `service_role` key มาใส่เด็ดขาด** — มันข้าม RLS ได้ทั้งหมด)
+
+| ตาราง | เก็บอะไร |
+|---|---|
+| `office` | ออฟฟิศ + เจ้าของ |
+| `office_member` | ใครอยู่ออฟฟิศไหน (owner / exec / viewer) |
+| `employee` | พนักงานที่จ้าง — ชื่อ บทบาท สี ที่นั่ง |
+
+RLS มีกฎเดียวซ้ำทุกตาราง: *แตะได้เฉพาะ row ของออฟฟิศที่ตัวเองเป็นสมาชิก* บังคับที่ DB
+บั๊กใน API ก็ทำข้อมูลข้ามออฟฟิศไม่ได้ ฟังก์ชัน `is_office_member()` เป็น `security definer`
+เพื่อกัน policy เรียกตัวเองวนไม่จบ
+
+### เตรียมไว้สำหรับ sync ตำแหน่ง (เฟสถัดไป)
+
+ทุก avatar มีฟิลด์ `owner: 'sim' | 'remote'` และ `World` มี `applyRemoteState(id, {px,py,dir,pose})`
+อยู่แล้ว — เฟสนี้ยังไม่มีใครเรียก พอถึงเฟส realtime งานที่เหลือคือ *เอา channel มาป้อนตรงนี้*
+ไม่ต้องรื้อ update loop
+
+**agent ไม่ต้อง sync พิกัด** เพราะ pathfinding เป็น BFS บนกริด static —
+`findPath(จาก,ถึง)` คืนเส้นทางเดียวกันทุกเครื่อง broadcast แค่ *"ต้นเดินไปที่นั่ง (18,2)"* ก็พอ
+มีแต่ avatar ของคนจริงที่ต้องส่งพิกัดจริง ซึ่งมีไม่กี่คน
+
 ## แนวคิด
 
 ### จ้างพนักงาน = spawn agent ที่เรียน skill มาก่อน

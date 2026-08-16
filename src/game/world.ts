@@ -6,7 +6,9 @@ import {
   MEET_SEATS, MH, MW, OBJECTS, PANTRY_TABLE, PODS, POND_SPOTS, REPORT_SPOTS,
   SOFA_SEATS, TS, WALL_DECOR, findPath, tileFree,
 } from './map';
-import type { AgentState, BubbleIcon, Dir, Employee, EmployeeSnapshot, Tile } from './types';
+import type {
+  AgentState, BubbleIcon, Dir, Employee, EmployeeSnapshot, PersistedEmployee, Pose, Tile,
+} from './types';
 
 const NAMES = [
   'ต้น', 'แนน', 'เอิร์ธ', 'ฟ้า', 'บอส', 'มิ้น', 'กาย', 'ปอ', 'แจ็ค', 'นุ่น',
@@ -91,6 +93,7 @@ export class World {
       sayFull: '', sayChars: 0, sayT: 0,
       busy: true,
       isBoss: true,
+      owner: 'sim',
     });
   }
 
@@ -144,24 +147,50 @@ export class World {
     if (!seat) return null;
 
     const n = this.headcount(dept.id);
-    const id = `emp_${this.nextId++}`;
     const usedNames = new Set(this.staff.map((e) => e.name));
     const name = NAMES.find((nm) => !usedNames.has(nm)) ?? `พนักงาน${this.nextId}`;
-    const pal = makePalette(this.nextId * 17 + dept.id.length, dept.color);
+    const pal = makePalette(this.nextId++ * 17 + dept.id.length, dept.color);
     // คนที่ 1 = ผู้เสนอ, 2 = ผู้ค้าน, 3 = ผู้ตรวจสอบ, 4 = ผู้ดูความเป็นไปได้ แล้ววนใหม่
     const role = ROLE_ORDER[n % ROLE_ORDER.length];
 
-    const e: Employee = {
-      id, name,
+    return this.spawn({
+      id: crypto.randomUUID(), // ใช้เป็น primary key ใน DB ด้วย
+      name,
       title: `${ROLES[role].icon} ${ROLES[role].th}`,
       deptId: dept.id,
       role,
-      lens: dept.lenses[role],
-      pal,
-      atlas: buildAtlas(pal),
+      palette: pal,
       seat: { ...seat },
-      tx: seat.x, ty: seat.y,
-      px: seat.x * TS + 8, py: seat.y * TS + TS,
+    }, dept);
+  }
+
+  /** สร้างพนักงานจากข้อมูลที่บันทึกไว้ (โหลดออฟฟิศกลับมา) */
+  restore(rows: PersistedEmployee[]) {
+    this.employees = this.employees.filter((e) => e.isBoss);
+    this.podDept = PODS.map(() => null);
+    for (const r of rows) {
+      const dept = DEPT_BY_ID.get(r.deptId);
+      if (!dept) continue;
+      this.spawn(r, dept);
+      // จองโซนโต๊ะคืนให้ตรงกับตอนก่อนรีเฟรช
+      const pod = PODS.findIndex((p) => p.some((s) => s.x === r.seat.x && s.y === r.seat.y));
+      if (pod >= 0 && !this.podDept[pod]) this.podDept[pod] = r.deptId;
+    }
+  }
+
+  private spawn(rec: PersistedEmployee, dept: Department): Employee {
+    const e: Employee = {
+      id: rec.id,
+      name: rec.name,
+      title: rec.title,
+      deptId: rec.deptId,
+      role: rec.role,
+      lens: dept.lenses[rec.role],
+      pal: rec.palette,
+      atlas: buildAtlas(rec.palette),
+      seat: { ...rec.seat },
+      tx: rec.seat.x, ty: rec.seat.y,
+      px: rec.seat.x * TS + 8, py: rec.seat.y * TS + TS,
       dir: 'down', pose: 'sit', frame: 0, animT: 0,
       state: 'work', timer: 3 + Math.random() * 6,
       speed: 40 + Math.random() * 12,
@@ -169,9 +198,30 @@ export class World {
       bubble: 'idea', bubbleT: 2,
       sayFull: '', sayChars: 0, sayT: 0,
       busy: false,
+      owner: 'sim',
     };
     this.employees.push(e);
     return e;
+  }
+
+  /** ข้อมูลที่ต้องบันทึกลง DB ของพนักงานคนหนึ่ง */
+  persistable(e: Employee): PersistedEmployee {
+    return {
+      id: e.id, name: e.name, title: e.title, deptId: e.deptId,
+      role: e.role, palette: e.pal, seat: e.seat,
+    };
+  }
+
+  /**
+   * รับตำแหน่งจากเครื่องอื่น (เฟส sync ตำแหน่ง)
+   * เฟสนี้ยังไม่มีใครเรียก — มีไว้ให้เฟสถัดไปเป็นแค่ "เอา channel มาป้อนตรงนี้"
+   * ไม่ต้องรื้อ update loop
+   */
+  applyRemoteState(id: string, s: { px: number; py: number; dir: Dir; pose: Pose }) {
+    const e = this.employees.find((x) => x.id === id);
+    if (!e) return;
+    e.owner = 'remote';
+    e.remote = { ...s };
   }
 
   fire(deptId?: string): boolean {
@@ -499,6 +549,22 @@ export class World {
   private update(dt: number) {
     for (const e of this.employees) {
       if (e.bubbleT > 0) { e.bubbleT -= dt; if (e.bubbleT <= 0) e.bubble = null; }
+
+      // ตัวที่คนอื่นเป็นเจ้าของ — ไม่คิดเส้นทางเอง แค่ไล่ตามค่าที่ได้รับ
+      if (e.owner === 'remote') {
+        if (e.remote) {
+          const k = Math.min(1, dt * 12);
+          e.px += (e.remote.px - e.px) * k;
+          e.py += (e.remote.py - e.py) * k;
+          e.dir = e.remote.dir;
+          e.pose = e.remote.pose;
+          e.tx = Math.round((e.px - 8) / TS);
+          e.ty = Math.round((e.py - TS) / TS);
+        }
+        e.animT += dt * (e.pose === 'walk' ? 9 : 2.2);
+        e.frame = Math.floor(e.animT) % 4;
+        continue;
+      }
       if (e.sayT > 0) {
         e.sayT -= dt;
         e.sayChars = Math.min(e.sayFull.length, e.sayChars + dt * 42); // ~42 ตัวอักษร/วินาที

@@ -18,7 +18,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * ไม่ใช่บุคลิก — ผู้เสนอถูกห้ามสรุปว่าอย่าทำ ผู้ค้านถูกห้ามลงท้ายว่าเห็นด้วย
  * สองข้อนี้ทำให้ทั้งคู่ไปถึงจุดหมายคนละที่ตั้งแต่ยังไม่เห็นหน้ากัน
  */
-export function agentSystem(skill: string, deptName: string, a: AskAgent): string {
+function agentSystem(skill: string, deptName: string, a: AskAgent): string {
   const role = ROLES[a.role];
   return `${skill}
 

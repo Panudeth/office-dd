@@ -5,6 +5,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import ChatPanel from '@/components/ChatPanel';
 import HirePanel from '@/components/HirePanel';
 import KeyPanel, { authHeaders, loadSettings, type LlmSettings } from '@/components/KeyPanel';
+import OfficePanel from '@/components/OfficePanel';
+import {
+  deleteEmployee, loadEmployees, sb, saveEmployee, supabaseConfigured,
+  type Office, type User,
+} from '@/lib/supabase';
 import type { EmployeeSnapshot } from '@/game/types';
 import type { World } from '@/game/world';
 import { MEETING_RECT } from '@/game/map';
@@ -67,9 +72,25 @@ export default function Page() {
   const [autoCam, setAutoCam] = useState(true);
   const [llm, setLlm] = useState<LlmSettings | null>(null);
   const [keyOpen, setKeyOpen] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [office, setOffice] = useState<Office | null>(null);
+  const [officeOpen, setOfficeOpen] = useState(false);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
 
   // localStorage อ่านได้เฉพาะฝั่ง client — โหลดหลัง mount
   useEffect(() => { setLlm(loadSettings()); }, []);
+
+  // กู้ session เดิม + ตามการเปลี่ยนสถานะล็อกอิน
+  useEffect(() => {
+    const c = sb();
+    if (!c) return;
+    c.auth.getUser().then(({ data }) => setUser(data.user ?? null));
+    const { data: sub } = c.auth.onAuthStateChange((_e, session) => {
+      setUser(session?.user ?? null);
+      if (!session) setOffice(null);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
 
   const syncRoster = useCallback(() => {
     const w = worldRef.current;
@@ -78,13 +99,34 @@ export default function Page() {
     setSeatsLeft(w.seatsLeft());
   }, []);
 
+  // เปลี่ยนออฟฟิศ = โหลดพนักงานของออฟฟิศนั้นมาแทนที่ทั้งชุด
+  useEffect(() => {
+    const w = worldRef.current;
+    if (!w || !ready) return;
+    // โหมดในเครื่องไม่มีออฟฟิศให้โหลด — ห้ามล้าง ไม่งั้นทับพนักงานที่จ้างไว้ตอน mount
+    if (!supabaseConfigured) return;
+    if (!office) { w.restore([]); syncRoster(); return; }
+    loadEmployees(office.id)
+      .then((rows) => {
+        w.restore(rows.map((r) => ({
+          id: r.id, name: r.name, title: r.title, deptId: r.dept_id,
+          role: r.role as EmployeeSnapshot['role'], palette: r.palette, seat: r.seat,
+        })));
+        syncRoster();
+      })
+      .catch((e) => setSaveErr(e instanceof Error ? e.message : String(e)));
+  }, [office, ready, syncRoster]);
+
   const onReady = useCallback(
     (w: World) => {
       worldRef.current = w;
       setReady(true);
-      // จ้างทีมกฎหมายให้ 3 คนตั้งแต่แรก จะได้ลองถามได้ทันที
-      const legal = DEPT_BY_ID.get('legal')!;
-      if (w.roster().length === 0) for (let i = 0; i < 3; i++) w.hire(legal);
+      // โหมดในเครื่อง: จ้างทีมกฎหมายให้ 3 คนเลย จะได้ลองถามได้ทันที
+      // ถ้าต่อ Supabase อยู่ ห้ามจ้างเอง เดี๋ยวไปทับกับพนักงานที่โหลดมาจากออฟฟิศ
+      if (!supabaseConfigured && w.roster().length === 0) {
+        const legal = DEPT_BY_ID.get('legal')!;
+        for (let i = 0; i < 3; i++) w.hire(legal);
+      }
       syncRoster();
     },
     [syncRoster],
@@ -100,12 +142,31 @@ export default function Page() {
     const w = worldRef.current;
     const dept = DEPT_BY_ID.get(deptId);
     if (!w || !dept) return;
-    for (let i = 0; i < count; i++) if (!w.hire(dept)) break;
+    setSaveErr(null);
+    for (let i = 0; i < count; i++) {
+      const e = w.hire(dept);
+      if (!e) break;
+      // วาดทันที แล้วค่อยบันทึก — ไม่ให้ผู้ใช้รอ network
+      if (office) {
+        const p = w.persistable(e);
+        saveEmployee({
+          id: p.id, office_id: office.id, name: p.name, title: p.title,
+          dept_id: p.deptId, role: p.role, palette: p.palette, seat: p.seat,
+        }).catch((err) => setSaveErr(err instanceof Error ? err.message : String(err)));
+      }
+    }
     syncRoster();
   };
 
   const fire = (deptId: string) => {
-    worldRef.current?.fire(deptId);
+    const w = worldRef.current;
+    if (!w) return;
+    const victim = [...w.roster()].reverse().find((r) => r.deptId === deptId);
+    if (!w.fire(deptId)) return;
+    if (office && victim) {
+      deleteEmployee(victim.id).catch((err) =>
+        setSaveErr(err instanceof Error ? err.message : String(err)));
+    }
     syncRoster();
   };
 
@@ -301,6 +362,13 @@ export default function Page() {
           VISUAL COMPANY <small>บริษัทที่พนักงานเป็น AI agent</small>
         </h1>
         <div className="tools">
+          <button
+            onClick={() => setOfficeOpen(true)}
+            className={office ? 'on' : ''}
+            title={supabaseConfigured ? 'เข้าสู่ระบบ / เลือกออฟฟิศ' : 'ยังไม่ได้ตั้งค่า Supabase'}
+          >
+            🏢 {office ? office.name : supabaseConfigured ? 'ออฟฟิศของฉัน' : 'ในเครื่อง'}
+          </button>
           <button onClick={() => setKeyOpen(true)} className={llm ? 'on' : ''} title="ใส่ API key ของคุณเอง">
             🔑 {llm ? (llm.provider === 'gemini' ? 'Gemini' : 'Claude') : 'คีย์ของฉัน'}
           </button>
@@ -342,7 +410,9 @@ export default function Page() {
             <span>
               พนักงาน <b>{roster.length}</b> คน · ในห้องประชุม <b>{busyAgents}</b>
             </span>
-            <span className="phase">{phase ?? 'พร้อมรับงาน'}</span>
+            <span className="phase">
+              {saveErr ? `⚠️ บันทึกไม่สำเร็จ: ${saveErr}` : (phase ?? 'พร้อมรับงาน')}
+            </span>
             <span className="muted">ลากเพื่อเลื่อน · ล้อเลื่อนเพื่อซูม</span>
           </div>
         </div>
@@ -369,6 +439,14 @@ export default function Page() {
       </div>
 
       <KeyPanel open={keyOpen} settings={llm} onClose={() => setKeyOpen(false)} onSave={setLlm} />
+      <OfficePanel
+        open={officeOpen}
+        onClose={() => setOfficeOpen(false)}
+        user={user}
+        office={office}
+        onUser={setUser}
+        onOffice={setOffice}
+      />
     </main>
   );
 }
