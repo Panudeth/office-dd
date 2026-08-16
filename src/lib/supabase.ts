@@ -33,7 +33,13 @@ export function sb(): SupabaseClient | null {
   if (!supabaseConfigured) return null;
   if (!client) {
     client = createClient(url, anonKey, {
-      auth: { persistSession: true, autoRefreshToken: true },
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        // ขากลับจาก Google จะพ่วง code มากับ URL ตัวนี้คือคนเก็บไปแลกเป็น session
+        detectSessionInUrl: true,
+        flowType: 'pkce',
+      },
     });
   }
   return client;
@@ -77,9 +83,33 @@ export function sbError(err: unknown): string {
     return 'ยังไม่ได้สร้างตาราง - เอา supabase/schema.sql ไปรันใน SQL Editor ก่อน';
   if (low.includes('row-level security') || low.includes('violates row-level'))
     return 'RLS ปฏิเสธคำสั่งนี้ - ตรวจว่ารัน schema.sql ครบแล้วและล็อกอินอยู่';
+  if (low.includes('unsupported provider') || low.includes('provider is not enabled'))
+    return 'ยังไม่ได้เปิด Google ใน Supabase - ไปที่ Authentication แล้วเปิด Google ใน Sign In / Providers พร้อมใส่ Client ID และ Secret';
+  if (low.includes('redirect') && (low.includes('not allowed') || low.includes('invalid')))
+    return 'URL ขากลับไม่อยู่ในรายการที่อนุญาต - เอา URL ของหน้านี้ไปใส่ใน Supabase ที่ Authentication แล้วดู URL Configuration ช่อง Redirect URLs';
   if (low.includes('failed to fetch'))
     return 'ต่อ Supabase ไม่ได้ - ตรวจ NEXT_PUBLIC_SUPABASE_URL';
   return raw.length > 220 ? `${raw.slice(0, 220)}...` : raw;
+}
+
+/**
+ * เข้าสู่ระบบด้วย Google
+ * เป็นการ redirect ออกจากหน้านี้ทั้งหน้า ฟังก์ชันนี้จึงไม่คืนค่าอะไรถ้าสำเร็จ
+ * ขากลับ supabase-js จะเห็น code ใน URL แล้วแลกเป็น session ให้เอง
+ * (เปิด detectSessionInUrl ไว้แล้วด้านบน) จากนั้น onAuthStateChange ใน page.tsx รับช่วงต่อ
+ */
+export async function signInWithGoogle(): Promise<void> {
+  const c = sb();
+  if (!c) throw new Error('ยังไม่ได้ตั้งค่า Supabase');
+  const { error } = await c.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      // กลับมาที่หน้าเดิมเสมอ ใช้ origin จริงของเบราว์เซอร์
+      // เพราะพอร์ต dev เปลี่ยนบ่อย ถ้า hardcode ไว้จะเด้งผิดที่
+      redirectTo: window.location.origin,
+    },
+  });
+  if (error) throw new Error(sbError(error));
 }
 
 /**

@@ -3,12 +3,13 @@
 import { Building2, LogOut, Plug, Plus } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import {
-  createOffice, healthCheck, listOffices, sb, sbError, supabaseConfigured,
-  usingSecretKeyByMistake, type Office, type User,
+  createOffice, healthCheck, listOffices, sb, sbError, signInWithGoogle,
+  supabaseConfigured, usingSecretKeyByMistake, type Office, type User,
 } from '@/lib/supabase';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog';
+import { GoogleMark } from '@/components/ui/google-mark';
 import { Field, Input } from '@/components/ui/input';
 import { Hint } from '@/components/ui/panel';
 
@@ -58,6 +59,18 @@ export default function OfficePanel({
     } catch (err) {
       setMsg({ ok: false, text: sbError(err) });
     } finally {
+      setBusy(false);
+    }
+  };
+
+  const google = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      // สำเร็จแล้วเบราว์เซอร์จะออกจากหน้านี้ไปเลย บรรทัดถัดไปจึงไม่ได้รัน
+      await signInWithGoogle();
+    } catch (err) {
+      setMsg({ ok: false, text: err instanceof Error ? err.message : String(err) });
       setBusy(false);
     }
   };
@@ -121,23 +134,24 @@ export default function OfficePanel({
           </Hint>
         ) : !user ? (
           <form onSubmit={auth} className="flex flex-col gap-3">
+            {/* Google มาก่อน เพราะกดทีเดียวจบ ไม่ต้องคิดรหัสผ่านใหม่ */}
             <Button
               type="button"
               variant="outline"
-              size="sm"
+              size="lg"
               disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                setMsg(await healthCheck());
-                setBusy(false);
-              }}
+              onClick={google}
+              className="border-ink-500 bg-parchment text-ink-900 hover:bg-white hover:text-ink-900"
             >
-              <Plug />
-              {busy ? 'กำลังตรวจ' : 'ตรวจการเชื่อมต่อ และตาราง'}
+              <GoogleMark className="size-4" />
+              เข้าสู่ระบบด้วย Google
             </Button>
-            <Hint className="-mt-2">
-              กดก่อนสมัครได้ จะได้รู้ว่ารัน schema.sql แล้วหรือยัง
-            </Hint>
+
+            <div className="flex items-center gap-2">
+              <span className="h-px flex-1 bg-ink-600" />
+              <span className="text-[10px] uppercase tracking-wide text-dim">หรือใช้อีเมล</span>
+              <span className="h-px flex-1 bg-ink-600" />
+            </div>
 
             <Field label="อีเมล" hint="ต้องเป็นอีเมลจริง Supabase บล็อกโดเมนทดสอบอย่าง example.com">
               <Input
@@ -172,11 +186,48 @@ export default function OfficePanel({
                 {mode === 'in' ? 'เข้าสู่ระบบ' : 'สมัคร'}
               </Button>
             </DialogFooter>
+
+            <div className="mt-1 border-t border-ink-600 pt-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="w-full"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  setMsg(await healthCheck());
+                  setBusy(false);
+                }}
+              >
+                <Plug />
+                {busy ? 'กำลังตรวจ' : 'ตรวจการเชื่อมต่อ และตาราง'}
+              </Button>
+              <Hint className="text-center">
+                กดก่อนสมัครได้ จะได้รู้ว่ารัน schema.sql แล้วหรือยัง
+              </Hint>
+            </div>
           </form>
         ) : (
           <>
             <div className="flex items-center gap-2 rounded-box border border-ink-600 bg-ink-700 px-2 py-1.5">
-              <span className="truncate text-[12px] text-parchment">{user.email}</span>
+              {/* เข้าด้วย Google จะมีชื่อกับรูปติดมาใน user_metadata ใช้เลยจะได้รู้ว่าเป็นบัญชีไหน */}
+              {typeof user.user_metadata?.avatar_url === 'string' && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={user.user_metadata.avatar_url}
+                  alt=""
+                  className="size-5 shrink-0 rounded-box border border-ink-500"
+                />
+              )}
+              <span className="truncate text-[12px] text-parchment">
+                {typeof user.user_metadata?.full_name === 'string'
+                  ? user.user_metadata.full_name
+                  : user.email}
+              </span>
+              {user.app_metadata?.provider === 'google' && (
+                <GoogleMark className="size-3 shrink-0" />
+              )}
               <Button variant="ghost" size="sm" className="ml-auto shrink-0" onClick={signOut}>
                 <LogOut /> ออกจากระบบ
               </Button>
