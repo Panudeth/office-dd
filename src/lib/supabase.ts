@@ -4,7 +4,7 @@ import { createClient, type SupabaseClient, type User } from '@supabase/supabase
 import type { Palette } from '@/game/types';
 
 /* ============================================================
-   เฟส 1 ใช้ client ฝั่งเบราว์เซอร์อย่างเดียว — ไม่มี SSR auth ไม่มี middleware
+   เฟส 1 ใช้ client ฝั่งเบราว์เซอร์อย่างเดียว - ไม่มี SSR auth ไม่มี middleware
    ความปลอดภัยอยู่ที่ RLS ใน Postgres ไม่ใช่ที่โค้ดฝั่งนี้
    ถ้าไม่ได้ตั้งค่า env แอปจะรันโหมด local เหมือนเดิมทุกอย่าง
    ============================================================ */
@@ -14,7 +14,7 @@ import type { Palette } from '@/game/types';
  * (sb_publishable_...) รับทั้งสองชื่อ ใครมีอันไหนก็ใช้ได้
  * ทั้งคู่ปลอดภัยที่จะให้เบราว์เซอร์เห็น เพราะ RLS ยังบังคับอยู่
  *
- * NEXT_PUBLIC_* ถูก inline ตอน build — อ้างชื่อเต็มตรง ๆ เท่านั้น
+ * NEXT_PUBLIC_* ถูก inline ตอน build - อ้างชื่อเต็มตรง ๆ เท่านั้น
  * เขียนเป็น process.env[ตัวแปร] จะได้ undefined
  */
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
@@ -66,36 +66,38 @@ export function sbError(err: unknown): string {
   if (low.includes('invalid login credentials'))
     return 'อีเมลหรือรหัสผ่านไม่ถูกต้อง';
   if (low.includes('user already registered'))
-    return 'อีเมลนี้สมัครไว้แล้ว — กดเข้าสู่ระบบแทน';
+    return 'อีเมลนี้สมัครไว้แล้ว - กดเข้าสู่ระบบแทน';
   if (low.includes('email not confirmed'))
-    return 'ยังไม่ได้ยืนยันอีเมล — เช็คกล่องจดหมาย หรือปิด "Confirm email" ใน Supabase → Authentication → Providers';
+    return 'ยังไม่ได้ยืนยันอีเมล - เช็คกล่องจดหมาย หรือปิด "Confirm email" ใน Supabase -> Authentication -> Providers';
   if (low.includes('password should be at least'))
     return 'รหัสผ่านสั้นเกินไป (อย่างน้อย 6 ตัว)';
+  if (low.includes('email address') && low.includes('invalid'))
+    return 'Supabase ไม่รับอีเมลนี้ - โดเมนทดสอบอย่าง example.com ถูกบล็อก ใช้อีเมลจริงที่รับเมลได้';
   if (low.includes('relation') && low.includes('does not exist'))
-    return 'ยังไม่ได้สร้างตาราง — เอา supabase/schema.sql ไปรันใน SQL Editor ก่อน';
+    return 'ยังไม่ได้สร้างตาราง - เอา supabase/schema.sql ไปรันใน SQL Editor ก่อน';
   if (low.includes('row-level security') || low.includes('violates row-level'))
-    return 'RLS ปฏิเสธคำสั่งนี้ — ตรวจว่ารัน schema.sql ครบแล้วและล็อกอินอยู่';
+    return 'RLS ปฏิเสธคำสั่งนี้ - ตรวจว่ารัน schema.sql ครบแล้วและล็อกอินอยู่';
   if (low.includes('failed to fetch'))
-    return 'ต่อ Supabase ไม่ได้ — ตรวจ NEXT_PUBLIC_SUPABASE_URL';
-  return raw.length > 220 ? `${raw.slice(0, 220)}…` : raw;
+    return 'ต่อ Supabase ไม่ได้ - ตรวจ NEXT_PUBLIC_SUPABASE_URL';
+  return raw.length > 220 ? `${raw.slice(0, 220)}...` : raw;
 }
 
 /**
  * ตรวจว่าต่อ Supabase ได้และรัน schema.sql แล้วหรือยัง
- * ยิง select ที่ไม่ต้องล็อกอิน — RLS จะคืน 0 แถวถ้าตารางมีจริง
+ * ยิง select ที่ไม่ต้องล็อกอิน - RLS จะคืน 0 แถวถ้าตารางมีจริง
  * แยกให้ออกว่า "config ผิด" / "ยังไม่ได้สร้างตาราง" / "พร้อมใช้"
  */
 export async function healthCheck(): Promise<{ ok: boolean; text: string }> {
   const c = sb();
   if (!c) return { ok: false, text: 'ยังไม่ได้ตั้งค่า NEXT_PUBLIC_SUPABASE_URL / PUBLISHABLE_KEY' };
-  if (usingSecretKeyByMistake) return { ok: false, text: 'คีย์ที่ใส่เป็น secret key — ต้องใช้ publishable key' };
+  if (usingSecretKeyByMistake) return { ok: false, text: 'คีย์ที่ใส่เป็น secret key - ต้องใช้ publishable key' };
 
   const { error } = await c.from('office').select('id', { head: true, count: 'exact' });
   if (!error) return { ok: true, text: 'ต่อ Supabase ได้ และตารางครบแล้ว' };
 
   const msg = String(error.message ?? '').toLowerCase();
   if (msg.includes('does not exist') || msg.includes('schema cache') || error.code === '42P01') {
-    return { ok: false, text: 'ต่อได้ แต่ยังไม่มีตาราง — เอา supabase/schema.sql ไปรันใน SQL Editor ก่อน' };
+    return { ok: false, text: 'ต่อได้ แต่ยังไม่มีตาราง - เอา supabase/schema.sql ไปรันใน SQL Editor ก่อน' };
   }
   return { ok: false, text: sbError(error) };
 }

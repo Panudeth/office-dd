@@ -1,7 +1,11 @@
 'use client';
 
+import {
+  Building2, KeyRound, Maximize2, Pause, Play, Video, ZoomIn, ZoomOut,
+} from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
 import ChatPanel from '@/components/ChatPanel';
 import HirePanel from '@/components/HirePanel';
 import KeyPanel, { authHeaders, loadSettings, type LlmSettings } from '@/components/KeyPanel';
@@ -29,14 +33,14 @@ function excerpt(text: string, round: 1 | 2): string {
   let s = text.trim().replace(/\*\*/g, '');
   if (round === 2) {
     const m = /(?:^|\n)\s*ค้าน\s*[:：]\s*(.+)/.exec(s);
-    s = m ? `⚔️ ${m[1].trim()}` : (s.split('\n').find((l) => l.trim()) ?? s);
+    s = m ? `ค้าน: ${m[1].trim()}` : (s.split('\n').find((l) => l.trim()) ?? s);
   } else {
     s = s.split('\n').find((l) => l.trim()) ?? s;
   }
-  return s.length > 150 ? `${s.slice(0, 150)}…` : s;
+  return s.length > 150 ? `${s.slice(0, 150)}...` : s;
 }
 
-/** หาว่ารอบแย้งนี้พุ่งไปที่ใคร — เอาไว้ให้คนถูกพาดพิงมีปฏิกิริยา */
+/** หาว่ารอบแย้งนี้พุ่งไปที่ใคร - เอาไว้ให้คนถูกพาดพิงมีปฏิกิริยา */
 function objectionTarget(text: string, names: string[]): string | null {
   const m = /(?:^|\n)\s*ค้าน\s*[:：]\s*(.+)/.exec(text);
   const line = m ? m[1] : text.split('\n')[0] ?? '';
@@ -47,7 +51,7 @@ function objectionTarget(text: string, names: string[]): string | null {
 function summaryLine(text: string): string {
   const m = /\*\*\s*สรุป\s*\*\*\s*\n?([\s\S]*?)(?=\n\s*\*\*|$)/.exec(text);
   const s = (m ? m[1] : text).trim().replace(/\*\*/g, '').split('\n').filter(Boolean).join(' ');
-  return s.length > 160 ? `${s.slice(0, 160)}…` : s;
+  return s.length > 160 ? `${s.slice(0, 160)}...` : s;
 }
 
 const WELCOME: ChatMessage = {
@@ -77,7 +81,7 @@ export default function Page() {
   const [officeOpen, setOfficeOpen] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
 
-  // localStorage อ่านได้เฉพาะฝั่ง client — โหลดหลัง mount
+  // localStorage อ่านได้เฉพาะฝั่ง client - โหลดหลัง mount
   useEffect(() => { setLlm(loadSettings()); }, []);
 
   // กู้ session เดิม + ตามการเปลี่ยนสถานะล็อกอิน
@@ -103,7 +107,7 @@ export default function Page() {
   useEffect(() => {
     const w = worldRef.current;
     if (!w || !ready) return;
-    // โหมดในเครื่องไม่มีออฟฟิศให้โหลด — ห้ามล้าง ไม่งั้นทับพนักงานที่จ้างไว้ตอน mount
+    // โหมดในเครื่องไม่มีออฟฟิศให้โหลด - ห้ามล้าง ไม่งั้นทับพนักงานที่จ้างไว้ตอน mount
     if (!supabaseConfigured) return;
     if (!office) { w.restore([]); syncRoster(); return; }
     loadEmployees(office.id)
@@ -132,7 +136,7 @@ export default function Page() {
     [syncRoster],
   );
 
-  // สถานะพนักงานเปลี่ยนตลอดเวลาใน game loop — poll เบา ๆ มาแสดงผล
+  // สถานะพนักงานเปลี่ยนตลอดเวลาใน game loop - poll เบา ๆ มาแสดงผล
   useEffect(() => {
     const t = window.setInterval(syncRoster, 400);
     return () => window.clearInterval(t);
@@ -146,7 +150,7 @@ export default function Page() {
     for (let i = 0; i < count; i++) {
       const e = w.hire(dept);
       if (!e) break;
-      // วาดทันที แล้วค่อยบันทึก — ไม่ให้ผู้ใช้รอ network
+      // วาดทันที แล้วค่อยบันทึก - ไม่ให้ผู้ใช้รอ network
       if (office) {
         const p = w.persistable(e);
         saveEmployee({
@@ -186,7 +190,7 @@ export default function Page() {
     if (!dept) {
       setMessages((ms) => [
         ...ms,
-        { id: newId(), role: 'system', text: 'ยังไม่มีพนักงานในบริษัท — จ้างอย่างน้อย 1 แผนกก่อนถามครับ' },
+        { id: newId(), role: 'system', text: 'ยังไม่มีพนักงานในบริษัท - จ้างอย่างน้อย 1 แผนกก่อนถามครับ' },
       ]);
       return;
     }
@@ -195,7 +199,7 @@ export default function Page() {
     if (!team.length) {
       setMessages((ms) => [
         ...ms,
-        { id: newId(), role: 'system', text: `ยังไม่มีพนักงาน${dept.nameTh} — จ้างก่อนแล้วถามใหม่` },
+        { id: newId(), role: 'system', text: `ยังไม่มีพนักงาน${dept.nameTh} - จ้างก่อนแล้วถามใหม่` },
       ]);
       return;
     }
@@ -211,7 +215,7 @@ export default function Page() {
     ]);
 
     setBusy(true);
-    setPhase('เรียกทีมเข้าห้องประชุม…');
+    setPhase('เรียกทีมเข้าห้องประชุม...');
     const transcript: Opinion[] = [];
     const buffer: Opinion[] = [];
     const names = team.map((t) => t.name);
@@ -231,8 +235,8 @@ export default function Page() {
       w.setDeliberating(ids);
       // ผู้บริหาร (ตัวผู้ใช้) เปิดประชุมด้วยคำถามของตัวเอง
       // ผูก animation เข้ากับคำถามจริง และไม่ให้จอว่างระหว่างรอ LLM รอบแรก
-      w.say(w.bossId, `📋 วาระวันนี้: ${question}`, 7);
-      setPhase('ทีมกำลังถกกัน…');
+      w.say(w.bossId, `วาระวันนี้: ${question}`, 7);
+      setPhase('ทีมกำลังถกกัน...');
 
       const res = await fetch('/api/ask', {
         method: 'POST',
@@ -275,8 +279,8 @@ export default function Page() {
             transcript.push(op);
             patch(pendingId, { transcript: [...transcript] });
 
-            // คอล LLM เสร็จไม่เรียงลำดับ — พักไว้จนครบรอบ แล้วค่อยให้พูด
-            // ตามลำดับบทบาท (ผู้เสนอ → ผู้ค้าน → ผู้ตรวจสอบ) จะได้เป็นบทสนทนา
+            // คอล LLM เสร็จไม่เรียงลำดับ - พักไว้จนครบรอบ แล้วค่อยให้พูด
+            // ตามลำดับบทบาท (ผู้เสนอ -> ผู้ค้าน -> ผู้ตรวจสอบ) จะได้เป็นบทสนทนา
             buffer.push(op);
             if (buffer.length >= team.length) {
               const ordered = [...buffer].sort(
@@ -284,7 +288,7 @@ export default function Page() {
               );
               buffer.length = 0;
               ordered.forEach((o) => {
-                // ค้านใคร → พอถึงคิวพูด ให้หันไปหาคนนั้น และคนนั้นมีปฏิกิริยาตอบ
+                // ค้านใคร -> พอถึงคิวพูด ให้หันไปหาคนนั้น และคนนั้นมีปฏิกิริยาตอบ
                 const targetName = o.round === 2 ? objectionTarget(o.text, names) : null;
                 const target = team.find((t) => t.name === targetName && t.id !== o.agentId);
                 w.say(o.agentId, excerpt(o.text, o.round), undefined, () => {
@@ -299,7 +303,7 @@ export default function Page() {
             leadId = ev.leadAgentId;
             leadName = ev.leadAgentName;
           } else if (ev.type === 'error') {
-            // error ไม่ควรกลายเป็นฟองคำพูดของ agent — ส่งเข้าแชทอย่างเดียว
+            // error ไม่ควรกลายเป็นฟองคำพูดของ agent - ส่งเข้าแชทอย่างเดียว
             errorText = ev.message;
             streaming = false;
           } else if (ev.type === 'done') {
@@ -308,24 +312,24 @@ export default function Page() {
         }
       }
 
-      // ถ้าพัง ไม่ต้องให้ใครเดินมารายงาน — เลิกประชุมแล้วบอกในแชทตรง ๆ
+      // ถ้าพัง ไม่ต้องให้ใครเดินมารายงาน - เลิกประชุมแล้วบอกในแชทตรง ๆ
       if (errorText) {
         w.clearSay(ids);
         patch(pendingId, {
           pending: false,
           role: 'system',
-          text: `⚠️ ${errorText}`,
+          text: `เกิดข้อผิดพลาด: ${errorText}`,
           transcript: transcript.length ? [...transcript] : undefined,
         });
         return;
       }
 
       // รอให้ถกกันจบก่อน ไม่งั้นบทสรุปจะทับบทสนทนาที่ยังพูดไม่หมด
-      setPhase('รอทีมถกให้จบ…');
+      setPhase('รอทีมถกให้จบ...');
       await w.waitForSpeech();
 
       // สรุปให้ผู้บริหารฟังคาโต๊ะประชุม ไม่ต้องเดินไปไหน
-      setPhase('สรุปให้ผู้บริหาร…');
+      setPhase('สรุปให้ผู้บริหาร...');
       w.faceToward(leadId, w.bossId);
       if (finalText) w.sayNow(leadId, summaryLine(finalText), 11);
       await new Promise((r) => setTimeout(r, 1800));
@@ -341,7 +345,7 @@ export default function Page() {
     } catch (err) {
       patch(pendingId, {
         pending: false,
-        text: `⚠️ ${err instanceof Error ? err.message : String(err)}`,
+        text: `เกิดข้อผิดพลาด: ${err instanceof Error ? err.message : String(err)}`,
         transcript: [...transcript],
       });
     } finally {
@@ -356,68 +360,116 @@ export default function Page() {
   const busyAgents = roster.filter((r) => ['meet', 'think', 'report'].includes(r.state)).length;
 
   return (
-    <main className="app">
-      <header className="topbar">
-        <h1>
-          VISUAL COMPANY <small>บริษัทที่พนักงานเป็น AI agent</small>
+    <main className="flex h-screen flex-col gap-2.5 p-2.5 max-[1080px]:h-auto">
+      {/* แถบบนเป็นแผ่นไม้ ให้รู้สึกเหมือนป้ายหน้าออฟฟิศ ไม่ใช่ nav ของเว็บแอป */}
+      <header className="bevel flex flex-wrap items-center gap-x-3 gap-y-2 rounded-box border-2 border-wood-deep bg-wood-mid px-3 py-2">
+        <h1 className="text-[15px] text-parchment">
+          VISUAL COMPANY
+          <span className="ml-2 text-[11px] font-normal tracking-normal text-parchment-2/80">
+            บริษัทที่พนักงานเป็น AI agent
+          </span>
         </h1>
-        <div className="tools">
-          <button
+
+        <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          <Button
+            variant={office ? 'primary' : 'outline'}
+            size="sm"
             onClick={() => setOfficeOpen(true)}
-            className={office ? 'on' : ''}
-            title={supabaseConfigured ? 'เข้าสู่ระบบ / เลือกออฟฟิศ' : 'ยังไม่ได้ตั้งค่า Supabase'}
+            title={supabaseConfigured ? 'เข้าสู่ระบบ และเลือกออฟฟิศ' : 'ยังไม่ได้ตั้งค่า Supabase'}
+            className={office ? undefined : 'border-wood-deep text-parchment-2 hover:bg-wood-dark'}
           >
-            🏢 {office ? office.name : supabaseConfigured ? 'ออฟฟิศของฉัน' : 'ในเครื่อง'}
-          </button>
-          <button onClick={() => setKeyOpen(true)} className={llm ? 'on' : ''} title="ใส่ API key ของคุณเอง">
-            🔑 {llm ? (llm.provider === 'gemini' ? 'Gemini' : 'Claude') : 'คีย์ของฉัน'}
-          </button>
-          <button onClick={() => worldRef.current?.zoomCenter(1 / 1.35)} disabled={!ready}>➖</button>
-          <button onClick={() => worldRef.current?.zoomCenter(1.35)} disabled={!ready}>➕</button>
-          <button onClick={() => worldRef.current?.resetView()} disabled={!ready}>⛶ พอดีจอ</button>
-          <button
+            <Building2 />
+            {office ? office.name : supabaseConfigured ? 'ออฟฟิศของฉัน' : 'ในเครื่อง'}
+          </Button>
+
+          <Button
+            variant={llm ? 'primary' : 'outline'}
+            size="sm"
+            onClick={() => setKeyOpen(true)}
+            title="ใส่ API key ของคุณเอง"
+            className={llm ? undefined : 'border-wood-deep text-parchment-2 hover:bg-wood-dark'}
+          >
+            <KeyRound />
+            {llm ? (llm.provider === 'gemini' ? 'Gemini' : 'Claude') : 'คีย์ของฉัน'}
+          </Button>
+
+          <div className="mx-0.5 h-5 w-px bg-wood-deep" />
+
+          <Button
+            variant="outline" size="icon" disabled={!ready} title="ซูมออก"
+            className="size-7 border-wood-deep text-parchment-2 hover:bg-wood-dark"
+            onClick={() => worldRef.current?.zoomCenter(1 / 1.35)}
+          >
+            <ZoomOut />
+          </Button>
+          <Button
+            variant="outline" size="icon" disabled={!ready} title="ซูมเข้า"
+            className="size-7 border-wood-deep text-parchment-2 hover:bg-wood-dark"
+            onClick={() => worldRef.current?.zoomCenter(1.35)}
+          >
+            <ZoomIn />
+          </Button>
+          <Button
+            variant="outline" size="sm" disabled={!ready}
+            className="border-wood-deep text-parchment-2 hover:bg-wood-dark"
+            onClick={() => worldRef.current?.resetView()}
+          >
+            <Maximize2 /> พอดีจอ
+          </Button>
+
+          <Button
+            variant={autoCam ? 'primary' : 'outline'}
+            size="sm"
+            disabled={!ready}
+            title="ซูมตามทีมเข้าห้องประชุมเองตอนถาม"
+            className={autoCam ? undefined : 'border-wood-deep text-parchment-2 hover:bg-wood-dark'}
             onClick={() => {
               const w = worldRef.current;
               if (!w) return;
               w.setAutoCam(!w.autoCam);
               setAutoCam(w.autoCam);
             }}
-            disabled={!ready}
-            className={autoCam ? 'on' : ''}
-            title="ซูมตามทีมเข้าห้องประชุมเองตอนถาม"
           >
-            🎥 กล้องอัตโนมัติ
-          </button>
-          <button
+            <Video /> กล้องอัตโนมัติ
+          </Button>
+
+          <Button
+            variant={paused ? 'primary' : 'outline'}
+            size="sm"
+            disabled={!ready}
+            className={paused ? undefined : 'border-wood-deep text-parchment-2 hover:bg-wood-dark'}
             onClick={() => {
               const w = worldRef.current;
               if (!w) return;
               w.setPaused(!w.isPaused());
               setPaused(w.isPaused());
             }}
-            disabled={!ready}
-            className={paused ? 'on' : ''}
           >
-            {paused ? '▶ เล่นต่อ' : '⏸ หยุด'}
-          </button>
+            {paused ? <Play /> : <Pause />}
+            {paused ? 'เล่นต่อ' : 'หยุด'}
+          </Button>
         </div>
       </header>
 
-      <div className="layout">
-        <div className="stage">
+      <div className="grid min-h-0 flex-1 gap-2.5 [grid-template-columns:minmax(0,1fr)_400px] max-[1080px]:grid-cols-1">
+        <div className="min-w-0 self-start rounded-box border-2 border-ink-500 bg-[#0d1119] p-1.5">
           <GameCanvas onReady={onReady} />
-          <div className="statusbar">
+
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 pb-0.5 pt-2 text-[11px] text-dim">
             <span>
-              พนักงาน <b>{roster.length}</b> คน · ในห้องประชุม <b>{busyAgents}</b>
+              พนักงาน <b className="text-parchment">{roster.length}</b> คน
             </span>
-            <span className="phase">
-              {saveErr ? `⚠️ บันทึกไม่สำเร็จ: ${saveErr}` : (phase ?? 'พร้อมรับงาน')}
+            <span>
+              ในห้องประชุม <b className="text-parchment">{busyAgents}</b>
             </span>
-            <span className="muted">ลากเพื่อเลื่อน · ล้อเลื่อนเพื่อซูม</span>
+            <span className={`ml-auto ${saveErr ? 'text-rug-lite' : 'text-brass'}`}>
+              {saveErr ? `บันทึกไม่สำเร็จ: ${saveErr}` : (phase ?? 'พร้อมรับงาน')}
+            </span>
+            <span>ลากเพื่อเลื่อน / ล้อเลื่อนเพื่อซูม</span>
           </div>
         </div>
 
-        <aside className="side">
+        <aside className="flex min-h-0 flex-col gap-2.5">
           <HirePanel
             roster={roster}
             seatsLeft={seatsLeft}

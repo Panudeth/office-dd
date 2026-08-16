@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 /**
  * ดึงรายชื่อโมเดลที่คีย์นี้เรียกได้จริง
- * คีย์มาทาง header เหมือน /api/ask — ใช้แล้วทิ้ง ไม่เก็บ ไม่ log
+ * คีย์มาทาง header เหมือน /api/ask - ใช้แล้วทิ้ง ไม่เก็บ ไม่ log
  * ใช้เป็นปุ่ม "ตรวจคีย์" ไปในตัว เพราะถ้าคีย์ผิดจะ error ตรงนี้เลย
  */
 export async function POST(req: NextRequest) {
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
   });
 
   if (!creds) {
-    return Response.json({ error: 'ยังไม่มีคีย์ — ใส่ API key ก่อน' }, { status: 400 });
+    return Response.json({ error: 'ยังไม่มีคีย์ - ใส่ API key ก่อน' }, { status: 400 });
   }
 
   try {

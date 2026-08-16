@@ -14,11 +14,11 @@ export interface LoadedSkill {
 const cache = new Map<string, { mtimeMs: number; skill: LoadedSkill }>();
 
 /**
- * โหลด skills/<id>.md — นี่คือ "การเรียน skill" ของ agent
+ * โหลด skills/<id>.md - นี่คือ "การเรียน skill" ของ agent
  * เกิดขึ้น **ตอนถามคำถาม** ไม่ใช่ตอนกดจ้าง เนื้อไฟล์จะถูกวางไว้ต้น system prompt
  * ของทุกคอลในรอบนั้น (agent ไม่มี state ค้างระหว่างคำถาม)
  *
- * cache ผูกกับ mtime ของไฟล์ — แก้ .md แล้วเห็นผลทันที ไม่ต้องรีสตาร์ท dev server
+ * cache ผูกกับ mtime ของไฟล์ - แก้ .md แล้วเห็นผลทันที ไม่ต้องรีสตาร์ท dev server
  */
 export async function loadSkill(id: string): Promise<LoadedSkill> {
   const safe = id.replace(/[^a-z0-9_-]/gi, '');

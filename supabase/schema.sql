@@ -89,9 +89,12 @@ alter table public.office_member enable row level security;
 alter table public.employee      enable row level security;
 
 -- office ------------------------------------------------------
+-- ต้องมี owner_id = auth.uid() ด้วย ไม่ใช่แค่ is_office_member()
+-- เพราะตอน INSERT ... RETURNING ระบบจะเอา policy ของ SELECT มาตรวจแถวที่เพิ่งสร้าง
+-- ถ้าพึ่งแต่ trigger ที่เพิ่มสมาชิก จังหวะจะเสี่ยงเกินไป — สร้างออฟฟิศแล้วอ่านผลไม่ได้
 drop policy if exists office_select on public.office;
 create policy office_select on public.office
-  for select using (public.is_office_member(id));
+  for select using (owner_id = auth.uid() or public.is_office_member(id));
 
 drop policy if exists office_insert on public.office;
 create policy office_insert on public.office

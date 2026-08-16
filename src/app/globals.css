@@ -1,91 +1,155 @@
-:root {
-  --bg: #141a24;
-  --bg2: #1c2534;
-  --bg3: #232e40;
-  --line: #2e3a4d;
-  --ink: #e8eef7;
-  --dim: #93a3ba;
-  --acc: #7cd06a;
-  --acc2: #ffd166;
+@import "tailwindcss";
+
+/* ============================================================
+   ธีมนี้ไม่ได้ตั้งขึ้นลอย ๆ ทุกสีคัดมาจาก tile จริงใน src/game/art.ts
+   เพื่อให้ UI รอบ ๆ เป็นวัสดุชุดเดียวกับโลกในเกม ไม่ใช่แดชบอร์ดคนละใบ
+   ที่บังเอิญวางข้างกัน
+   ============================================================ */
+@theme {
+  /* ผนังกระดาษ (paintWall) ใช้เป็นสีตัวหนังสือหลัก */
+  --color-parchment: #f0e4c8;
+  --color-parchment-2: #e4d4b4;
+  --color-wall-top: #c8b088;
+  --color-wall-mid: #a88c64;
+  --color-wall-dark: #8c6e4c;
+  --color-wall-deep: #6b5236;
+
+  /* ไม้ (drawDesk) ใช้เป็นหัวแผงและกรอบ */
+  --color-wood-lite: #c48b4e;
+  --color-wood: #a9703a;
+  --color-wood-mid: #8a5a2a;
+  --color-wood-dark: #6b4520;
+  --color-wood-deep: #4e3116;
+
+  /* พรมเขียว (paintCarpet) ใช้เป็นปุ่มหลัก */
+  --color-carpet-lite: #68b46c;
+  --color-carpet: #4c9c54;
+  --color-carpet-dark: #3e8848;
+
+  /* พรมแดงห้องประชุม ใช้เป็นปุ่มอันตราย */
+  --color-rug-lite: #d88c70;
+  --color-rug: #c07058;
+  --color-rug-dark: #a85c48;
+
+  /* ทองจากดอกไม้/ป้าย ใช้เป็นสีเตือนและหัวข้อ */
+  --color-brass: #e0a13f;
+  --color-brass-lite: #f0c674;
+
+  /* พื้นหลัง เป็นน้ำตาลเข้มอมดำ เหมือนออฟฟิศไม้ตอนปิดไฟ
+     ไม่ใช้ slate เทา เพราะนั่นคือหน้าตา default ที่เจอทุกที่ */
+  --color-ink-900: #17140f;
+  --color-ink-800: #201b14;
+  --color-ink-700: #2b241a;
+  --color-ink-600: #3a3024;
+  --color-ink-500: #4e4132;
+  --color-ink-400: #6b5a45;
+
+  --color-dim: #b5a488;
+
+  --radius-box: 3px;
+
+  --font-sans: "Segoe UI", system-ui, -apple-system, "Leelawadee UI",
+    "Noto Sans Thai", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
 }
 
-* { box-sizing: border-box; }
-
-html, body {
-  margin: 0;
-  padding: 0;
-  height: 100%;
-  background: var(--bg);
-  color: var(--ink);
-  font-family: "Segoe UI", system-ui, -apple-system, "Noto Sans Thai", sans-serif;
-  font-size: 14px;
+/* ============================================================
+   กรอบแบบกล่องข้อความ GBA
+   ขอบหนา มุมเหลี่ยม ไฮไลต์บนหนึ่งเส้น เงาล่างหนึ่งเส้น
+   ไม่มี gradient ไม่มีเงาฟุ้ง เหมือน sprite ที่วาดทีละพิกเซล
+   ============================================================ */
+@utility bevel {
+  box-shadow:
+    inset 0 1px 0 0 --alpha(var(--color-parchment) / 12%),
+    inset 0 -1px 0 0 --alpha(#000 / 45%);
 }
 
-code {
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-  font-size: .92em;
-  background: #0f141d;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  padding: 0 4px;
+/* ปุ่มกดได้จริง มีความหนา พอกดแล้วยุบลงไป 2px
+   ต้องเขียน inset ซ้ำในนี้ด้วย ห้ามใส่คู่กับ bevel
+   เพราะ box-shadow เขียนทับกันทั้งก้อน ไม่ได้ผสมกัน */
+@utility press {
+  box-shadow:
+    inset 0 1px 0 0 --alpha(var(--color-parchment) / 12%),
+    inset 0 -1px 0 0 --alpha(#000 / 45%),
+    0 2px 0 0 --alpha(#000 / 55%);
+  transition: none;
+
+  &:active:not(:disabled) {
+    transform: translateY(2px);
+    box-shadow:
+      inset 0 1px 0 0 --alpha(var(--color-parchment) / 12%),
+      inset 0 -1px 0 0 --alpha(#000 / 45%);
+  }
 }
 
-button {
-  font: inherit;
-  font-size: 12px;
-  padding: 6px 10px;
-  cursor: pointer;
-  color: var(--ink);
-  background: #2a3648;
-  border: 2px solid #3d4d67;
-  border-radius: 4px;
+@layer base {
+  * {
+    box-sizing: border-box;
+    border-color: var(--color-ink-500);
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: var(--color-ink-900);
+    color: var(--color-parchment);
+    font-family: var(--font-sans);
+  }
+
+  /* root ต้องเป็น 16px ไม่งั้น spacing ของ Tailwind (ซึ่งคิดเป็น rem)
+     จะหดลงตามไปหมด p-2.5 ที่ควรได้ 10px จะเหลือ 8.75px
+     ตัวหนังสือของแอปตั้งที่ body แยกต่างหาก */
+  html {
+    font-size: 16px;
+  }
+  body {
+    font-size: 14px;
+  }
+
+  /* หัวข้อทุกระดับเป็นตัวพิมพ์ใหญ่ระยะห่างกว้าง เลียนป้ายในเกม */
+  h1,
+  h2,
+  h3 {
+    margin: 0;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+  }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background: var(--color-ink-900);
+    border: 1px solid var(--color-ink-600);
+    border-radius: 2px;
+    padding: 0 4px;
+    color: var(--color-wall-top);
+  }
+
+  /* โฟกัสต้องเห็นชัด เพราะทั้งแอปเดินด้วยคีย์บอร์ดได้ */
+  :focus-visible {
+    outline: 2px solid var(--color-brass);
+    outline-offset: 1px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-ink-900);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-ink-600);
+    border: 2px solid var(--color-ink-900);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-ink-500);
+  }
 }
-button:hover:not(:disabled) { background: #35455c; border-color: #55688a; }
-button:disabled { opacity: .42; cursor: not-allowed; }
-button.on { background: #2f5a35; border-color: var(--acc); color: #dcffd6; }
-button.ghost { background: transparent; }
 
-select, textarea {
-  font: inherit;
-  color: var(--ink);
-  background: #0f141d;
-  border: 2px solid var(--line);
-  border-radius: 4px;
-  padding: 6px 8px;
-}
-textarea { resize: vertical; width: 100%; }
-select:focus, textarea:focus { outline: none; border-color: #55688a; }
-
-.muted { color: var(--dim); }
-
-/* ---------- layout ---------- */
-.app { display: flex; flex-direction: column; height: 100vh; padding: 10px; gap: 10px; }
-
-.topbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.topbar h1 { font-size: 16px; margin: 0; letter-spacing: .5px; }
-.topbar h1 small { color: var(--dim); font-weight: 400; font-size: 12px; margin-left: 8px; }
-.tools { display: flex; gap: 6px; margin-left: auto; }
-
-.layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 400px;
-  gap: 10px;
-  flex: 1;
-  min-height: 0;
-}
-@media (max-width: 1080px) {
-  .layout { grid-template-columns: 1fr; }
-  .app { height: auto; }
-}
-
-.stage {
-  background: #0d1119;
-  border: 3px solid var(--line);
-  border-radius: 5px;
-  padding: 6px;
-  align-self: start;
-  min-width: 0;
-}
+/* canvas ต้องคมเป็นพิกเซล ห้ามให้เบราว์เซอร์เกลี่ยสี */
 canvas.screen {
   display: block;
   image-rendering: pixelated;
@@ -93,171 +157,17 @@ canvas.screen {
   cursor: grab;
   touch-action: none;
 }
-canvas.grabbing { cursor: grabbing; }
-
-.statusbar {
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  padding: 7px 4px 2px;
-  font-size: 12px;
-  color: var(--dim);
-  flex-wrap: wrap;
-}
-.statusbar b { color: var(--ink); }
-.statusbar .phase { color: var(--acc2); margin-left: auto; }
-
-.side { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
-
-/* ---------- panels ---------- */
-.panel {
-  background: var(--bg2);
-  border: 3px solid var(--line);
-  border-radius: 5px;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.panel-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.panel-head h2 { font-size: 13px; margin: 0; color: var(--acc2); letter-spacing: .5px; }
-.panel-head .muted, .panel-head select { margin-left: auto; font-size: 12px; }
-.hint { font-size: 11px; color: var(--dim); line-height: 1.6; margin: 0 0 8px; }
-
-/* ---------- hire ---------- */
-.dept-list { display: flex; flex-direction: column; gap: 7px; max-height: 320px; overflow: auto; }
-.dept {
-  background: var(--bg3);
-  border-left: 4px solid #555;
-  border-radius: 4px;
-  padding: 7px 9px;
-}
-.dept-top { display: flex; align-items: center; gap: 8px; }
-.dept-name { font-weight: 600; font-size: 13px; }
-.count {
-  margin-left: auto;
-  min-width: 20px;
-  text-align: center;
-  border-radius: 10px;
-  padding: 1px 7px;
-  font-size: 11px;
-  font-weight: 700;
-  color: #0d1119;
-}
-.dept-skill { font-size: 11px; color: var(--dim); margin: 3px 0 6px; }
-.dept-actions { display: flex; gap: 5px; }
-.dept-actions button { padding: 4px 8px; font-size: 11px; }
-
-.team { list-style: none; margin: 7px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
-.member {
-  display: flex; align-items: center; gap: 5px;
-  background: #182031; border: 1px solid var(--line);
-  padding: 3px 7px; font-size: 11px;
-}
-.member em { color: var(--dim); font-style: normal; }
-.sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
-
-/* ---------- chat ---------- */
-.chat { flex: 1; min-height: 320px; }
-.log { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 9px; padding-right: 4px; }
-
-.msg { border-radius: 5px; padding: 8px 10px; font-size: 13px; line-height: 1.65; }
-.msg.user { background: #26405e; align-self: flex-end; max-width: 88%; }
-.msg.agent { background: var(--bg3); border: 1px solid var(--line); }
-.msg.system { background: transparent; border: 1px dashed var(--line); color: var(--dim); font-size: 12px; }
-.msg .who { font-size: 11px; font-weight: 700; margin-bottom: 4px; }
-.msg .body p { margin: 0 0 4px; }
-.msg .body .sp { height: 6px; }
-.msg .body .li { display: flex; gap: 6px; margin-bottom: 2px; }
-.msg .body .li .dot { color: var(--acc); }
-
-.typing { color: var(--acc2); }
-.typing::after { content: '▍'; animation: blink 1s steps(2) infinite; }
-@keyframes blink { 50% { opacity: 0; } }
-
-.transcript { margin-top: 7px; border-top: 1px solid var(--line); padding-top: 6px; }
-.toggle { background: none; border: none; padding: 0; color: var(--dim); font-size: 11px; }
-.toggle:hover { color: var(--ink); background: none; }
-.obj { margin-left: 7px; font-size: 10px; }
-.obj.ok { color: #e0a13f; }
-.obj.none { color: #7d8794; }
-.op .role {
-  font-weight: 400;
-  background: #26304a;
-  border-radius: 8px;
-  padding: 0 6px;
-  margin-left: 4px;
-  color: #a8b6cc;
-}
-.warn {
-  margin-top: 6px;
-  font-size: 11px;
-  color: #e0a13f;
-  background: #2e2718;
-  border-radius: 3px;
-  padding: 4px 7px;
-}
-.rounds { margin-top: 6px; font-size: 12px; }
-.rounds h4 { margin: 8px 0 4px; font-size: 11px; color: var(--acc2); font-weight: 600; }
-.op { background: #182031; border-radius: 4px; padding: 6px 8px; margin-bottom: 5px; }
-.op b { font-size: 11px; color: var(--dim); }
-.op p { margin: 2px 0; }
-
-.prompt {
-  margin: 0;
-  padding: 8px 10px;
-  background: #0f141d;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 340px;
-  overflow: auto;
-  color: #bccbdd;
+canvas.grabbing {
+  cursor: grabbing;
 }
 
-.composer { display: flex; gap: 6px; align-items: flex-end; margin-top: 8px; }
-.composer textarea { flex: 1; }
-.composer button { padding: 9px 16px; background: #2f5a35; border-color: var(--acc); }
-.composer button:disabled { background: #2a3648; border-color: #3d4d67; }
-
-/* ---------- modal ใส่คีย์ ---------- */
-.modal-bg {
-  position: fixed; inset: 0; z-index: 50;
-  background: rgba(8, 11, 17, .72);
-  display: flex; align-items: center; justify-content: center; padding: 16px;
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
 }
-.modal {
-  width: min(460px, 100%);
-  background: var(--bg2);
-  border: 3px solid var(--line);
-  border-radius: 6px;
-  padding: 14px;
-  max-height: 90vh; overflow: auto;
+.caret::after {
+  content: "|";
+  animation: caret 1s steps(2) infinite;
+  margin-left: 1px;
 }
-.modal .panel-head button { margin-left: auto; }
-.field { display: block; margin-bottom: 12px; }
-.field > span { display: block; font-size: 12px; color: var(--dim); margin-bottom: 4px; }
-.field input, .field select { width: 100%; }
-.field input {
-  font: inherit; font-size: 13px;
-  color: var(--ink); background: #0f141d;
-  border: 2px solid var(--line); border-radius: 4px; padding: 7px 9px;
-}
-.field input:focus { outline: none; border-color: #55688a; }
-.field small { display: block; font-size: 11px; color: var(--dim); margin-top: 4px; line-height: 1.5; }
-.field small.bad { color: var(--acc2); }
-.field small.good { color: var(--acc); }
-.field .check { margin-top: 6px; width: 100%; font-size: 11px; }
-.key-row { display: flex; gap: 6px; }
-.key-row input { flex: 1; }
-.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
-.modal-actions .primary { background: #2f5a35; border-color: var(--acc); padding: 8px 18px; }
-
-::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-track { background: #0f141d; }
-::-webkit-scrollbar-thumb { background: #33425a; border-radius: 5px; }
-::-webkit-scrollbar-thumb:hover { background: #445a78; }

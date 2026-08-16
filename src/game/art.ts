@@ -1,7 +1,7 @@
 /* ============================================================
-   Pixel art ทั้งหมดวาดด้วยโค้ด — โทน Game Boy Advance (Gen 3)
+   Pixel art ทั้งหมดวาดด้วยโค้ด - โทน Game Boy Advance (Gen 3)
    ใช้ dithering แทน gradient, outline เป็นสีเข้มของวัสดุนั้น ๆ
-   ทุก canvas สร้างแบบ lazy (ห้ามสร้างตอน import — จะพังตอน SSR)
+   ทุก canvas สร้างแบบ lazy (ห้ามสร้างตอน import - จะพังตอน SSR)
    ============================================================ */
 import { GROUND, MH, MW, type MapObject } from './map';
 
@@ -176,7 +176,7 @@ function drawDesk(v: number): Sprite {
   P(g, 1, 17, 2, 4, '#6b4520'); P(g, 13, 17, 2, 4, '#6b4520');
   return { c: o.c, oy: 6 };
 }
-/** โต๊ะผู้บริหาร (โต๊ะของผู้ใช้) — ใหญ่กว่า มีป้ายชื่อ */
+/** โต๊ะผู้บริหาร (โต๊ะของผู้ใช้) - ใหญ่กว่า มีป้ายชื่อ */
 function drawBossDesk(v: number): Sprite {
   const o = mk(16, 22), g = o.g;
   P(g, 0, 8, 16, 9, '#6b4520'); P(g, 0, 9, 16, 7, '#8f5f34'); P(g, 0, 9, 16, 1, '#b07c48');
@@ -274,7 +274,7 @@ function drawCoffeeTable(): Sprite {
   P(g, 2, 10, 2, 6, '#6b4520'); P(g, 12, 10, 2, 6, '#6b4520');
   return { c: o.c, oy: 2 };
 }
-/** เคาน์เตอร์แพนทรี่ — เครื่องชงกาแฟ + จาน */
+/** เคาน์เตอร์แพนทรี่ - เครื่องชงกาแฟ + จาน */
 function drawCounter(): Sprite {
   const o = mk(16, 24), g = o.g;
   P(g, 0, 8, 16, 14, '#8c6e4c'); P(g, 0, 9, 16, 11, '#c9ab7e'); P(g, 0, 9, 16, 1, '#e2c79c');

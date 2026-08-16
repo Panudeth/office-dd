@@ -15,7 +15,7 @@ export interface Creds {
   provider: Provider;
   apiKey: string;
   model?: string;
-  /** คีย์มาจากไหน — เอาไว้โชว์ใน UI ว่าใช้คีย์ของใครอยู่ */
+  /** คีย์มาจากไหน - เอาไว้โชว์ใน UI ว่าใช้คีย์ของใครอยู่ */
   source: 'byok' | 'env';
 }
 
@@ -24,13 +24,13 @@ export const PROVIDERS: { id: Provider; label: string; defaultModel: string; key
     id: 'anthropic',
     label: 'Claude (Anthropic)',
     defaultModel: DEFAULT_CLAUDE_MODEL,
-    keyHint: 'ขึ้นต้นด้วย sk-ant- · เอาจาก Anthropic Console → API keys (ต้องมีเครดิตในบัญชี)',
+    keyHint: 'ขึ้นต้นด้วย sk-ant- / เอาจาก Anthropic Console -> API keys (ต้องมีเครดิตในบัญชี)',
   },
   {
     id: 'gemini',
     label: 'Gemini (Google)',
     defaultModel: GEMINI_MODEL,
-    keyHint: 'ขึ้นต้นด้วย AIza- · เอาจาก Google AI Studio → Get API key (มี free tier)',
+    keyHint: 'ขึ้นต้นด้วย AIza- / เอาจาก Google AI Studio -> Get API key (มี free tier)',
   },
 ];
 
@@ -68,7 +68,7 @@ export function resolveCreds(byok: {
   if (envProvider === 'anthropic' && claudeKey) {
     return { provider: 'anthropic', apiKey: claudeKey, source: 'env' };
   }
-  // ไม่ได้ระบุ LLM_PROVIDER — ใช้อันที่มีคีย์
+  // ไม่ได้ระบุ LLM_PROVIDER - ใช้อันที่มีคีย์
   if (claudeKey) return { provider: 'anthropic', apiKey: claudeKey, source: 'env' };
   if (hasGeminiKey()) return { provider: 'gemini', apiKey: geminiEnvKey(), source: 'env' };
   return null;

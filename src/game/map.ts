@@ -47,16 +47,16 @@ export const MEET_SEATS: { x: number; y: number; dir: 'up' | 'down' }[] = [
   { x: 18, y: 5, dir: 'up' }, { x: 19, y: 5, dir: 'up' }, { x: 20, y: 5, dir: 'up' },
 ];
 
-/** ห้องผู้บริหาร (มุมล่างซ้าย) — บอสนั่งทำงานที่นี่ตอนไม่มีประชุม */
+/** ห้องผู้บริหาร (มุมล่างซ้าย) - บอสนั่งทำงานที่นี่ตอนไม่มีประชุม */
 export const BOSS_HOME = { x: 2, y: 13, dir: 'down' as const };
 export const BOSS_ROOM_RECT = { x: 0, y: 12 * TS, w: 6 * TS, h: 4 * TS };
 
 /** โต๊ะของผู้ใช้ (ผู้บริหาร) + จุดที่พนักงานมายืนรายงาน */
 export const BOSS_DESK: Tile[] = [{ x: 2, y: 14 }, { x: 3, y: 14 }];
-/** (11,6) มีกระถางต้นไม้อยู่ — ห้ามใช้เป็นจุดยืนรายงาน */
+/** (11,6) มีกระถางต้นไม้อยู่ - ห้ามใช้เป็นจุดยืนรายงาน */
 export const REPORT_SPOTS: Tile[] = [{ x: 13, y: 6 }, { x: 12, y: 6 }, { x: 14, y: 6 }];
 
-/** ที่นั่งหัวโต๊ะของผู้บริหาร — บอสเดินมานั่งตรงนี้เฉพาะตอนมีประชุม */
+/** ที่นั่งหัวโต๊ะของผู้บริหาร - บอสเดินมานั่งตรงนี้เฉพาะตอนมีประชุม */
 export const BOSS_SEAT = { x: 17, y: 4, dir: 'right' as const };
 
 /** กรอบสำหรับกล้องอัตโนมัติ (หน่วย base px) */
@@ -152,7 +152,7 @@ export function tileFree(x: number, y: number): boolean {
   return x >= 0 && y >= 0 && x < MW && y < MH && WALKABLE[y][x];
 }
 
-/** BFS 4 ทิศ — คืน path (ไม่รวมช่องเริ่มต้น) หรือ null ถ้าไปไม่ถึง */
+/** BFS 4 ทิศ - คืน path (ไม่รวมช่องเริ่มต้น) หรือ null ถ้าไปไม่ถึง */
 export function findPath(sx: number, sy: number, gx: number, gy: number): Tile[] | null {
   if (!tileFree(gx, gy)) return null;
   const start = sy * MW + sx;

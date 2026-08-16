@@ -1,6 +1,14 @@
 'use client';
 
+import { Eye, EyeOff, KeyRound, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog';
+import { Field, Input } from '@/components/ui/input';
+import { Hint } from '@/components/ui/panel';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 
 export interface LlmSettings {
   provider: 'anthropic' | 'gemini';
@@ -15,15 +23,15 @@ const META = {
     label: 'Claude (Anthropic)',
     defaultModel: 'claude-opus-5',
     prefix: 'sk-ant-',
-    where: 'Anthropic Console → API keys',
-    note: 'ต้องมีเครดิตในบัญชี — subscription Max/Pro ใช้กับ API ไม่ได้',
+    where: 'Anthropic Console หน้า API keys',
+    note: 'ต้องมีเครดิตในบัญชี subscription Max/Pro ใช้กับ API ไม่ได้',
   },
   gemini: {
     label: 'Gemini (Google)',
     defaultModel: 'gemini-3.7-flash',
     prefix: 'AIza',
-    where: 'Google AI Studio → Get API key',
-    note: 'มี free tier แต่จำกัดจำนวนเรียกต่อนาที/ต่อวัน',
+    where: 'Google AI Studio หน้า Get API key',
+    note: 'มี free tier แต่จำกัดจำนวนเรียกต่อนาทีและต่อวัน',
   },
 } as const;
 
@@ -40,7 +48,7 @@ export function loadSettings(): LlmSettings | null {
   }
 }
 
-/** header ที่แนบไปกับ /api/ask — ส่งทาง header ไม่ใช่ body จะได้ไม่ติดไปกับ log */
+/** header ที่แนบไปกับ /api/ask ส่งทาง header ไม่ใช่ body จะได้ไม่ติดไปกับ log */
 export function authHeaders(s: LlmSettings | null): Record<string, string> {
   if (!s?.apiKey) return {};
   return {
@@ -76,8 +84,11 @@ export default function KeyPanel({ open, settings, onClose, onSave }: Props) {
     setCheckMsg(null);
   }, [open, settings]);
 
-  // เปลี่ยนเจ้า/เปลี่ยนคีย์ = รายชื่อเดิมใช้ไม่ได้แล้ว
-  useEffect(() => { setModels(null); setCheckMsg(null); }, [provider, apiKey]);
+  // เปลี่ยนเจ้าหรือเปลี่ยนคีย์ แปลว่ารายชื่อเดิมใช้ไม่ได้แล้ว
+  useEffect(() => {
+    setModels(null);
+    setCheckMsg(null);
+  }, [provider, apiKey]);
 
   const fetchModels = async () => {
     const k = apiKey.trim();
@@ -95,8 +106,8 @@ export default function KeyPanel({ open, settings, onClose, onSave }: Props) {
       };
       if (!res.ok || !data.models) throw new Error(data.error ?? `HTTP ${res.status}`);
       setModels(data.models);
-      setCheckMsg({ ok: true, text: `คีย์ใช้ได้ · เรียกได้ ${data.models.length} โมเดล` });
-      // โมเดลที่เลือกไว้ไม่มีในรายชื่อ = สาเหตุของ 400 ที่เคยเจอ
+      setCheckMsg({ ok: true, text: `คีย์ใช้ได้ เรียกได้ ${data.models.length} โมเดล` });
+      // โมเดลที่เลือกไว้ไม่มีในรายชื่อ คือสาเหตุของ 400 ที่เคยเจอ
       if (model && !data.models.some((m) => m.id === model)) setModel('');
     } catch (err) {
       setModels(null);
@@ -106,106 +117,151 @@ export default function KeyPanel({ open, settings, onClose, onSave }: Props) {
     }
   };
 
-  if (!open) return null;
   const meta = META[provider];
   const looksWrong = apiKey.trim().length > 0 && !apiKey.trim().startsWith(meta.prefix);
 
   const save = () => {
     const k = apiKey.trim();
-    if (!k) { onSave(null); onClose(); return; }
+    if (!k) {
+      onSave(null);
+      onClose();
+      return;
+    }
     const next: LlmSettings = { provider, apiKey: k, model: model.trim() };
-    try { window.localStorage.setItem(STORE_KEY, JSON.stringify(next)); } catch { /* โหมดส่วนตัวอาจเขียนไม่ได้ */ }
+    try {
+      window.localStorage.setItem(STORE_KEY, JSON.stringify(next));
+    } catch {
+      /* โหมดส่วนตัวอาจเขียนไม่ได้ */
+    }
     onSave(next);
     onClose();
   };
 
   const clear = () => {
-    try { window.localStorage.removeItem(STORE_KEY); } catch { /* ไม่เป็นไร */ }
+    try {
+      window.localStorage.removeItem(STORE_KEY);
+    } catch {
+      /* ไม่เป็นไร */
+    }
     onSave(null);
     onClose();
   };
 
   return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <header className="panel-head">
-          <h2>🔑 คีย์ของคุณเอง</h2>
-          <button className="ghost" onClick={onClose}>✕</button>
-        </header>
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent
+        icon={<KeyRound />}
+        title="คีย์ของคุณเอง"
+        description="ตั้งค่าผู้ให้บริการ API key และโมเดลที่จะใช้"
+      >
+        <Field label="ผู้ให้บริการ">
+          <Select value={provider} onValueChange={(v) => setProvider(v as 'anthropic' | 'gemini')}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="anthropic">{META.anthropic.label}</SelectItem>
+              <SelectItem value="gemini">{META.gemini.label}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
 
-        <label className="field">
-          <span>ผู้ให้บริการ</span>
-          <select value={provider} onChange={(e) => setProvider(e.target.value as 'anthropic' | 'gemini')}>
-            <option value="anthropic">{META.anthropic.label}</option>
-            <option value="gemini">{META.gemini.label}</option>
-          </select>
-        </label>
-
-        <label className="field">
-          <span>API key</span>
-          <div className="key-row">
-            <input
+        <Field
+          label="API key"
+          hint={
+            <>
+              เอาจาก {meta.where} {meta.note}
+              {looksWrong && (
+                <b className="mt-1 block text-brass">
+                  คีย์ของ{meta.label}มักขึ้นต้นด้วย {meta.prefix} เลือกผู้ให้บริการถูกอันแล้วใช่ไหม
+                </b>
+              )}
+            </>
+          }
+        >
+          <div className="flex gap-1.5">
+            <Input
               type={reveal ? 'text' : 'password'}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder={`${meta.prefix}…`}
+              placeholder={`${meta.prefix}...`}
               autoComplete="off"
               spellCheck={false}
             />
-            <button type="button" className="ghost" onClick={() => setReveal((v) => !v)}>
-              {reveal ? '🙈' : '👁'}
-            </button>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-9 shrink-0"
+              onClick={() => setReveal((v) => !v)}
+              title={reveal ? 'ซ่อนคีย์' : 'แสดงคีย์'}
+            >
+              {reveal ? <EyeOff /> : <Eye />}
+            </Button>
           </div>
-          <small>เอาจาก {meta.where} · {meta.note}</small>
-          {looksWrong && <small className="bad">คีย์ของ{meta.label}มักขึ้นต้นด้วย {meta.prefix} — เลือกผู้ให้บริการถูกอันแล้วใช่ไหม</small>}
-        </label>
+        </Field>
 
-        <div className="field">
-          <span>โมเดล</span>
+        <Field
+          label="โมเดล"
+          hint={
+            checkMsg ? (
+              <b className={checkMsg.ok ? 'text-carpet-lite' : 'text-brass'}>{checkMsg.text}</b>
+            ) : !models ? (
+              'กดปุ่มด้านบนเพื่อดูว่าคีย์นี้เรียกโมเดลไหนได้บ้าง จะได้ไม่ต้องเดาชื่อ'
+            ) : null
+          }
+        >
           {models ? (
-            <select value={model} onChange={(e) => setModel(e.target.value)}>
-              <option value="">ใช้ค่าดีฟอลต์ ({meta.defaultModel})</option>
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>{m.label}</option>
-              ))}
-            </select>
+            <Select value={model || 'default'} onValueChange={(v) => setModel(v === 'default' ? '' : v)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">ใช้ค่าดีฟอลต์ ({meta.defaultModel})</SelectItem>
+                {models.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           ) : (
-            <input
+            <Input
               value={model}
               onChange={(e) => setModel(e.target.value)}
               placeholder={`${meta.defaultModel} (ไม่ใส่ก็ได้)`}
               spellCheck={false}
             />
           )}
-          <button
+          <Button
             type="button"
-            className="ghost check"
+            variant="outline"
+            size="sm"
+            className="mt-1 w-full"
             onClick={fetchModels}
             disabled={loading || !apiKey.trim()}
           >
-            {loading ? 'กำลังตรวจ…' : models ? '↻ โหลดรายชื่อใหม่' : '✓ ตรวจคีย์ + โหลดรายชื่อโมเดล'}
-          </button>
-          {checkMsg && (
-            <small className={checkMsg.ok ? 'good' : 'bad'}>
-              {checkMsg.ok ? '✓ ' : '⚠️ '}{checkMsg.text}
-            </small>
-          )}
-          {!models && !checkMsg && (
-            <small>กดปุ่มด้านบนเพื่อดูว่าคีย์นี้เรียกโมเดลไหนได้บ้าง จะได้ไม่ต้องเดาชื่อ</small>
-          )}
-        </div>
+            {models ? <RefreshCw /> : <ShieldCheck />}
+            {loading ? 'กำลังตรวจ' : models ? 'โหลดรายชื่อใหม่' : 'ตรวจคีย์ และโหลดรายชื่อโมเดล'}
+          </Button>
+        </Field>
 
-        <p className="hint">
+        <Hint>
           คีย์เก็บไว้ใน <code>localStorage</code> ของเบราว์เซอร์คุณเท่านั้น ส่งไปที่เซิร์ฟเวอร์ของแอปนี้
-          เฉพาะตอนถามคำถาม แล้วใช้ยิงต่อไปที่ผู้ให้บริการ — ไม่ถูกบันทึกลงดิสก์และไม่ถูก log<br />
-          ถ้าเครื่องนี้มีคนอื่นใช้ด้วย หรือจะเอาแอปนี้ไป deploy บนเน็ต ให้กด &ldquo;ลบคีย์&rdquo; เมื่อเลิกใช้
-        </p>
+          เฉพาะตอนถามคำถาม แล้วใช้ยิงต่อไปที่ผู้ให้บริการ ไม่ถูกบันทึกลงดิสก์และไม่ถูก log
+          <br />
+          ถ้าเครื่องนี้มีคนอื่นใช้ด้วย หรือจะเอาแอปนี้ไป deploy บนเน็ต ให้กดลบคีย์เมื่อเลิกใช้
+        </Hint>
 
-        <div className="modal-actions">
-          <button className="ghost" onClick={clear} disabled={!settings}>ลบคีย์</button>
-          <button className="primary" onClick={save}>บันทึก</button>
-        </div>
-      </div>
-    </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={clear} disabled={!settings}>
+            <Trash2 /> ลบคีย์
+          </Button>
+          <Button variant="primary" onClick={save}>
+            บันทึก
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

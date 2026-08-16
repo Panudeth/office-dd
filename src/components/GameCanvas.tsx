@@ -12,7 +12,7 @@ export default function GameCanvas({ onReady }: { onReady: (w: World) => void })
     const world = new World(canvas);
     // resize อีกครั้งหลัง layout นิ่ง (parent อาจยังกว้างไม่ครบตอน mount)
     const t = window.setTimeout(() => world.resize(), 0);
-    // handle สำหรับดีบักในคอนโซล เช่น vcWorld.debugStep(10) — เฉพาะตอน dev
+    // handle สำหรับดีบักในคอนโซล เช่น vcWorld.debugStep(10) - เฉพาะตอน dev
     if (process.env.NODE_ENV !== 'production') {
       (window as unknown as { vcWorld?: World }).vcWorld = world;
     }

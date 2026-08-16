@@ -16,7 +16,7 @@ export interface AskRequest {
   agents: AskAgent[];
 }
 
-/** หลักฐานว่า agent ได้รับ skill ไปจริง — ส่งกลับมาให้ผู้ใช้ตรวจได้ */
+/** หลักฐานว่า agent ได้รับ skill ไปจริง - ส่งกลับมาให้ผู้ใช้ตรวจได้ */
 export interface SkillProof {
   file: string;
   bytes: number;
@@ -50,9 +50,9 @@ export interface ChatMessage {
   text: string;
   departmentId?: string;
   authorName?: string;
-  /** บันทึกการถกกันก่อนสรุป — กางดูได้ในหน้าแชท */
+  /** บันทึกการถกกันก่อนสรุป - กางดูได้ในหน้าแชท */
   transcript?: Opinion[];
-  /** หลักฐานว่า skill ถูกส่งไปจริง — กางดูได้ในหน้าแชท */
+  /** หลักฐานว่า skill ถูกส่งไปจริง - กางดูได้ในหน้าแชท */
   proof?: SkillProof;
   pending?: boolean;
 }

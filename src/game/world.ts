@@ -47,7 +47,7 @@ export class World {
   autoCam = true;
   private camTarget: { x: number; y: number; z: number } | null = null;
   private savedCam: { x: number; y: number; z: number } | null = null;
-  /** คิวคำพูด — พูดทีละคน ไม่ให้แย่งกัน */
+  /** คิวคำพูด - พูดทีละคน ไม่ให้แย่งกัน */
   private speechQueue: { id: string; text: string; sec: number; onStart?: () => void }[] = [];
   private speechGap = 0;
 
@@ -70,7 +70,7 @@ export class World {
     this.raf = requestAnimationFrame(this.frame);
   }
 
-  /** ผู้บริหาร (ตัวผู้ใช้) — ปกตินั่งทำงานในห้องตัวเอง เดินมาห้องประชุมเมื่อมีวาระ */
+  /** ผู้บริหาร (ตัวผู้ใช้) - ปกตินั่งทำงานในห้องตัวเอง เดินมาห้องประชุมเมื่อมีวาระ */
   private spawnBoss() {
     const pal = { skin: '#e8b088', hair: '#403848', shirt: '#3a4256', pants: '#2a3040', shoes: '#403848' };
     this.employees.push({
@@ -156,7 +156,7 @@ export class World {
     return this.spawn({
       id: crypto.randomUUID(), // ใช้เป็น primary key ใน DB ด้วย
       name,
-      title: `${ROLES[role].icon} ${ROLES[role].th}`,
+      title: ROLES[role].th,
       deptId: dept.id,
       role,
       palette: pal,
@@ -214,7 +214,7 @@ export class World {
 
   /**
    * รับตำแหน่งจากเครื่องอื่น (เฟส sync ตำแหน่ง)
-   * เฟสนี้ยังไม่มีใครเรียก — มีไว้ให้เฟสถัดไปเป็นแค่ "เอา channel มาป้อนตรงนี้"
+   * เฟสนี้ยังไม่มีใครเรียก - มีไว้ให้เฟสถัดไปเป็นแค่ "เอา channel มาป้อนตรงนี้"
    * ไม่ต้องรื้อ update loop
    */
   applyRemoteState(id: string, s: { px: number; py: number; dir: Dir; pose: Pose }) {
@@ -281,14 +281,14 @@ export class World {
   }
 
   /**
-   * ฟองคำพูดข้อความจริง — เข้าคิวไว้ แล้วพูดทีละคน
+   * ฟองคำพูดข้อความจริง - เข้าคิวไว้ แล้วพูดทีละคน
    * ถ้าปล่อยให้พูดพร้อมกันจะกลายเป็นแย่งกันพูด (คอล LLM 3 ตัวเสร็จไล่ ๆ กัน)
    * และฟองซ้อนกันจนดูไม่ออกว่าใครพูด
    */
   say(id: string, text: string, sec?: number, onStart?: () => void) {
     const t = text.trim();
     if (!t) return;
-    // ไม่ตัดคิวทิ้งแล้ว — ทุกคนต้องได้พูด ไม่งั้นเห็นแค่คนแรกคนเดียว
+    // ไม่ตัดคิวทิ้งแล้ว - ทุกคนต้องได้พูด ไม่งั้นเห็นแค่คนแรกคนเดียว
     // การประชุมจะยาวเท่าที่บทสนทนายาว (page.tsx รอ waitForSpeech() ก่อนสรุป)
     this.speechQueue.push({
       id, text: t, onStart,
@@ -320,7 +320,7 @@ export class World {
     const next = this.speechQueue[0];
     const e = this.employees.find((x) => x.id === next.id);
     if (!e) { this.speechQueue.shift(); return; }
-    // คนพูดยังเดินอยู่ — รอให้นั่งลงก่อน ไม่งั้นจะกลายเป็น "เดินไปพูดไป"
+    // คนพูดยังเดินอยู่ - รอให้นั่งลงก่อน ไม่งั้นจะกลายเป็น "เดินไปพูดไป"
     // ถือคิวไว้ทั้งแถวเพื่อรักษาลำดับการสนทนา
     if (e.path) return;
 
@@ -333,7 +333,7 @@ export class World {
     next.onStart?.(); // เช่น หันไปหาคนที่กำลังค้าน + ให้คนนั้นมีปฏิกิริยา
   }
 
-  /** รอจนคุยกันจบทั้งคิว — ใช้กันไม่ให้สรุปทับบทสนทนาที่ยังไม่จบ */
+  /** รอจนคุยกันจบทั้งคิว - ใช้กันไม่ให้สรุปทับบทสนทนาที่ยังไม่จบ */
   waitForSpeech(timeoutMs = 120_000): Promise<void> {
     if (!this.isSpeaking()) return Promise.resolve();
     return new Promise((resolve) => {
@@ -386,7 +386,7 @@ export class World {
      Choreography ที่ผูกกับงานจริง (chat -> ประชุม -> รายงาน)
      ============================================================ */
 
-  /** เรียกทีมเข้าห้องประชุม — บอสเดินมาจากห้องตัวเองด้วย resolve เมื่อทุกคนนั่งครบ */
+  /** เรียกทีมเข้าห้องประชุม - บอสเดินมาจากห้องตัวเองด้วย resolve เมื่อทุกคนนั่งครบ */
   async gather(ids: string[]): Promise<void> {
     const team = ids
       .map((id) => this.employees.find((e) => e.id === id))
@@ -418,7 +418,7 @@ export class World {
     await Promise.all(walkers);
   }
 
-  /** ระหว่างรอคำตอบจาก LLM — ให้คนในห้องประชุมสลับกันพูด */
+  /** ระหว่างรอคำตอบจาก LLM - ให้คนในห้องประชุมสลับกันพูด */
   setDeliberating(ids: string[]) {
     ids.forEach((id) => {
       const e = this.employees.find((x) => x.id === id);
@@ -426,7 +426,7 @@ export class World {
     });
   }
 
-  /** ให้คนหนึ่งเดินมารายงานที่โต๊ะผู้บริหาร — resolve เมื่อถึงที่ */
+  /** ให้คนหนึ่งเดินมารายงานที่โต๊ะผู้บริหาร - resolve เมื่อถึงที่ */
   async report(id: string): Promise<void> {
     const e = this.employees.find((x) => x.id === id);
     if (!e) return;
@@ -444,7 +444,7 @@ export class World {
     e.bubbleT = 4;
   }
 
-  /** เลิกประชุม — ทุกคนกลับโต๊ะตัวเอง */
+  /** เลิกประชุม - ทุกคนกลับโต๊ะตัวเอง */
   disperse(ids: string[]) {
     this.clearSay(); // เลิกประชุมแล้วห้ามมีฟองค้างไปพูดตอนเดิน
 
@@ -461,7 +461,7 @@ export class World {
       if (!e) return;
       e.path = null;
       e.after = null;
-      // goTo เรียก callback เสมอ ไม่ว่าจะเดินถึงหรือหาเส้นทางไม่เจอ — busy จึงถูกปลดแน่นอน
+      // goTo เรียก callback เสมอ ไม่ว่าจะเดินถึงหรือหาเส้นทางไม่เจอ - busy จึงถูกปลดแน่นอน
       this.goTo(e, e.seat.x, e.seat.y, () => {
         this.sitAt(e, e.seat.x, e.seat.y, 'down', 'work', 8 + Math.random() * 10);
         e.busy = false;
@@ -550,7 +550,7 @@ export class World {
     for (const e of this.employees) {
       if (e.bubbleT > 0) { e.bubbleT -= dt; if (e.bubbleT <= 0) e.bubble = null; }
 
-      // ตัวที่คนอื่นเป็นเจ้าของ — ไม่คิดเส้นทางเอง แค่ไล่ตามค่าที่ได้รับ
+      // ตัวที่คนอื่นเป็นเจ้าของ - ไม่คิดเส้นทางเอง แค่ไล่ตามค่าที่ได้รับ
       if (e.owner === 'remote') {
         if (e.remote) {
           const k = Math.min(1, dt * 12);
@@ -701,7 +701,7 @@ export class World {
       const pod = PODS[i];
       const cx = ((pod[0].x + pod[1].x) / 2 + 0.5) * TS * z + ox;
       const cy = (pod[0].y * TS - 4) * z + oy;
-      const label = `${d.emoji} ${d.shortTh}`;
+      const label = d.shortTh;
       const w = s.measureText(label).width + plateSize;
       s.fillStyle = 'rgba(10,14,20,.72)';
       s.fillRect(cx - w / 2, cy - plateSize, w, plateSize * 1.5);
@@ -731,7 +731,7 @@ export class World {
   }
 
   /**
-   * ฟองคำพูดข้อความจริง — วาดบนเลเยอร์จอ (ไม่ใช่ base canvas)
+   * ฟองคำพูดข้อความจริง - วาดบนเลเยอร์จอ (ไม่ใช่ base canvas)
    * เพราะข้อความไทยที่ 16px จะอ่านไม่ออก
    * ตัดบรรทัดทีละตัวอักษร เพราะภาษาไทยไม่มีช่องว่างระหว่างคำ
    */
@@ -757,7 +757,7 @@ export class World {
       const shown = e.sayFull.slice(0, Math.floor(e.sayChars));
       if (!shown) continue;
       // คนพูดอยู่นอกจอ (เช่นกล้องซูมอยู่ในห้องประชุม แต่คนที่โต๊ะพูด)
-      // ถ้าวาดฟองไว้ริมจอจะดูเหมือนฟองไปโผล่ผิดตัว — ข้ามไปเลย
+      // ถ้าวาดฟองไว้ริมจอจะดูเหมือนฟองไปโผล่ผิดตัว - ข้ามไปเลย
       const sx = e.px * z + ox;
       const sy = e.py * z + oy;
       if (sx < -20 || sx > this.canvas.width + 20 || sy < -20 || sy > this.canvas.height + 40) continue;
@@ -775,12 +775,12 @@ export class World {
       if (lines.length < maxLines && cur) lines.push(cur);
       if (!lines.length) continue;
       const clipped = lines.length >= maxLines && Math.floor(e.sayChars) < e.sayFull.length;
-      if (clipped) lines[lines.length - 1] = lines[lines.length - 1].slice(0, -1) + '…';
+      if (clipped) lines[lines.length - 1] = lines[lines.length - 1].slice(0, -1) + '...';
 
-      // แถบชื่อในฟอง — ตอนซ้อนกันหลายฟองจะได้รู้ว่าใครพูด
+      // แถบชื่อในฟอง - ตอนซ้อนกันหลายฟองจะได้รู้ว่าใครพูด
       const nameFs = Math.max(9, Math.round(fs * 0.82));
       const nameH = Math.round(nameFs * 1.35);
-      const label = `${e.name} · ${e.title.replace(/^\S+\s/, '')}`;
+      const label = `${e.name} / ${e.title.replace(/^\S+\s/, '')}`;
       s.font = `700 ${nameFs}px "Segoe UI","Noto Sans Thai",sans-serif`;
       const wName = s.measureText(label).width;
       s.font = `500 ${fs}px "Segoe UI","Noto Sans Thai",sans-serif`;
@@ -1003,7 +1003,7 @@ export class World {
 
   /**
    * เดินเวลาจำลองไปข้างหน้าทันทีโดยไม่ต้องรอ requestAnimationFrame
-   * ใช้ตอนดีบัก/เทสต์ (เช่นในเบราว์เซอร์ที่ throttle rAF) — ไม่ได้ถูกเรียกจาก UI
+   * ใช้ตอนดีบัก/เทสต์ (เช่นในเบราว์เซอร์ที่ throttle rAF) - ไม่ได้ถูกเรียกจาก UI
    */
   debugStep(seconds: number) {
     let left = seconds;

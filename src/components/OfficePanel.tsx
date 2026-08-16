@@ -1,10 +1,16 @@
 'use client';
 
+import { Building2, LogOut, Plug, Plus } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import {
   createOffice, healthCheck, listOffices, sb, sbError, supabaseConfigured,
   usingSecretKeyByMistake, type Office, type User,
 } from '@/lib/supabase';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog';
+import { Field, Input } from '@/components/ui/input';
+import { Hint } from '@/components/ui/panel';
 
 interface Props {
   open: boolean;
@@ -15,7 +21,9 @@ interface Props {
   onOffice: (o: Office | null) => void;
 }
 
-export default function OfficePanel({ open, onClose, user, office, onUser, onOffice }: Props) {
+export default function OfficePanel({
+  open, onClose, user, office, onUser, onOffice,
+}: Props) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState<'in' | 'up'>('in');
@@ -31,8 +39,6 @@ export default function OfficePanel({ open, onClose, user, office, onUser, onOff
       .catch((e) => setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) }));
   }, [open, user]);
 
-  if (!open) return null;
-
   const auth = async (e: FormEvent) => {
     e.preventDefault();
     const c = sb();
@@ -47,7 +53,7 @@ export default function OfficePanel({ open, onClose, user, office, onUser, onOff
         onUser(data.user);
         setMsg({ ok: true, text: mode === 'up' ? 'สมัครและเข้าสู่ระบบแล้ว' : 'เข้าสู่ระบบแล้ว' });
       } else {
-        setMsg({ ok: true, text: 'สมัครแล้ว — เช็คอีเมลเพื่อยืนยันก่อนเข้าสู่ระบบ' });
+        setMsg({ ok: true, text: 'สมัครแล้ว เช็คอีเมลเพื่อยืนยันก่อนเข้าสู่ระบบ' });
       }
     } catch (err) {
       setMsg({ ok: false, text: sbError(err) });
@@ -81,119 +87,169 @@ export default function OfficePanel({ open, onClose, user, office, onUser, onOff
   };
 
   return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <header className="panel-head">
-          <h2>🏢 ออฟฟิศของฉัน</h2>
-          <button className="ghost" onClick={onClose}>✕</button>
-        </header>
-
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent
+        icon={<Building2 />}
+        title="ออฟฟิศของฉัน"
+        description="เข้าสู่ระบบและเลือกออฟฟิศที่จะใช้"
+      >
         {usingSecretKeyByMistake ? (
-          <p className="hint" style={{ color: 'var(--acc2)' }}>
-            ⚠️ <b>คีย์ที่ใส่มาเป็น secret key</b> (<code>sb_secret_…</code>) — อันนี้ข้าม RLS ได้ทั้งหมด
+          <Hint className="text-brass">
+            คีย์ที่ใส่มาเป็น <b>secret key</b> (<code>sb_secret_...</code>) อันนี้ข้าม RLS ได้ทั้งหมด
             และห้ามให้เบราว์เซอร์เห็นเด็ดขาด
-            <br /><br />
-            เปลี่ยนเป็น <b>publishable key</b> (<code>sb_publishable_…</code>) จาก
-            Project Settings → API keys แล้วรีสตาร์ท dev server
-          </p>
+            <br />
+            <br />
+            เปลี่ยนเป็น <b>publishable key</b> (<code>sb_publishable_...</code>) จาก Project Settings
+            หน้า API keys แล้วรีสตาร์ท dev server
+          </Hint>
         ) : !supabaseConfigured ? (
-          <p className="hint">
-            ยังไม่ได้ตั้งค่า Supabase — ตอนนี้แอปทำงานแบบ <b>ในเครื่องอย่างเดียว</b>{' '}
-            (จ้างพนักงานแล้วรีเฟรชจะหาย)
-            <br /><br />
-            วิธีเปิดใช้:
-            <br />1. สร้างโปรเจกต์ที่ supabase.com
-            <br />2. เอา <code>supabase/schema.sql</code> ไปรันใน SQL Editor
-            <br />3. ใส่ <code>NEXT_PUBLIC_SUPABASE_URL</code> และ{' '}
+          <Hint>
+            ยังไม่ได้ตั้งค่า Supabase ตอนนี้แอปทำงานแบบ{' '}
+            <b className="text-parchment">ในเครื่องอย่างเดียว</b> จ้างพนักงานแล้วรีเฟรชจะหาย
+            <br />
+            <br />
+            วิธีเปิดใช้
+            <br />
+            1. สร้างโปรเจกต์ที่ supabase.com
+            <br />
+            2. เอา <code>supabase/schema.sql</code> ไปรันใน SQL Editor
+            <br />
+            3. ใส่ <code>NEXT_PUBLIC_SUPABASE_URL</code> และ{' '}
             <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code> ใน <code>.env.local</code>
-            <br />4. รีสตาร์ท dev server
-          </p>
+            <br />
+            4. รีสตาร์ท dev server
+          </Hint>
         ) : !user ? (
-          <form onSubmit={auth}>
-            <div className="field">
-              <button
-                type="button" className="ghost check" disabled={busy}
-                onClick={async () => {
-                  setBusy(true);
-                  setMsg(await healthCheck());
-                  setBusy(false);
-                }}
-              >
-                {busy ? 'กำลังตรวจ…' : '🔌 ตรวจการเชื่อมต่อ + ตาราง'}
-              </button>
-              <small>กดก่อนสมัครได้ จะได้รู้ว่ารัน schema.sql แล้วหรือยัง</small>
-            </div>
-            <label className="field">
-              <span>อีเมล</span>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
-            </label>
-            <label className="field">
-              <span>รหัสผ่าน</span>
-              <input
-                type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-                required minLength={6} autoComplete={mode === 'up' ? 'new-password' : 'current-password'}
+          <form onSubmit={auth} className="flex flex-col gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                setMsg(await healthCheck());
+                setBusy(false);
+              }}
+            >
+              <Plug />
+              {busy ? 'กำลังตรวจ' : 'ตรวจการเชื่อมต่อ และตาราง'}
+            </Button>
+            <Hint className="-mt-2">
+              กดก่อนสมัครได้ จะได้รู้ว่ารัน schema.sql แล้วหรือยัง
+            </Hint>
+
+            <Field label="อีเมล" hint="ต้องเป็นอีเมลจริง Supabase บล็อกโดเมนทดสอบอย่าง example.com">
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
               />
-            </label>
-            <div className="modal-actions">
-              <button type="button" className="ghost" onClick={() => setMode(mode === 'in' ? 'up' : 'in')}>
-                {mode === 'in' ? 'ยังไม่มีบัญชี? สมัคร' : 'มีบัญชีแล้ว? เข้าสู่ระบบ'}
-              </button>
-              <button type="submit" className="primary" disabled={busy}>
-                {busy ? '…' : mode === 'in' ? 'เข้าสู่ระบบ' : 'สมัคร'}
-              </button>
-            </div>
+            </Field>
+
+            <Field label="รหัสผ่าน">
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+                autoComplete={mode === 'up' ? 'new-password' : 'current-password'}
+              />
+            </Field>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setMode(mode === 'in' ? 'up' : 'in')}
+              >
+                {mode === 'in' ? 'ยังไม่มีบัญชี สมัคร' : 'มีบัญชีแล้ว เข้าสู่ระบบ'}
+              </Button>
+              <Button type="submit" variant="primary" disabled={busy}>
+                {mode === 'in' ? 'เข้าสู่ระบบ' : 'สมัคร'}
+              </Button>
+            </DialogFooter>
           </form>
         ) : (
           <>
-            <p className="hint">
-              เข้าสู่ระบบเป็น <b>{user.email}</b>
-              <button className="toggle" style={{ marginLeft: 8 }} onClick={signOut}>ออกจากระบบ</button>
-            </p>
+            <div className="flex items-center gap-2 rounded-box border border-ink-600 bg-ink-700 px-2 py-1.5">
+              <span className="truncate text-[12px] text-parchment">{user.email}</span>
+              <Button variant="ghost" size="sm" className="ml-auto shrink-0" onClick={signOut}>
+                <LogOut /> ออกจากระบบ
+              </Button>
+            </div>
 
-            <div className="field">
-              <span>เลือกออฟฟิศ</span>
+            <Field label="เลือกออฟฟิศ">
               {offices.length === 0 ? (
-                <small>ยังไม่มีออฟฟิศ — สร้างอันแรกด้านล่าง</small>
+                <Hint>ยังไม่มีออฟฟิศ สร้างอันแรกด้านล่าง</Hint>
               ) : (
-                <ul className="team" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                  {offices.map((o) => (
-                    <li key={o.id}>
-                      <button
-                        className="member"
-                        style={{ width: '100%', ...(office?.id === o.id ? { outline: '1px solid #ffd166' } : {}) }}
-                        onClick={() => { onOffice(o); onClose(); }}
-                      >
-                        <b>{o.name}</b>
-                        {o.owner_id === user.id && <em>เจ้าของ</em>}
-                        {office?.id === o.id && <em style={{ marginLeft: 'auto' }}>กำลังใช้</em>}
-                      </button>
-                    </li>
-                  ))}
+                <ul className="flex flex-col gap-1">
+                  {offices.map((o) => {
+                    const active = office?.id === o.id;
+                    return (
+                      <li key={o.id}>
+                        <button
+                          onClick={() => {
+                            onOffice(o);
+                            onClose();
+                          }}
+                          className={`flex w-full items-center gap-2 rounded-box border-2 px-2 py-1.5 text-left text-[12px] ${
+                            active
+                              ? 'border-brass bg-ink-700'
+                              : 'border-ink-600 bg-ink-800 hover:border-ink-500'
+                          }`}
+                        >
+                          <b className="font-semibold text-parchment">{o.name}</b>
+                          {o.owner_id === user.id && <Badge>เจ้าของ</Badge>}
+                          {active && (
+                            <Badge variant="brass" className="ml-auto">
+                              กำลังใช้
+                            </Badge>
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
-            </div>
+            </Field>
 
-            <div className="field">
-              <span>สร้างออฟฟิศใหม่</span>
-              <div className="key-row">
-                <input
-                  value={newName} onChange={(e) => setNewName(e.target.value)}
-                  placeholder="เช่น OneDD HQ" maxLength={80}
+            <Field label="สร้างออฟฟิศใหม่">
+              <div className="flex gap-1.5">
+                <Input
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="เช่น OneDD HQ"
+                  maxLength={80}
                 />
-                <button className="primary" onClick={create} disabled={busy || !newName.trim()}>
-                  สร้าง
-                </button>
+                <Button
+                  variant="primary"
+                  className="shrink-0"
+                  onClick={create}
+                  disabled={busy || !newName.trim()}
+                >
+                  <Plus /> สร้าง
+                </Button>
               </div>
-            </div>
+            </Field>
           </>
         )}
 
         {msg && (
-          <p className={`hint ${msg.ok ? '' : 'bad-msg'}`} style={{ color: msg.ok ? 'var(--acc)' : 'var(--acc2)' }}>
-            {msg.ok ? '✓ ' : '⚠️ '}{msg.text}
+          <p
+            className={`rounded-box border px-2 py-1.5 text-[11px] leading-relaxed ${
+              msg.ok
+                ? 'border-carpet-dark bg-[#22401f] text-carpet-lite'
+                : 'border-wood-dark bg-wood-deep/60 text-brass-lite'
+            }`}
+          >
+            {msg.text}
           </p>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

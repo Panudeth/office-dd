@@ -1,7 +1,7 @@
 import { dith4, mk, shade } from './art';
 import type { Dir, Palette, Pose } from './types';
 
-/* จานสีโทน Generation 3 (GBA) — อิ่มตัวปานกลาง ไม่ใช้สีดำสนิท */
+/* จานสีโทน Generation 3 (GBA) - อิ่มตัวปานกลาง ไม่ใช้สีดำสนิท */
 export const SKIN = ['#f8d0a8', '#e8b088', '#c88c60', '#a06840'];
 export const HAIR = ['#403848', '#684830', '#a86038', '#e0c060', '#985880', '#405888', '#c05048', '#584030'];
 export const PANTS = ['#485878', '#6b5840', '#3c5878', '#585868', '#785868'];
@@ -15,7 +15,7 @@ const P = (g: G, x: number, y: number, w: number, h: number, c: string) => {
   g.fillRect(x, y, w, h);
 };
 
-/** สร้าง palette จาก seed — สีเสื้อมาจากแผนก จะได้แยกทีมออกบนแผนที่ */
+/** สร้าง palette จาก seed - สีเสื้อมาจากแผนก จะได้แยกทีมออกบนแผนที่ */
 export function makePalette(seed: number, shirt: string): Palette {
   const pick = <T,>(arr: T[], salt: number) => arr[Math.abs((seed * 2654435761 + salt * 97) | 0) % arr.length];
   return {
@@ -27,7 +27,7 @@ export function makePalette(seed: number, shirt: string): Palette {
   };
 }
 
-/** ตัวละคร 16x24 วาดแบบ parametric — outline เป็นสีเข้มของวัสดุนั้น ๆ (สไตล์ gen 3) */
+/** ตัวละคร 16x24 วาดแบบ parametric - outline เป็นสีเข้มของวัสดุนั้น ๆ (สไตล์ gen 3) */
 export function drawChar(g: G, pal: Palette, dir: Dir, pose: Pose, frame: number) {
   const sk = pal.skin, ha = pal.hair, sh = pal.shirt, pa = pal.pants, so = pal.shoes;
   const shD = shade(sh, 0.78), shL = shade(sh, 1.15), haL = shade(ha, 1.3);
