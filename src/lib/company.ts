@@ -30,7 +30,7 @@ export const PROFILE_FIELDS: ProfileField[] = [
   { key: 'revenue', label: 'รายได้มาจากไหน', hint: 'โมเดลรายได้ - ขายขาด รายเดือน คอมมิชชัน ฯลฯ และสัดส่วนคร่าว ๆ', long: true, max: 400 },
   { key: 'size', label: 'ขนาดองค์กร', hint: 'พนักงานกี่คน สาขา/สำนักงาน ก่อตั้งปีไหน', long: false, max: 200 },
   { key: 'entity', label: 'รูปแบบนิติบุคคล', hint: 'บจก. / หจก. / บมจ. ทุนจดทะเบียน จด VAT ไหม - ฝ่ายกฎหมายกับการเงินใช้', long: false, max: 200 },
-  { key: 'products', label: 'สินค้า/บริการหลัก', hint: '3-5 อย่าง พร้อมราคาช่วงคร่าว ๆ ถ้าบอกได้', long: true, max: 500 },
+  { key: 'products', label: 'ภาพรวมสินค้า/บริการ', hint: 'สรุปสั้น ๆ ว่าขายอะไรเป็นหลัก - รายการแยกชิ้นพร้อมราคาไปกรอกที่แท็บ "สินค้า"', long: true, max: 500 },
   { key: 'redlines', label: 'เส้นแดง - สิ่งที่บริษัทไม่ทำ', hint: 'ห้ามทำเด็ดขาด เช่น ไม่รับงานภาครัฐ ไม่ให้เครดิต ไม่ทำโฆษณาเปรียบเทียบ - ทุกแผนกจะยึดตามนี้ก่อน', long: true, max: 500 },
   { key: 'goals', label: 'เป้าหมายปีนี้', hint: 'ตัวเลขหรือเหตุการณ์ที่อยากไปให้ถึง', long: true, max: 400 },
   { key: 'problems', label: 'ปัญหาที่กำลังเจอ', hint: 'เรื่องที่กวนใจอยู่ตอนนี้ - agent จะได้ไม่เสนอทางที่ชนกับปัญหาเดิม', long: true, max: 400 },
@@ -52,6 +52,39 @@ export const profileLength = (f: ProfileFields) =>
 export const profileIsEmpty = (f: ProfileFields | null | undefined) =>
   !f || !PROFILE_FIELDS.some((p) => (f[p.key] ?? '').trim());
 
+/* ---------- รายการสินค้า/บริการ ---------- */
+
+/**
+ * สินค้าเก็บเป็นรายการแยกชิ้น ไม่ใช่ย่อหน้าเดียวในโปรไฟล์
+ * เพราะ agent ต้องอ้างชื่อกับราคาให้ถูกเป๊ะ (ขาย/การตลาด/การเงินใช้บ่อยสุด)
+ * ราคาเป็นข้อความอิสระ - ของจริงมักเป็นช่วงหรือต่อหน่วย ไม่ใช่ตัวเลขเดียว
+ */
+export interface Product {
+  id: string;
+  name: string;
+  description: string;
+  price: string;
+  note: string;
+}
+
+export const PRODUCT_LIMITS = { name: 80, description: 300, price: 80, note: 200 } as const;
+export const PRODUCT_LABELS: Record<keyof typeof PRODUCT_LIMITS, string> = {
+  name: 'ชื่อ', description: 'รายละเอียด', price: 'ราคา', note: 'หมายเหตุ',
+};
+/** เพดานจำนวนรายการ - ทุกชิ้นถูกส่งไปทุกคอล */
+export const PRODUCT_MAX_COUNT = 30;
+
+export const emptyProduct = (id: string): Product => ({ id, name: '', description: '', price: '', note: '' });
+
+/** รายการที่กรอกไม่ครบหรือยาวเกิน - เอาไว้กันกดบันทึก */
+export function productIssue(p: Product): string | null {
+  if (!p.name.trim()) return 'ยังไม่ได้ตั้งชื่อ';
+  for (const k of Object.keys(PRODUCT_LIMITS) as (keyof typeof PRODUCT_LIMITS)[]) {
+    if ((p[k] ?? '').length > PRODUCT_LIMITS[k]) return `${PRODUCT_LABELS[k]}ยาวเกิน ${PRODUCT_LIMITS[k]} ตัวอักษร`;
+  }
+  return null;
+}
+
 /* ---------- หัวข้อแนะนำสำหรับโน้ตแผนก ---------- */
 
 export const DEPT_NOTE_HINTS: Record<string, string> = {
@@ -67,6 +100,8 @@ export const DEPT_NOTE_HINTS: Record<string, string> = {
 
 export interface CompanyContext {
   profile: ProfileFields;
+  /** รายการสินค้า/บริการ - ทุกแผนกเห็นเหมือนกัน */
+  products?: Product[];
   /** deptId -> body */
   notes: Record<string, string>;
   /** ชิ้นเอกสารที่ค้นเจอว่าเกี่ยวกับคำถามนี้ (เฟส 3) */
@@ -83,6 +118,22 @@ export function profileBlock(profile: ProfileFields | null | undefined): string 
   return `## ข้อมูลบริษัท (ข้อเท็จจริง - ยึดตามนี้ก่อนความรู้ทั่วไป)
 
 ${rows.map(({ f, v }) => `**${f.label}:** ${v}`).join('\n')}`;
+}
+
+/** ส่วนรายการสินค้า - ทุกแผนกได้เหมือนกัน เรียงตามที่ผู้ใช้จัดไว้ */
+export function productsBlock(products: Product[] | null | undefined): string {
+  const rows = (products ?? []).filter((p) => p.name.trim());
+  if (!rows.length) return '';
+  const line = (p: Product) => {
+    const parts = [`**${p.name.trim()}**`];
+    if (p.price.trim()) parts.push(`ราคา ${p.price.trim()}`);
+    if (p.description.trim()) parts.push(p.description.trim());
+    if (p.note.trim()) parts.push(`(${p.note.trim()})`);
+    return `- ${parts.join(' - ')}`;
+  };
+  return `## สินค้า/บริการของบริษัท (${rows.length} รายการ - อ้างชื่อและราคาตามนี้ ห้ามแต่งเพิ่ม)
+
+${rows.map(line).join('\n')}`;
 }
 
 /** ส่วนโน้ตแผนก - เฉพาะแผนกตัวเอง */
@@ -107,12 +158,12 @@ ${chunks.map((c, i) => `[อ้างอิง ${i + 1}] จาก "${c.docName}
 
 /**
  * รวมทุกชั้นสำหรับ agent หนึ่งตัว
- * เรียงลำดับ: โปรไฟล์ (ทุกคนเห็น) -> โน้ตแผนก (เฉพาะแผนก) -> เอกสาร (เฉพาะที่ค้นเจอ)
+ * เรียงลำดับ: โปรไฟล์ (ทุกคนเห็น) -> สินค้า (ทุกคนเห็น) -> โน้ตแผนก (เฉพาะแผนก) -> เอกสาร (เฉพาะที่ค้นเจอ)
  * คืนสตริงว่างถ้าไม่มีอะไรเลย - route จะได้ข้ามได้โดยไม่ต้องเช็คซ้ำ
  */
 export function companyBlock(ctx: CompanyContext | null | undefined, deptId: string): string {
   if (!ctx) return '';
-  return [profileBlock(ctx.profile), deptNoteBlock(deptId, ctx.notes), chunksBlock(ctx.chunks)]
+  return [profileBlock(ctx.profile), productsBlock(ctx.products), deptNoteBlock(deptId, ctx.notes), chunksBlock(ctx.chunks)]
     .filter(Boolean)
     .join('\n\n');
 }
@@ -121,6 +172,7 @@ export function companyBlock(ctx: CompanyContext | null | undefined, deptId: str
 export function companyStats(ctx: CompanyContext | null | undefined, deptId: string) {
   return {
     profileChars: profileBlock(ctx?.profile).length,
+    productCount: (ctx?.products ?? []).filter((p) => p.name.trim()).length,
     noteChars: deptNoteBlock(deptId, ctx?.notes).length,
     chunkCount: ctx?.chunks?.length ?? 0,
   };

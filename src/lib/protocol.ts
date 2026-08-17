@@ -39,6 +39,8 @@ export interface AskAgent {
   deptName: string;
   /** มุมมองเฉพาะแผนกที่ผูกกับบทบาทนี้ */
   lens: string;
+  /** หัวหน้าแผนก (คนแรกที่จ้าง) - ใช้โมเดล "หัวหน้าแผนก" และเป็นประธานได้ */
+  isHead?: boolean;
 }
 
 /* ---------- ระเบียบวาระ: ใครควรเข้าประชุม ---------- */
@@ -87,7 +89,35 @@ export interface SkillProof {
   model: string;
   provider: string;
   /** agent ตัวแรกได้ข้อมูลบริษัทไปเท่าไร - พิสูจน์ได้ว่าอ่านโปรไฟล์/โน้ต/เอกสารจริง */
-  company?: { profileChars: number; noteChars: number; chunkCount: number };
+  company?: { profileChars: number; productCount?: number; noteChars: number; chunkCount: number };
+  /** ประชุมนี้ใช้กี่โมเดล ใครใช้อะไร - โชว์ให้เห็นว่า mixed-model ทำงานจริง */
+  agentModels?: { agentId: string; agentName: string; model: string; provider: string }[];
+}
+
+/* ---------- คีย์ LLM ต่อคน/ต่อบทบาท ---------- */
+
+/** การเชื่อมต่อหนึ่งชุดในรูปที่เซิร์ฟเวอร์เข้าใจ - คีย์ถูกใช้เฉพาะคำขอนี้ ไม่เก็บ */
+export interface LlmCredsWire {
+  provider: string;
+  apiKey?: string;
+  model?: string;
+  baseUrl?: string;
+}
+
+/**
+ * ใครใช้โมเดลไหนในการประชุมนี้ - อ้างด้วย id ของชุดคีย์ ตัวคีย์จริงอยู่ใน conns ครั้งเดียว
+ * ลำดับที่เซิร์ฟเวอร์ใช้:
+ *   หัวหน้าแผนก (isHead) = byAgent -> chair -> member -> ค่าเริ่มต้น (header)   [ทุกรอบ ไม่ใช่แค่ตอนสรุป]
+ *   ลูกทีม               = byAgent -> member -> ค่าเริ่มต้น (header)
+ * รายคนชนะเสมอเพราะเป็นการเลือกที่เจาะจงที่สุด chair คือค่าเริ่มต้นของหัวหน้าทุกคน
+ */
+export interface LlmAssignment {
+  conns: Record<string, LlmCredsWire>;
+  chair?: string;
+  member?: string;
+  /** เลขาฯ ที่จดรายงานการประชุมหลังจบ - ไม่ตั้งใช้ค่าลูกทีม, 'off' = ไม่จด */
+  secretary?: string | 'off';
+  byAgent?: Record<string, string>;
 }
 
 /* ---------- การประชุม ---------- */
@@ -99,6 +129,10 @@ export interface AskRequest {
   agents: AskAgent[];
   /** ข้อมูลบริษัท - client โหลดจาก Supabase (RLS) แล้วส่งมา เซิร์ฟเวอร์ไม่มี Supabase creds */
   company?: CompanyContext;
+  /** โมเดลต่อคน/ต่อบทบาท - ไม่ส่งมาก็ใช้ชุดเดียวจาก header เหมือนเดิม */
+  llm?: LlmAssignment;
+  /** ประธานที่ประชุม/คนสรุป - ผู้ใช้เลือกจากหัวหน้าแผนกในหน้าวาระ ไม่ส่งมาใช้หัวหน้าของแผนกเจ้าของเรื่อง */
+  chairId?: string;
 }
 
 export type AskEvent =
@@ -116,6 +150,8 @@ export type AskEvent =
       /** relay: ชื่อคนที่เดินมาถาม */
       askedBy?: string;
       text: string;
+      /** โมเดลที่คนนี้ใช้ตอบจริง */
+      model?: string;
     }
   /** relay: คำถามที่เจ้าของเรื่องส่งต่อให้อีกแผนก - แยก event เพราะเกมต้องเล่นท่าเดินไปถาม */
   | {
@@ -128,7 +164,9 @@ export type AskEvent =
       toDeptId: string;
       text: string;
     }
-  | { type: 'final'; text: string; leadAgentId: string; leadAgentName: string }
+  | { type: 'final'; text: string; leadAgentId: string; leadAgentName: string; model?: string }
+  /** รายงานการประชุมของเลขาฯ - มาหลัง final เสมอ เขียนโดยคนละคน/คนละโมเดลกับประธาน */
+  | { type: 'minutes'; text: string; model?: string }
   | { type: 'error'; message: string }
   | { type: 'done' };
 
@@ -141,6 +179,8 @@ export interface Opinion {
   step?: number;
   askedBy?: string;
   text: string;
+  /** โมเดลที่ใช้ตอบ - เก็บลงบันทึกด้วย จะได้เทียบย้อนหลังได้ว่าตัวไหนคุ้ม */
+  model?: string;
 }
 
 /** คำถามที่ถูกส่งต่อในโหมดสายพาน - เก็บไว้แสดงคู่กับคำตอบในบันทึกการประชุม */
@@ -167,5 +207,7 @@ export interface ChatMessage {
   consults?: Consult[];
   /** หลักฐานว่า skill ถูกส่งไปจริง - กางดูได้ในหน้าแชท */
   proof?: SkillProof;
+  /** โมเดลของคนที่สรุปคำตอบสุดท้าย */
+  model?: string;
   pending?: boolean;
 }

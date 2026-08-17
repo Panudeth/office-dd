@@ -7,6 +7,7 @@ import {
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import AgendaPanel, { type AgendaPick } from '@/components/AgendaPanel';
 import Portrait from '@/components/Portrait';
 import SecretaryTab from '@/components/SecretaryTab';
@@ -14,20 +15,22 @@ import CompanyPanel from '@/components/CompanyPanel';
 import ChatPanel from '@/components/ChatPanel';
 import HirePanel from '@/components/HirePanel';
 import KeyPanel, {
-  activeOf, authHeaders, loadStore, saveStore, type LlmStore,
+  activeOf, authHeaders, connSubtitle, llmAssignment, loadStore, pruneStore, saveStore,
+  type LlmRoles, type LlmStore,
 } from '@/components/KeyPanel';
 import OfficePanel from '@/components/OfficePanel';
 import {
   accountAvatar, accountName, deleteEmployee, deleteMeeting, listMeetings, listOffices,
-  loadDeptNotes, loadEmployees, loadProfile, matchChunks, readOAuthReturn, rememberOffice,
+  listProducts, loadDeptNotes, loadEmployees, loadProfile, matchChunks, readOAuthReturn, rememberOffice,
   rememberedOfficeId, sb, saveEmployee, saveMeeting, sbError, supabaseConfigured,
   type MeetingRow, type OAuthReturn, type Office, type User,
 } from '@/lib/supabase';
-import { profileIsEmpty, type CompanyContext } from '@/lib/company';
+import { profileIsEmpty, type CompanyContext, type Product } from '@/lib/company';
 import type { EmployeeSnapshot } from '@/game/types';
 import type { World } from '@/game/world';
 import { BOSS_RECT, MAX_STAFF, MEETING_RECT, SECRETARY_NAME, SECRETARY_PAL } from '@/game/map';
 import { DEPARTMENTS, DEPT_BY_ID } from '@/lib/departments';
+import { deptHeadIds } from '@/lib/heads';
 import type { Agenda, AskEvent, ChatMessage, Consult, Opinion } from '@/lib/protocol';
 
 const GameCanvas = dynamic(() => import('@/components/GameCanvas'), { ssr: false });
@@ -119,6 +122,7 @@ export default function Page() {
   const [meetings, setMeetings] = useState<MeetingRow[]>([]);
   /** ข้อมูลบริษัท - โหลดจาก Supabase ตอนเลือกออฟฟิศ ส่งไปกับทุกคำถาม */
   const [profile, setProfile] = useState<Record<string, string>>({});
+  const [products, setProducts] = useState<Product[]>([]);
   const [deptNotes, setDeptNotes] = useState<Record<string, string>>({});
   const [companyOpen, setCompanyOpen] = useState(false);
   const [meetingsLoading, setMeetingsLoading] = useState(false);
@@ -155,6 +159,32 @@ export default function Page() {
   /** ชุดที่กำลังใช้ - null คือยังไม่ได้เลือก แปลว่าใช้คีย์ของเซิร์ฟเวอร์ */
   const llm = activeOf(llmStore);
   const setLlmStoreSaved = useCallback((s: LlmStore) => { setLlmStore(s); saveStore(s); }, []);
+  /** ตั้งโมเดลรายคนจากแผงพนักงาน - เก็บในที่เดียวกับคีย์ (localStorage) เพราะ id ของชุดคีย์เป็นของเบราว์เซอร์นี้ */
+  const setEmployeeLlm = useCallback((employeeId: string, connId: string | null) => {
+    setLlmStore((s) => {
+      const byEmployee = { ...s.byEmployee };
+      if (connId) byEmployee[employeeId] = connId; else delete byEmployee[employeeId];
+      const next = pruneStore({ ...s, byEmployee });
+      saveStore(next);
+      return next;
+    });
+  }, []);
+  /** ตั้งโมเดลของตำแหน่งพิเศษ (ประธาน/ลูกทีม/เลขาฯ) จากแผงพนักงาน - ค่าเดียวกับใน "คีย์ของฉัน" */
+  const setRoleLlm = useCallback((k: keyof LlmRoles, connId: string | null) => {
+    setLlmStore((s) => {
+      const roles = { ...s.roles };
+      if (connId) roles[k] = connId; else delete roles[k];
+      const next = pruneStore({ ...s, roles });
+      saveStore(next);
+      return next;
+    });
+  }, []);
+  /** ป้ายสำหรับแผงพนักงาน - บอกว่า "ค่าเริ่มต้น" ของลูกทีมตอนนี้คือชุดไหน */
+  const memberDefault = llmStore.items.find((c) => c.id === llmStore.roles?.member) ?? llm;
+  const llmDefaultLabel = memberDefault ? memberDefault.label : 'คีย์ของเซิร์ฟเวอร์';
+  const headDefault = llmStore.items.find((c) => c.id === llmStore.roles?.chair) ?? memberDefault;
+  const llmHeadLabel = headDefault ? headDefault.label : 'คีย์ของเซิร์ฟเวอร์';
+  const llmOptions = llmStore.items.map((c) => ({ id: c.id, label: `${c.label} · ${connSubtitle(c)}` }));
 
   /**
    * ต้องอยู่เหนือ effect ที่เรียก sb() เพราะ effect รันตามลำดับที่ประกาศ
@@ -234,9 +264,9 @@ export default function Page() {
 
   // ข้อมูลบริษัทผูกกับออฟฟิศ - สลับออฟฟิศต้องโหลดใหม่ ไม่งั้นเอาโปรไฟล์บริษัท A ไปตอบเรื่องบริษัท B
   const refreshCompany = useCallback(() => {
-    if (!officeId) { setProfile({}); setDeptNotes({}); return; }
-    Promise.all([loadProfile(officeId), loadDeptNotes(officeId)])
-      .then(([p, n]) => { setProfile(p); setDeptNotes(n); })
+    if (!officeId) { setProfile({}); setProducts([]); setDeptNotes({}); return; }
+    Promise.all([loadProfile(officeId), listProducts(officeId), loadDeptNotes(officeId)])
+      .then(([p, pr, n]) => { setProfile(p); setProducts(pr); setDeptNotes(n); })
       .catch((e) => setSaveErr(sbError(e)));
   }, [officeId]);
   useEffect(() => { refreshCompany(); }, [refreshCompany]);
@@ -266,8 +296,8 @@ export default function Page() {
     } catch {
       chunks = undefined;
     }
-    return { profile, notes, chunks };
-  }, [officeId, profile, deptNotes, llm]);
+    return { profile, products, notes, chunks };
+  }, [officeId, profile, products, deptNotes, llm]);
 
   const secBlocked = !supabaseConfigured
     ? 'โหมดในเครื่องยังไม่มีที่เก็บบันทึก - ตั้งค่า Supabase ก่อนถึงจะจดประวัติได้'
@@ -355,10 +385,17 @@ export default function Page() {
           ? { text: 'เลือกออฟฟิศก่อน พนักงานจะได้ถูกบันทึกลงออฟฟิศนั้น', action: 'เลือกออฟฟิศ' }
           : null;
 
+  /**
+   * ทั้งหน้าถูกล็อกจนกว่าจะเข้าสู่ระบบ - ยังวาดทุกอย่างให้เห็นเหมือนเดิม แต่กดอะไรไม่ได้
+   * ระหว่างรอ session (authReady = false) ก็ล็อกไว้ก่อน จะได้ไม่กระพริบเปิด-ปิด
+   * โหมดในเครื่อง (ไม่มี Supabase) ไม่มีอะไรให้ล็อกอินจึงปล่อยใช้ได้ตามปกติ
+   */
+  const locked = supabaseConfigured && (!authReady || !user);
+
   const hire = (deptId: string, count: number) => {
     const w = worldRef.current;
     const dept = DEPT_BY_ID.get(deptId);
-    if (!w || !dept || lock) return;
+    if (!w || !dept || lock || locked) return;
     setSaveErr(null);
     for (let i = 0; i < count; i++) {
       const e = w.hire(dept);
@@ -396,7 +433,7 @@ export default function Page() {
    */
   async function proposeAgenda(question: string) {
     const w = worldRef.current;
-    if (!w || busy) return;
+    if (!w || busy || locked) return;
 
     const hiredDeptIds = [...new Set(w.roster().map((r) => r.deptId))];
     setMessages((ms) => [...ms, { id: newId(), role: 'user', text: question }]);
@@ -440,6 +477,8 @@ export default function Page() {
     if (!w || busy) return;
 
     const snap = w.roster();
+    // หัวหน้าแผนกคำนวณจากทั้งบริษัท ไม่ใช่จากคนที่เข้าประชุม - หัวหน้าไม่เข้าห้องก็ยังเป็นหัวหน้า
+    const heads = deptHeadIds(snap);
     const team = pick.agentIds
       .map((id) => snap.find((r) => r.id === id))
       .filter((r): r is EmployeeSnapshot => !!r)
@@ -448,6 +487,7 @@ export default function Page() {
         return {
           id: r.id, name: r.name, role: r.role, deptId: r.deptId,
           deptName: d?.nameTh ?? r.deptId, lens: d?.lenses[r.role] ?? '',
+          isHead: heads.get(r.deptId) === r.id,
         };
       });
     if (!team.length) return;
@@ -465,7 +505,11 @@ export default function Page() {
     const ids = team.map((t) => t.id);
     const relay = pick.mode === 'relay';
     const direct = pick.mode === 'direct';
-    const owner = team.find((t) => t.deptId === pick.ownerDeptId) ?? team[0];
+    // ประธาน/เจ้าของเรื่อง = คนที่ผู้ใช้เลือกในหน้าวาระ (หัวหน้าแผนก) - ตกหล่นค่อยถอยไปหัวหน้าของแผนกเจ้าของเรื่อง
+    const owner = team.find((t) => t.id === pick.chairId)
+      ?? team.find((t) => t.deptId === pick.ownerDeptId && t.isHead)
+      ?? team.find((t) => t.deptId === pick.ownerDeptId)
+      ?? team[0];
 
     const pendingId = newId();
     setMessages((ms) => [
@@ -486,6 +530,8 @@ export default function Page() {
     let errorText = '';
     let leadId = owner.id;
     let leadName = owner.name;
+    let finalModel: string | undefined;
+    let minutesText = '';
 
     try {
       // ประกอบข้อมูลบริษัทระหว่างที่คนกำลังเดิน - ไม่ให้ผู้ใช้รอสองต่อ
@@ -516,8 +562,11 @@ export default function Page() {
           question,
           mode: pick.mode,
           ownerDeptId: owner.deptId,
+          chairId: owner.id,
           agents: team,
           company,
+          // ใครใช้โมเดลไหน - ส่งคีย์เฉพาะชุดที่ถูกอ้างถึงจริงในทีมนี้ ไม่มีใครตั้งก็ไม่ส่ง
+          llm: llmAssignment(llmStore, ids),
         }),
       });
       if (!res.ok || !res.body) throw new Error(`เรียก API ไม่สำเร็จ (${res.status})`);
@@ -560,7 +609,7 @@ export default function Page() {
             const op: Opinion = {
               agentId: ev.agentId, agentName: ev.agentName, agentRole: ev.agentRole,
               deptId: ev.deptId, round: ev.round, step: ev.step, askedBy: ev.askedBy,
-              text: ev.text,
+              text: ev.text, model: ev.model,
             };
             transcript.push(op);
             patch(pendingId, { transcript: [...transcript] });
@@ -587,6 +636,11 @@ export default function Page() {
             finalText = ev.text;
             leadId = ev.leadAgentId;
             leadName = ev.leadAgentName;
+            finalModel = ev.model;
+          } else if (ev.type === 'minutes') {
+            minutesText = ev.text;
+            // เลขาฯ บอกให้รู้ว่าจดเสร็จแล้ว - บันทึกจริงอยู่ในสมุด (แท็บเลขาฯ)
+            w.say(w.secretaryId, 'จดรายงานการประชุมเรียบร้อยค่ะ', 3);
           } else if (ev.type === 'error') {
             // error ไม่ควรกลายเป็นฟองคำพูดของ agent - ส่งเข้าแชทอย่างเดียว
             errorText = ev.message;
@@ -625,6 +679,7 @@ export default function Page() {
         pending: false,
         text: finalText || '(ไม่ได้รับคำตอบ)',
         authorName: leadName,
+        model: finalModel,
         transcript: [...transcript],
         consults: [...consults],
       });
@@ -641,6 +696,7 @@ export default function Page() {
           dept_ids: deptIds,
           attendees,
           summary: finalText,
+          minutes: minutesText,
           transcript,
           consults,
         })
@@ -736,6 +792,12 @@ export default function Page() {
             </>
           )}
 
+          {/* ทุกปุ่มที่เหลือใช้ไม่ได้จนกว่าจะเข้าสู่ระบบ - inert กันทั้งคลิกและคีย์บอร์ด */}
+          <div
+            inert={locked || undefined}
+            aria-disabled={locked || undefined}
+            className={cn('flex flex-wrap items-center gap-1.5', locked && 'opacity-40')}
+          >
           <Button
             variant={llm ? 'primary' : 'outline'}
             size="sm"
@@ -847,13 +909,38 @@ export default function Page() {
           >
             {sideOpen ? <PanelRightClose /> : <PanelRightOpen />}
           </Button>
+          </div>
         </div>
       </header>
 
       {/* ความกว้างมาทาง CSS variable ไม่ใช่ inline grid-template
           เพราะ inline style จะชนะ media query แล้วจอแคบจะไม่ยอมตกลงมาเป็นคอลัมน์เดียว */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+      {/* ยังไม่เข้าสู่ระบบ = เห็นออฟฟิศเหมือนเดิมแต่จับต้องไม่ได้ ทั้งแผนที่ แผงจ้าง และช่องแชท */}
+      {locked && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+          <div className="bevel pointer-events-auto flex flex-col items-center gap-2 rounded-box border-2 border-wood-deep bg-wood-mid px-5 py-4 text-center shadow-lg">
+            <span className="text-[13px] font-semibold text-parchment">
+              {authReady ? 'เข้าสู่ระบบเพื่อใช้งานพนักงาน' : 'กำลังตรวจสอบสถานะการเข้าสู่ระบบ'}
+            </span>
+            <span className="text-[11px] text-parchment-2/80">
+              จ้างพนักงาน ประชุม และบันทึกทั้งหมด ผูกอยู่กับบัญชีของคุณ
+            </span>
+            {authReady && (
+              <Button variant="primary" size="sm" onClick={() => setOfficeOpen(true)}>
+                <LogIn /> เข้าสู่ระบบ
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
       <div
-        className="grid min-h-0 flex-1 gap-2.5 [grid-template-columns:var(--cols)] max-[1080px]:grid-cols-1"
+        inert={locked || undefined}
+        aria-disabled={locked || undefined}
+        className={cn(
+          'grid min-h-0 flex-1 gap-2.5 [grid-template-columns:var(--cols)] max-[1080px]:grid-cols-1',
+          locked && 'opacity-50 saturate-50',
+        )}
         style={
           {
             '--cols': sideOpen ? `minmax(0,1fr) 6px ${sideW}px` : 'minmax(0,1fr)',
@@ -934,6 +1021,14 @@ export default function Page() {
               tab={sideTab}
               onTab={setSideTab}
               meetingCount={meetings.length}
+              llmOptions={llmOptions}
+              llmOf={(id) => llmStore.byEmployee?.[id]}
+              llmDefaultLabel={llmDefaultLabel}
+              onLlm={setEmployeeLlm}
+              roleLlm={llmStore.roles}
+              onRoleLlm={setRoleLlm}
+              llmActiveLabel={llm ? llm.label : 'คีย์ของเซิร์ฟเวอร์'}
+              llmHeadLabel={llmHeadLabel}
               secretary={
                 <SecretaryTab
                   meetings={meetings}
@@ -995,6 +1090,7 @@ export default function Page() {
         </aside>
         )}
       </div>
+      </div>
 
       <AgendaPanel
         open={agendaOpen}
@@ -1022,6 +1118,7 @@ export default function Page() {
         officeId={officeId}
         userId={user?.id ?? null}
         profile={profile}
+        products={products}
         deptNotes={deptNotes}
         onChanged={refreshCompany}
         llmHeaders={authHeaders(llm)}
@@ -1034,6 +1131,7 @@ export default function Page() {
         store={llmStore}
         onClose={() => setKeyOpen(false)}
         onChange={setLlmStoreSaved}
+        roster={roster}
       />
       <OfficePanel
         open={officeOpen || !!authNote}

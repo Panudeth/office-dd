@@ -1,9 +1,13 @@
 'use client';
 
 import {
-  Check, Eye, EyeOff, KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, X,
+  Check, Cpu, Crown, Eye, EyeOff, KeyRound, NotebookPen, Pencil, Plus, RefreshCw, ShieldCheck, Trash2,
+  Users, X,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { DEPARTMENTS } from '@/lib/departments';
+import type { EmployeeSnapshot } from '@/game/types';
+import Portrait from '@/components/Portrait';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog';
 import { Field, Input } from '@/components/ui/input';
@@ -12,6 +16,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { defaultModelForBase } from '@/lib/openai';
+import { deptHeadIds } from '@/lib/heads';
+import type { LlmAssignment } from '@/lib/protocol';
 
 export type ProviderId = 'anthropic' | 'gemini' | 'openai';
 
@@ -30,10 +36,29 @@ export interface LlmConnection {
   baseUrl?: string;
 }
 
+/**
+ * ใครใช้ชุดไหน - ค่าเป็น id ของ LlmConnection ทั้งหมด
+ * chair  = หัวหน้าแผนกทุกคน ทุกรอบ (คนแรกที่จ้างในแผนก - เป็นประธานที่ประชุมได้) รายคนยังทับได้
+ * member = ลูกทีมที่เหลือ
+ * ไม่ตั้ง = ใช้ชุดที่ active (หรือคีย์ของเซิร์ฟเวอร์ถ้าไม่มี)
+ */
+export interface LlmRoles {
+  chair?: string;
+  member?: string;
+  /** เลขาฯ ที่จดรายงานการประชุม - 'off' คือไม่จด, ไม่ตั้งคือใช้ค่าลูกทีม */
+  secretary?: string;
+}
+
+/** ค่าพิเศษของ roles.secretary - ไม่ใช่ id ของชุดคีย์ */
+export const SECRETARY_OFF = 'off';
+
 export interface LlmStore {
   /** id ของชุดที่กำลังใช้ - null คือใช้คีย์ของเซิร์ฟเวอร์ */
   active: string | null;
   items: LlmConnection[];
+  roles?: LlmRoles;
+  /** พนักงานคนไหนใช้ชุดไหน (employeeId -> connectionId) - ตั้งจากแผงพนักงาน */
+  byEmployee?: Record<string, string>;
 }
 
 const STORE_KEY = 'visual-company.llm';
@@ -147,10 +172,26 @@ export function loadStore(): LlmStore {
     const items = (Array.isArray(p.items) ? p.items : [])
       .filter((c): c is LlmConnection => !!c && isProvider(c.provider) && typeof c.id === 'string');
     const active = items.some((c) => c.id === p.active) ? p.active! : items[0]?.id ?? null;
-    return { active, items };
+    return pruneStore({ active, items, roles: p.roles, byEmployee: p.byEmployee });
   } catch {
     return EMPTY;
   }
+}
+
+/**
+ * ตัดการอ้างถึงชุดที่ไม่มีแล้วออก - ลบชุดคีย์ทิ้งแล้ว บทบาท/พนักงานที่เคยชี้ไปหามันต้องกลับเป็น "ค่าเริ่มต้น"
+ * ไม่งั้นจะมี id ค้างที่ resolve ไม่เจอเงียบ ๆ แล้วผู้ใช้งงว่าทำไมตั้งแล้วไม่มีผล
+ */
+export function pruneStore(s: LlmStore): LlmStore {
+  const has = (id: unknown): id is string => typeof id === 'string' && s.items.some((c) => c.id === id);
+  const roles: LlmRoles = {};
+  if (has(s.roles?.chair)) roles.chair = s.roles!.chair;
+  if (has(s.roles?.member)) roles.member = s.roles!.member;
+  if (has(s.roles?.secretary) || s.roles?.secretary === SECRETARY_OFF) roles.secretary = s.roles!.secretary;
+  const byEmployee = Object.fromEntries(
+    Object.entries(s.byEmployee ?? {}).filter(([, v]) => has(v)),
+  );
+  return { active: s.active, items: s.items, roles, byEmployee };
 }
 
 export function saveStore(s: LlmStore): void {
@@ -163,6 +204,46 @@ export function saveStore(s: LlmStore): void {
 
 export const activeOf = (s: LlmStore): LlmConnection | null =>
   s.items.find((c) => c.id === s.active) ?? null;
+
+/** ชุดนี้ยิงได้จริงไหม - มีคีย์ หรือเป็นปลายทางในเครื่องที่ไม่ต้องใช้คีย์ */
+const usable = (c: LlmConnection) =>
+  !!(c.apiKey.trim() || (c.provider === 'openai' && c.baseUrl?.trim()));
+
+/**
+ * ประกอบ "ใครใช้ชุดไหน" สำหรับ /api/ask - ส่งคีย์เฉพาะชุดที่ถูกอ้างถึงจริงในการประชุมนี้
+ * คืน undefined ถ้าไม่มีใครตั้งอะไรเลย -> เซิร์ฟเวอร์ใช้ header ชุดเดียวเหมือนเดิม
+ */
+export function llmAssignment(s: LlmStore, agentIds: string[]): LlmAssignment | undefined {
+  const byId = new Map(s.items.filter(usable).map((c) => [c.id, c]));
+  const conns: LlmAssignment['conns'] = {};
+  const ref = (id?: string): string | undefined => {
+    const c = id ? byId.get(id) : undefined;
+    if (!c) return undefined;
+    conns[c.id] = {
+      provider: c.provider,
+      ...(c.apiKey ? { apiKey: c.apiKey } : {}),
+      ...(c.model ? { model: c.model } : {}),
+      ...(c.baseUrl ? { baseUrl: c.baseUrl } : {}),
+    };
+    return c.id;
+  };
+  const chair = ref(s.roles?.chair);
+  const member = ref(s.roles?.member);
+  const secretary = s.roles?.secretary === SECRETARY_OFF ? SECRETARY_OFF : ref(s.roles?.secretary);
+  const byAgent: Record<string, string> = {};
+  for (const id of agentIds) {
+    const r = ref(s.byEmployee?.[id]);
+    if (r) byAgent[id] = r;
+  }
+  if (!chair && !member && !secretary && !Object.keys(byAgent).length) return undefined;
+  return { conns, chair, member, secretary, byAgent };
+}
+
+/** ชุดที่พนักงานคนนี้จะใช้เป็นลูกทีม (ไม่นับกรณีเป็นประธาน) - เอาไว้โชว์ป้ายในแผงพนักงาน */
+export function connForEmployee(s: LlmStore, employeeId: string): LlmConnection | null {
+  const id = s.byEmployee?.[employeeId] ?? s.roles?.member ?? s.active;
+  return s.items.find((c) => c.id === id) ?? null;
+}
 
 /** header ที่แนบไปกับ /api/ask ส่งทาง header ไม่ใช่ body จะได้ไม่ติดไปกับ log */
 export function authHeaders(c: LlmConnection | null): Record<string, string> {
@@ -198,7 +279,13 @@ interface Props {
   store: LlmStore;
   onClose: () => void;
   onChange: (s: LlmStore) => void;
+  /** พนักงานปัจจุบัน - เอาไว้ตั้งโมเดลรายคนจากหน้านี้ได้เลย ไม่ต้องไปหาในแผงพนักงาน */
+  roster?: EmployeeSnapshot[];
 }
+
+/** เว็บนี้เปิดจากเครื่องเดียวกับที่ Ollama รันอยู่ไหม - ถ้าไม่ใช่ localhost:11434 จะชี้ไปที่เซิร์ฟเวอร์ของเว็บ ไม่ใช่เครื่องผู้ใช้ */
+const appIsLocal = () =>
+  typeof window !== 'undefined' && isLocalBase(window.location.origin);
 
 const blank = (): LlmConnection => ({
   id: crypto.randomUUID(),
@@ -209,7 +296,7 @@ const blank = (): LlmConnection => ({
   baseUrl: OPENAI_PRESETS[0].url,
 });
 
-export default function KeyPanel({ open, store, onClose, onChange }: Props) {
+export default function KeyPanel({ open, store, onClose, onChange, roster = [] }: Props) {
   const [draft, setDraft] = useState<LlmConnection | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [reveal, setReveal] = useState(false);
@@ -218,6 +305,8 @@ export default function KeyPanel({ open, store, onClose, onChange }: Props) {
   const [checkMsg, setCheckMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
+  /** base URL ที่โหลดรายชื่ออัตโนมัติไปแล้ว - กันยิงซ้ำวนถ้าโหลดพัง */
+  const autoFetched = useRef<string | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -250,9 +339,12 @@ export default function KeyPanel({ open, store, onClose, onChange }: Props) {
 
   const remove = (id: string) => {
     const items = store.items.filter((c) => c.id !== id);
-    onChange({ items, active: store.active === id ? items[0]?.id ?? null : store.active });
+    onChange(pruneStore({ ...store, items, active: store.active === id ? items[0]?.id ?? null : store.active }));
     setConfirmDel(null);
   };
+
+  const setRole = (k: keyof LlmRoles, v: string) =>
+    onChange({ ...store, roles: { ...store.roles, [k]: v === '_default' ? undefined : v } });
 
   const fetchModels = async () => {
     if (!draft) return;
@@ -315,9 +407,29 @@ export default function KeyPanel({ open, store, onClose, onChange }: Props) {
   };
 
   const meta = draft ? META[draft.provider] : META.gemini;
+  const activeConn = activeOf(store);
+
+  /**
+   * ปลายทางในเครื่องไม่ต้องใช้คีย์ จึงโหลดรายชื่อโมเดลให้เองทันทีที่เลือก
+   * ผู้ใช้จะได้เห็นว่ามีอะไร pull ไว้บ้าง แทนที่จะต้องเดาชื่อแล้วกดปุ่มเอง
+   */
+  const localBase = draft?.provider === 'openai' && keyIsOptional(draft.provider, draft.baseUrl ?? '')
+    ? (draft.baseUrl ?? '').trim()
+    : null;
+  useEffect(() => {
+    if (!open || !localBase || models || loading) return;
+    if (autoFetched.current === localBase) return;
+    autoFetched.current = localBase;
+    const t = window.setTimeout(() => { void fetchModels(); }, 400);
+    return () => window.clearTimeout(t);
+    // fetchModels อ่าน draft ล่าสุดเองอยู่แล้ว
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, localBase, models, loading]);
+
   // ค่าดีฟอลต์ที่จะโชว์/ใช้จริง - OpenAI-compatible ขึ้นกับปลายทาง ไม่ใช่ค่าตายตัวของ Groq
   const effDefault = draft?.provider === 'openai' ? defaultModelForBase(draft.baseUrl) : meta.defaultModel;
   const optional = draft ? keyIsOptional(draft.provider, draft.baseUrl ?? '') : false;
+  const remoteWarning = optional && !appIsLocal();
   const looksWrong =
     !!draft && meta.prefix !== '' && draft.apiKey.trim().length > 0 &&
     !draft.apiKey.trim().startsWith(meta.prefix);
@@ -383,6 +495,15 @@ export default function KeyPanel({ open, store, onClose, onChange }: Props) {
                               size="icon"
                               variant="ghost"
                               className="size-7"
+                              title="ทำสำเนา - ปลายทางเดิม เปลี่ยนแค่โมเดล (เหมาะกับ Ollama หลายโมเดล)"
+                              onClick={() => { setDraft({ ...c, id: crypto.randomUUID(), label: `${c.label} (สำเนา)`, model: '' }); setIsNew(true); }}
+                            >
+                              <Plus />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="size-7"
                               title="แก้ไข"
                               onClick={() => startEdit(c)}
                             >
@@ -418,6 +539,97 @@ export default function KeyPanel({ open, store, onClose, onChange }: Props) {
               >
                 เลิกใช้คีย์ของตัวเอง กลับไปใช้ของเซิร์ฟเวอร์
               </Button>
+            )}
+
+            {store.items.length > 0 && (
+              <Field
+                label="ใครใช้ชุดไหนในห้องประชุม"
+                hint="หัวหน้าแผนก (คนแรกที่จ้าง) ใช้โมเดลเก่งเสมอ และเป็นประธานที่ประชุม/คนสรุป - ลูกทีมใช้โมเดลถูกได้ ตั้งรายคนทับได้อีกที่ด้านล่างหรือแผงพนักงาน"
+              >
+                <div className="flex flex-col gap-1.5">
+                  {(
+                    [
+                      { k: 'chair', icon: <Crown className="size-3.5 text-brass" />, label: 'หัวหน้าแผนก (ประธาน)', note: 'ทุกรอบ' },
+                      { k: 'member', icon: <Users className="size-3.5 text-dim" />, label: 'ลูกทีมที่เหลือ', note: 'ถ้าไม่ตั้งรายคน' },
+                      { k: 'secretary', icon: <NotebookPen className="size-3.5 text-dim" />, label: 'เลขาฯ จดรายงาน', note: 'หลังจบประชุม' },
+                    ] as { k: keyof LlmRoles; icon: ReactNode; label: string; note: string }[]
+                  ).map(({ k, icon, label, note }) => (
+                    <div key={k} className="flex items-center gap-2">
+                      <span className="flex w-32 shrink-0 items-center gap-1.5 text-[11px] text-parchment">
+                        {icon} {label}
+                      </span>
+                      <Select value={store.roles?.[k] ?? '_default'} onValueChange={(v) => setRole(k, v)}>
+                        <SelectTrigger className="h-8 min-w-0 flex-1 text-[11px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="_default">
+                            {k === 'secretary' ? 'ตามค่าลูกทีม' : `ค่าเริ่มต้น${activeConn ? ` (${activeConn.label})` : ' (คีย์ของเซิร์ฟเวอร์)'}`}
+                          </SelectItem>
+                          {k === 'secretary' && <SelectItem value={SECRETARY_OFF}>ไม่จดรายงาน (เร็วขึ้น ประหยัดขึ้น)</SelectItem>}
+                          {store.items.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>{c.label} · {connSubtitle(c)}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <span className="w-20 shrink-0 text-[10px] text-dim">{note}</span>
+                    </div>
+                  ))}
+                </div>
+              </Field>
+            )}
+
+            {store.items.length > 0 && roster.length > 0 && (
+              <Field
+                label={<span className="flex items-center gap-1.5"><Cpu className="size-3.5" /> โมเดลรายคน</span>}
+                hint="ตั้งเฉพาะคนที่อยากให้ต่างจากค่าหัวหน้า/ลูกทีม - ตั้งจากการ์ดพนักงานในแผงขวาก็ได้เหมือนกัน"
+              >
+                <div className="flex max-h-56 flex-col gap-1 overflow-y-auto pr-1">
+                  {DEPARTMENTS.map((d) => {
+                    const team = roster.filter((r) => r.deptId === d.id);
+                    const headId = deptHeadIds(roster).get(d.id);
+                    if (!team.length) return null;
+                    return (
+                      <div key={d.id}>
+                        <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-dim">
+                          <i className="size-2 rounded-[2px]" style={{ background: d.color }} /> {d.nameTh}
+                        </div>
+                        {team.map((m) => {
+                          const cur = store.byEmployee?.[m.id];
+                          const set = store.items.some((c) => c.id === cur);
+                          return (
+                            <div key={m.id} className="mb-1 flex items-center gap-2">
+                              <Portrait palette={m.palette} size={1} className="block shrink-0" />
+                              <span className="flex w-28 shrink-0 items-center gap-1 text-[11px] text-parchment" title={`${m.name} - ${m.title}${m.id === headId ? ' (หัวหน้าแผนก)' : ''}`}>
+                                {m.id === headId && <Crown className="size-3 shrink-0 text-brass" />}
+                                <span className="truncate">{m.name}</span>
+                              </span>
+                              <Select
+                                value={set ? cur! : '_default'}
+                                onValueChange={(v) => {
+                                  const byEmployee = { ...store.byEmployee };
+                                  if (v === '_default') delete byEmployee[m.id]; else byEmployee[m.id] = v;
+                                  onChange(pruneStore({ ...store, byEmployee }));
+                                }}
+                              >
+                                <SelectTrigger className={`h-7 min-w-0 flex-1 text-[11px] ${set ? 'border-brass/60' : 'text-dim'}`}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="_default">{m.id === headId ? 'ตามค่าหัวหน้าแผนก' : 'ตามค่าลูกทีม'}</SelectItem>
+                                  {store.items.map((c) => (
+                                    <SelectItem key={c.id} value={c.id}>{c.label} · {connSubtitle(c)}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              </Field>
             )}
 
             <Hint>
@@ -465,9 +677,17 @@ export default function KeyPanel({ open, store, onClose, onChange }: Props) {
               <Field
                 label="ปลายทาง (base URL)"
                 hint={
-                  preset
-                    ? `เอาคีย์จาก ${preset.keys}`
-                    : 'ใส่เองได้ ต้องเป็น URL ที่มี /chat/completions และ /models ต่อท้าย (ปกติลงท้ายด้วย /v1)'
+                  <>
+                    {preset
+                      ? optional ? 'ไม่ต้องใช้คีย์ - รายชื่อโมเดลจะโหลดให้เองจากเครื่อง' : `เอาคีย์จาก ${preset.keys}`
+                      : 'ใส่เองได้ ต้องเป็น URL ที่มี /chat/completions และ /models ต่อท้าย (ปกติลงท้ายด้วย /v1)'}
+                    {remoteWarning && (
+                      <b className="mt-1 block text-brass">
+                        เว็บนี้ไม่ได้รันบนเครื่องคุณ - localhost ตรงนี้หมายถึงเครื่องเซิร์ฟเวอร์ของเว็บ ไม่ใช่เครื่องคุณ
+                        จะเรียก Ollama ไม่เจอ ต้องเปิด Ollama ออกเน็ต (เช่น cloudflared / ngrok / Tailscale) แล้วใส่ URL นั้นแทน
+                      </b>
+                    )}
+                  </>
                 }
               >
                 <Select
@@ -496,13 +716,13 @@ export default function KeyPanel({ open, store, onClose, onChange }: Props) {
               </Field>
             )}
 
+            {/* ปลายทางในเครื่องไม่มีคีย์ให้กรอก - ซ่อนช่องไปเลย ไม่ต้องให้ผู้ใช้สงสัยว่าต้องใส่อะไร */}
+            {!optional && (
             <Field
-              label={optional ? 'API key (ปลายทางในเครื่อง ไม่ต้องใส่)' : 'API key'}
+              label="API key"
               hint={
                 <>
-                  {optional
-                    ? 'เซิร์ฟเวอร์ในเครื่องไม่ตรวจคีย์ เว้นว่างไว้ได้เลย'
-                    : `เอาจาก ${meta.where} ${meta.note}`}
+                  {`เอาจาก ${meta.where} ${meta.note}`}
                   {looksWrong && (
                     <b className="mt-1 block text-brass">
                       คีย์ของ{meta.label}มักขึ้นต้นด้วย {meta.prefix} เลือกผู้ให้บริการถูกอันแล้วใช่ไหม
@@ -532,6 +752,7 @@ export default function KeyPanel({ open, store, onClose, onChange }: Props) {
                 </Button>
               </div>
             </Field>
+            )}
 
             <Field
               label="โมเดล"
@@ -540,9 +761,9 @@ export default function KeyPanel({ open, store, onClose, onChange }: Props) {
                   <b className={checkMsg.ok ? 'text-carpet-lite' : 'text-brass'}>{checkMsg.text}</b>
                 ) : !models ? (
                   optional
-                    ? `Ollama มีเฉพาะโมเดลที่ pull ไว้ในเครื่อง - กดโหลดรายชื่อแล้วเลือก อย่าเดา (ค่าดีฟอลต์ ${effDefault} อาจไม่มี)`
+                    ? (loading ? 'กำลังถามเครื่องว่ามีโมเดลอะไรบ้าง...' : `โหลดรายชื่อจากเครื่องไม่ได้ - Ollama เปิดอยู่ไหม? (ค่าดีฟอลต์ ${effDefault} อาจไม่มี)`)
                     : 'กดปุ่มด้านล่างเพื่อดูว่าคีย์นี้เรียกโมเดลไหนได้บ้าง จะได้ไม่ต้องเดาชื่อ'
-                ) : null
+                ) : optional ? `มี ${models.length} โมเดลในเครื่อง - เลือกได้เลย จะเพิ่มชุดใหม่สำหรับโมเดลอื่นก็ทำสำเนาชุดนี้จากหน้ารายการ` : null
               }
             >
               {models ? (
@@ -579,7 +800,7 @@ export default function KeyPanel({ open, store, onClose, onChange }: Props) {
                 disabled={loading || (!draft.apiKey.trim() && !optional)}
               >
                 {models ? <RefreshCw /> : <ShieldCheck />}
-                {loading ? 'กำลังตรวจ' : models ? 'โหลดรายชื่อใหม่' : 'ตรวจคีย์ และโหลดรายชื่อโมเดล'}
+                {loading ? (optional ? 'กำลังโหลด' : 'กำลังตรวจ') : models ? 'โหลดรายชื่อใหม่' : optional ? 'โหลดรายชื่อโมเดลจากเครื่อง' : 'ตรวจคีย์ และโหลดรายชื่อโมเดล'}
               </Button>
             </Field>
 

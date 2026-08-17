@@ -77,6 +77,7 @@ export default function SecretaryTab({
         (m) =>
           m.question.toLowerCase().includes(needle) ||
           m.summary.toLowerCase().includes(needle) ||
+          (m.minutes ?? '').toLowerCase().includes(needle) ||
           m.dept_ids.some((d) => (DEPT_BY_ID.get(d)?.nameTh ?? d).toLowerCase().includes(needle)),
       );
     }
@@ -266,6 +267,13 @@ export default function SecretaryTab({
 
                 {on && (
                   <div className="mt-1.5 border-t border-ink-600 pt-1.5">
+                    {m.minutes && (
+                      <div className="mb-1.5 rounded-box border border-wood-dark bg-wood-deep/40 px-2 py-1.5">
+                        <div className="mb-0.5 text-[10px] font-semibold text-brass-lite">รายงานการประชุม (เลขาฯ จด)</div>
+                        <div className="text-[12px] leading-relaxed text-parchment-2">{fmt(m.minutes)}</div>
+                      </div>
+                    )}
+                    {m.minutes && <div className="mb-0.5 text-[10px] font-semibold text-dim">คำสรุปของประธาน</div>}
                     <div className="text-[12px] leading-relaxed text-parchment-2">
                       {m.summary ? fmt(m.summary) : <Hint>ไม่มีข้อสรุปบันทึกไว้</Hint>}
                     </div>

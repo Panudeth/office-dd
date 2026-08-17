@@ -67,31 +67,39 @@ export async function effectiveModel(creds: Creds): Promise<string> {
   return defaultModelFor(creds.provider, creds.baseUrl);
 }
 
-/**
- * เลือกคีย์ที่จะใช้: คีย์ที่ผู้ใช้ส่งมาจากเบราว์เซอร์มาก่อน ถ้าไม่มีค่อยใช้ของ .env
- * คีย์ของผู้ใช้ถูกใช้เฉพาะในคำขอนั้น ๆ ไม่เก็บลงดิสก์ ไม่ log ไม่ส่งกลับไปที่ client
- */
-export function resolveCreds(byok: {
+export interface ByokInput {
   provider?: string | null;
   apiKey?: string | null;
   model?: string | null;
   baseUrl?: string | null;
-}): Creds | null {
-  const wanted = isProvider(byok.provider) ? byok.provider : null;
+}
 
+/**
+ * ชุดคีย์ที่ผู้ใช้ส่งมาเอง - เฉพาะที่ครบพอจะยิงได้ ไม่ถอยไปใช้ .env
+ * ใช้กับชุดที่ถูกผูกกับคน/บทบาท เพราะถ้าชุดนั้นพัง ควรถอยไปชุดถัดไปในลำดับ ไม่ใช่กระโดดไป env
+ */
+export function byokCreds(byok: ByokInput): Creds | null {
+  const wanted = isProvider(byok.provider) ? byok.provider : null;
   // ปกติต้องมีคีย์ถึงจะนับว่าผู้ใช้เอาของตัวเองมา ยกเว้น OpenAI-compatible ที่ชี้ปลายทางเอง
   // เพราะเซิร์ฟเวอร์ที่รันในเครื่อง (Ollama, LM Studio) ไม่มีคีย์ให้กรอกตั้งแต่แรก
-  const byokReady = wanted && (byok.apiKey || (wanted === 'openai' && byok.baseUrl));
+  const ready = wanted && (byok.apiKey || (wanted === 'openai' && byok.baseUrl));
+  if (!wanted || !ready) return null;
+  return {
+    provider: wanted,
+    apiKey: byok.apiKey ?? '',
+    model: byok.model || undefined,
+    baseUrl: byok.baseUrl || undefined,
+    source: 'byok',
+  };
+}
 
-  if (wanted && byokReady) {
-    return {
-      provider: wanted,
-      apiKey: byok.apiKey ?? '',
-      model: byok.model || undefined,
-      baseUrl: byok.baseUrl || undefined,
-      source: 'byok',
-    };
-  }
+/**
+ * เลือกคีย์ที่จะใช้: คีย์ที่ผู้ใช้ส่งมาจากเบราว์เซอร์มาก่อน ถ้าไม่มีค่อยใช้ของ .env
+ * คีย์ของผู้ใช้ถูกใช้เฉพาะในคำขอนั้น ๆ ไม่เก็บลงดิสก์ ไม่ log ไม่ส่งกลับไปที่ client
+ */
+export function resolveCreds(byok: ByokInput): Creds | null {
+  const own = byokCreds(byok);
+  if (own) return own;
 
   const envProvider = isProvider(process.env.LLM_PROVIDER) ? process.env.LLM_PROVIDER : null;
   const claudeKey = envClaudeKey();

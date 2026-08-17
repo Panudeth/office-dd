@@ -2,6 +2,7 @@
 
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
 import type { Palette } from '@/game/types';
+import type { Product } from '@/lib/company';
 
 /* ============================================================
    เฟส 1 ใช้ client ฝั่งเบราว์เซอร์อย่างเดียว - ไม่มี SSR auth ไม่มี middleware
@@ -308,6 +309,8 @@ export interface MeetingRow {
   dept_ids: string[];
   attendees: MeetingAttendee[];
   summary: string;
+  /** รายงานการประชุมโดยเลขาฯ - ว่างได้ถ้าปิดการจด หรือบันทึกเก่าก่อนมีฟีเจอร์นี้ */
+  minutes?: string;
   transcript: unknown[];
   consults: unknown[];
   created_at: string;
@@ -315,7 +318,7 @@ export interface MeetingRow {
 
 /** คอลัมน์ที่อ่านตอนแสดงรายการ - ไม่ดึง transcript มาทั้งก้อนโดยไม่จำเป็น */
 const MEETING_COLS =
-  'id,office_id,asked_by,question,mode,owner_dept,dept_ids,attendees,summary,transcript,consults,created_at';
+  'id,office_id,asked_by,question,mode,owner_dept,dept_ids,attendees,summary,minutes,transcript,consults,created_at';
 
 export async function saveMeeting(
   row: Omit<MeetingRow, 'id' | 'created_at'>,
@@ -397,6 +400,48 @@ export async function saveDeptNote(
   const { error } = await c
     .from('office_dept_note')
     .upsert({ office_id: officeId, dept_id: deptId, body, updated_by: userId, updated_at: new Date().toISOString() });
+  if (error) throw new Error(sbError(error));
+}
+
+/* ---------- รายการสินค้า/บริการ ---------- */
+
+export async function listProducts(officeId: string): Promise<Product[]> {
+  const c = sb();
+  if (!c) return [];
+  const { data, error } = await c
+    .from('office_product')
+    .select('id,name,description,price,note')
+    .eq('office_id', officeId)
+    .order('sort_order', { ascending: true })
+    .order('updated_at', { ascending: true });
+  if (error) throw new Error(sbError(error));
+  return (data ?? []) as Product[];
+}
+
+/**
+ * บันทึกทั้งรายการในครั้งเดียว - upsert แถวที่มี แล้วลบแถวที่หายไปจากหน้าจอ
+ * ลำดับบนหน้าจอคือ sort_order เลย ไม่ต้องให้ผู้ใช้กรอกเอง
+ */
+export async function saveProducts(
+  officeId: string, products: Product[], userId: string | null,
+): Promise<void> {
+  const c = sb();
+  if (!c) return;
+  const now = new Date().toISOString();
+  const rows = products.map((p, i) => ({
+    id: p.id, office_id: officeId,
+    name: p.name.trim(), description: p.description.trim(), price: p.price.trim(), note: p.note.trim(),
+    sort_order: i, updated_by: userId, updated_at: now,
+  }));
+  if (rows.length) {
+    const { error } = await c.from('office_product').upsert(rows);
+    if (error) throw new Error(sbError(error));
+  }
+  const keep = rows.map((r) => r.id);
+  let del = c.from('office_product').delete().eq('office_id', officeId);
+  // PostgREST ไม่รับ not-in ว่าง - ไม่มีอะไรจะเก็บก็ลบทั้งออฟฟิศ
+  if (keep.length) del = del.not('id', 'in', `(${keep.join(',')})`);
+  const { error } = await del;
   if (error) throw new Error(sbError(error));
 }
 

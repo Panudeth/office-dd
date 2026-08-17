@@ -58,6 +58,8 @@ create table if not exists public.meeting (
 -- ตารางที่สร้างไว้ก่อนหน้ามี constraint แค่สองโหมด - เปลี่ยนให้รับ direct ด้วย
 alter table public.meeting drop constraint if exists meeting_mode_check;
 alter table public.meeting add constraint meeting_mode_check check (mode in ('roundtable', 'relay', 'direct'));
+-- รายงานการประชุมที่เลขาฯ เขียน (เป็นกลาง คนละคนกับประธานที่เขียน summary) - ตารางเก่าไม่มีคอลัมน์นี้
+alter table public.meeting add column if not exists minutes text not null default '';
 
 -- ============================================================
 -- ข้อมูลบริษัท - สิ่งที่ agent ทุกตัวต้องรู้ก่อนตอบ (แยกจาก skill ที่เป็น "วิธีคิด")
@@ -81,6 +83,20 @@ create table if not exists public.office_dept_note (
   updated_by   uuid references auth.users(id) on delete set null,
   updated_at   timestamptz not null default now(),
   primary key (office_id, dept_id)
+);
+
+-- รายการสินค้า/บริการ - แยกเป็นแถวเพื่อให้แก้ทีละชิ้นได้ และ agent เห็นเป็นรายการชัด ๆ ไม่ใช่ย่อหน้าเดียว
+create table if not exists public.office_product (
+  id           uuid primary key default gen_random_uuid(),
+  office_id    uuid not null references public.office(id) on delete cascade,
+  name         text not null,
+  description  text not null default '',
+  -- ราคาเก็บเป็นข้อความ เพราะของจริงมักเป็นช่วง/ต่อหน่วย เช่น "990-2,990 บาท/เดือน" ไม่ใช่ตัวเลขเดียว
+  price        text not null default '',
+  note         text not null default '',
+  sort_order   int not null default 0,
+  updated_by   uuid references auth.users(id) on delete set null,
+  updated_at   timestamptz not null default now()
 );
 
 -- เอกสารที่อัปโหลด (เฟส 3) - ไฟล์จริงอยู่ใน Storage bucket "docs" ที่ path <office_id>/<doc_id>/<name>
@@ -115,6 +131,7 @@ create table if not exists public.office_doc_chunk (
 
 create index if not exists employee_office_idx on public.employee (office_id);
 create index if not exists office_dept_note_office_idx on public.office_dept_note (office_id);
+create index if not exists office_product_office_idx on public.office_product (office_id, sort_order);
 create index if not exists office_doc_office_idx on public.office_doc (office_id, created_at desc);
 create index if not exists office_doc_chunk_doc_idx on public.office_doc_chunk (doc_id, seq);
 -- ivfflat ต้องมีข้อมูลก่อนถึงคุ้ม แต่สร้างไว้เลยไม่เสียหาย (ตารางเล็ก Postgres จะ seq scan เอง)
@@ -175,6 +192,7 @@ alter table public.employee      enable row level security;
 alter table public.meeting       enable row level security;
 alter table public.office_profile   enable row level security;
 alter table public.office_dept_note enable row level security;
+alter table public.office_product   enable row level security;
 alter table public.office_doc       enable row level security;
 alter table public.office_doc_chunk enable row level security;
 
@@ -261,6 +279,13 @@ create policy office_dept_note_select on public.office_dept_note
   for select using (public.is_office_member(office_id));
 drop policy if exists office_dept_note_write on public.office_dept_note;
 create policy office_dept_note_write on public.office_dept_note
+  for all using (public.can_edit_office(office_id)) with check (public.can_edit_office(office_id));
+
+drop policy if exists office_product_select on public.office_product;
+create policy office_product_select on public.office_product
+  for select using (public.is_office_member(office_id));
+drop policy if exists office_product_write on public.office_product;
+create policy office_product_write on public.office_product
   for all using (public.can_edit_office(office_id)) with check (public.can_edit_office(office_id));
 
 drop policy if exists office_doc_select on public.office_doc;

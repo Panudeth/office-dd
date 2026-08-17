@@ -1,9 +1,12 @@
 import { NextRequest } from 'next/server';
 import { DEPT_BY_ID, ROLES } from '@/lib/departments';
-import { ask, effectiveModel, resolveCreds, type Creds } from '@/lib/llm';
+import { SECRETARY_NAME } from '@/game/map';
+import { ask, byokCreds, effectiveModel, resolveCreds, type Creds } from '@/lib/llm';
 import { loadSkill, type LoadedSkill } from '@/lib/skills';
 import { companyBlock, companyStats, type CompanyContext } from '@/lib/company';
-import { MAX_ATTENDEES, type AskAgent, type AskEvent, type AskRequest, type SkillFile } from '@/lib/protocol';
+import {
+  MAX_ATTENDEES, type AskAgent, type AskEvent, type AskRequest, type LlmAssignment, type SkillFile,
+} from '@/lib/protocol';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -337,6 +340,43 @@ function mockText(a: AskAgent, round: number) {
 const mockAsk = (owner: AskAgent, t: AskAgent) =>
   `[โหมดสาธิต] ${owner.deptName}ขอถาม${t.deptName}ว่าเรื่องนี้ติดข้อกำหนดอะไรบ้าง และต้องเตรียมอะไรก่อน`;
 
+/* ============================================================
+   เลขาฯ จดรายงานการประชุม - คนละหน้าที่กับประธาน
+   ประธาน "ตัดสิน" จากมุมของแผนกตัวเอง เลขาฯ "จดให้เป็นกลาง" ว่าใครพูดอะไร มติคืออะไร ค้างอะไร
+   ใช้โมเดลถูก ๆ ได้ เพราะไม่ต้องคิด แค่เรียบเรียงตามโครง
+   ============================================================ */
+function writeMinutes(
+  question: string, agents: AskAgent[], dump: string, final: string, chairName: string, creds: Creds,
+) {
+  const who = agents.map((a) => `${a.name} (${ROLES[a.role].th} - ${a.deptName})`).join(', ');
+  return ask({
+    system: `คุณคือ **${SECRETARY_NAME}** เลขานุการของบริษัท นั่งจดอยู่ในห้องประชุม
+หน้าที่ของคุณคือเขียน "รายงานการประชุม" ให้เป็นกลางและครบถ้วน - คุณไม่ตัดสิน ไม่เพิ่มความเห็นตัวเอง
+บันทึกให้คนที่ไม่ได้อยู่ในห้องอ่านแล้วรู้ว่าเกิดอะไรขึ้น ใครยืนยันอะไร และตกลงกันว่าอย่างไร
+เขียนภาษาไทย กระชับ เป็นข้อ ๆ`,
+    user: `วาระ: "${question}"
+ผู้เข้าประชุม: ${who}
+ประธาน/ผู้สรุป: ${chairName}
+
+บันทึกดิบจากห้องประชุม:
+
+${dump}
+
+คำสรุปของประธานที่รายงานหัวหน้า:
+
+${final}
+
+เขียนรายงานการประชุมตามโครงนี้ (ใช้หัวข้อตามนี้เป๊ะ ไม่ต้องเกริ่น):
+
+**ประเด็นจากแต่ละแผนก** - แผนกละ 1-2 บรรทัด ระบุชื่อแผนก ว่ายืนยันอะไร
+**ข้อค้านที่ยกขึ้นมา** - ใครค้านใครเรื่องอะไร และถูกตอบหรือยัง (ถ้าไม่มีให้เขียน "ไม่มี")
+**มติ** - สิ่งที่ประธานตัดสิน 1-3 บรรทัด ตามที่ประธานสรุป ห้ามแต่งเพิ่ม
+**สิ่งที่ต้องทำต่อ / รอหัวหน้าตัดสิน** - ถ้าไม่มีให้เขียน "ไม่มี"`,
+    maxTokens: 4000,
+    effort: 'low',
+  }, creds);
+}
+
 const mockAnswer = (a: AskAgent) =>
   `[โหมดสาธิต] ${a.deptName}ตอบว่าเรื่องนี้มีเงื่อนไขที่ต้องทำก่อน และมีจุดที่ต้องระวัง\n(ใส่ API key เพื่อให้ agent ตอบจริง)`;
 
@@ -374,6 +414,37 @@ export async function POST(req: NextRequest) {
     baseUrl: req.headers.get('x-llm-base-url'),
   });
 
+  /**
+   * โมเดลต่อคน/ต่อบทบาท - ชุดคีย์เพิ่มเติมมาใน body เพราะมีได้หลายชุดพร้อมกัน
+   * ใช้เฉพาะคำขอนี้เหมือน header ไม่เก็บ ไม่ log และไม่ส่งกลับ
+   * ชุดที่กรอกไม่ครบ (byokCreds คืน null) ถือว่าไม่มี แล้วถอยไปชุดถัดไปตามลำดับ
+   */
+  const assign: LlmAssignment | undefined = body.llm;
+  const conns = new Map<string, Creds>();
+  for (const [id, c] of Object.entries(assign?.conns ?? {})) {
+    const cr = byokCreds(c);
+    if (cr) conns.set(id, cr);
+  }
+  const pick = (id?: string | null) => (id ? conns.get(id) ?? null : null);
+  /**
+   * โมเดลของคนนี้ - รายคนชนะเสมอ ถัดมาหัวหน้าแผนกได้ค่า "หัวหน้าแผนก" (ทุกรอบ ไม่ใช่แค่ตอนสรุป)
+   * ที่เหลือใช้ค่าลูกทีม แล้วค่อยถอยไปชุดเริ่มต้นจาก header
+   */
+  const credsOf = (a: AskAgent): Creds | null =>
+    pick(assign?.byAgent?.[a.id]) ?? (a.isHead ? pick(assign?.chair) : null) ?? pick(assign?.member) ?? creds;
+  /** เลขาฯ: ตั้ง 'off' = ไม่จด, ไม่ตั้ง = ค่าลูกทีม -> ค่าเริ่มต้น */
+  const secretaryCreds: Creds | null =
+    assign?.secretary === 'off' ? null : pick(assign?.secretary) ?? pick(assign?.member) ?? creds;
+
+  // ชื่อโมเดลจริงต่อชุดคีย์ - ปลายทางในเครื่องต้องไปถามก่อน ถามครั้งเดียวพอ
+  const modelCache = new Map<Creds, Promise<string>>();
+  const modelOf = (c: Creds | null): Promise<string> => {
+    if (!c) return Promise.resolve('โหมดสาธิต');
+    let p = modelCache.get(c);
+    if (!p) { p = effectiveModel(c); modelCache.set(c, p); }
+    return p;
+  };
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -383,10 +454,19 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(ev)}\n\n`));
       };
       const roleTh = (a: AskAgent) => ROLES[a.role].th;
+      /** เลขาฯ จดหลัง final - พังก็ข้าม ไม่ให้รายงานการประชุมมาทำให้คำตอบหลักล้ม */
+      const minutes = async (dump: string, final: string, chairName: string) => {
+        if (!secretaryCreds || !final) return;
+        send({ type: 'phase', phase: 'synthesis', label: `${SECRETARY_NAME} กำลังจดรายงานการประชุม` });
+        try {
+          const text = await writeMinutes(question, agents, dump, final, chairName, secretaryCreds);
+          send({ type: 'minutes', text, model: await modelOf(secretaryCreds) });
+        } catch {
+          /* ไม่มีรายงานก็ยังมีคำตอบของประธานอยู่ */
+        }
+      };
 
       try {
-        const live = creds !== null;
-
         // แต่ละแผนกอ่านสกิลของตัวเอง - โหลดทีเดียวแล้วแจกตาม deptId
         const skills = new Map<string, LoadedSkill>();
         await Promise.all(
@@ -410,7 +490,23 @@ export async function POST(req: NextRequest) {
           };
         });
 
+        // ประธานที่ประชุม = คนที่ผู้ใช้เลือกในหน้าวาระ (ต้องเป็นคนที่อยู่ในห้องจริง)
+        // ไม่ได้เลือกมา -> หัวหน้าของแผนกเจ้าของเรื่อง -> ใครก็ได้ในแผนกนั้น
+        const ownerPool = agents.filter((a) => a.deptId === ownerDeptId);
+        const chair = agents.find((a) => a.id === body.chairId)
+          ?? ownerPool.find((a) => a.isHead)
+          ?? ownerPool[0]
+          ?? agents[0];
+        const chairC = credsOf(chair);
+
         // ส่งหลักฐานให้ผู้ใช้ตรวจได้ว่า skill ถูกอ่านและประกอบเป็น system prompt จริง
+        // และใครใช้โมเดลไหน - mixed-model จะได้ตรวจได้ว่าตั้งแล้วมีผลจริง
+        const agentModels = await Promise.all(
+          agents.map(async (a) => {
+            const c = credsOf(a);
+            return { agentId: a.id, agentName: a.name, model: await modelOf(c), provider: c?.provider ?? 'mock' };
+          }),
+        );
         send({
           type: 'skill',
           proof: {
@@ -418,26 +514,29 @@ export async function POST(req: NextRequest) {
             systemPrompt: agentSystem(skillOf(agents[0]), agents[0], room, company),
             company: companyStats(company, agents[0].deptId),
             agentName: agents[0].name,
-            model: creds ? await effectiveModel(creds) : 'โหมดสาธิต',
-            provider: creds?.provider ?? 'mock',
+            model: await modelOf(chairC),
+            provider: chairC?.provider ?? 'mock',
+            agentModels,
           },
         });
 
         if (mode === 'direct') {
           /* ---------- ตอบตรง ---------- */
-          const who = agents.find((a) => a.deptId === ownerDeptId) ?? agents[0];
+          const who = chair;
+          const c = chairC;
           send({ type: 'phase', phase: 'direct', label: `${who.name} ตอบจากข้อมูลบริษัท` });
-          const text = live
-            ? await directAnswer(skillOf(who), who, question, creds, company)
+          const text = c
+            ? await directAnswer(skillOf(who), who, question, c, company)
             : (await sleep(1200), `[โหมดสาธิต] ${who.deptName}ตอบจากข้อมูลบริษัท (ใส่ API key เพื่อให้ตอบจริง)`);
-          send({ type: 'final', text, leadAgentId: who.id, leadAgentName: who.name });
+          send({ type: 'final', text, leadAgentId: who.id, leadAgentName: who.name, model: await modelOf(c) });
           send({ type: 'done' });
           return;
         }
 
         if (mode === 'relay') {
           /* ---------- สายพาน ---------- */
-          const owner = agents.find((a) => a.deptId === ownerDeptId) ?? agents[0];
+          const owner = chair;
+          const ownerC = chairC;
           // แผนกอื่นส่งตัวแทนแผนกละคน - สายพานคุยกันทีละคน ไม่ใช่ประชุม
           const targets = deptIds
             .filter((id) => id !== owner.deptId)
@@ -451,8 +550,8 @@ export async function POST(req: NextRequest) {
             const step = i + 1;
             send({ type: 'phase', phase: 'consult', label: `${owner.name} ไปถาม${t.deptName}` });
 
-            const asked = live
-              ? await relayAsk(skillOf(owner), owner, question, t, steps, creds, company)
+            const asked = ownerC
+              ? await relayAsk(skillOf(owner), owner, question, t, steps, ownerC, company)
               : (await sleep(1200), mockAsk(owner, t));
             send({
               type: 'consult',
@@ -462,24 +561,29 @@ export async function POST(req: NextRequest) {
               text: asked.trim(),
             });
 
-            const answer = live
-              ? await relayAnswer(skillOf(t), t, question, asked, owner, creds, company)
+            const tc = credsOf(t);
+            const answer = tc
+              ? await relayAnswer(skillOf(t), t, question, asked, owner, tc, company)
               : (await sleep(1500), mockAnswer(t));
             send({
               type: 'opinion',
               agentId: t.id, agentName: t.name, agentRole: roleTh(t), deptId: t.deptId,
-              round: 1, step, askedBy: owner.name, text: answer,
+              round: 1, step, askedBy: owner.name, text: answer, model: await modelOf(tc),
             });
 
             steps.push({ deptName: t.deptName, asked: asked.trim(), text: answer });
           }
 
           send({ type: 'phase', phase: 'synthesis', label: `${owner.name} ประกอบคำตอบก่อนไปรายงาน` });
-          const final = live
-            ? await relaySummary(skillOf(owner), owner, question, steps, creds, company)
+          const final = ownerC
+            ? await relaySummary(skillOf(owner), owner, question, steps, ownerC, company)
             : (await sleep(1500), mockFinal(question));
 
-          send({ type: 'final', text: final, leadAgentId: owner.id, leadAgentName: owner.name });
+          send({ type: 'final', text: final, leadAgentId: owner.id, leadAgentName: owner.name, model: await modelOf(ownerC) });
+          if (ownerC) {
+            const dump = steps.map((s, i) => `### ขั้นที่ ${i + 1} - ${owner.name} ถาม${s.deptName}: ${s.asked}\n${s.text}`).join('\n\n');
+            await minutes(dump, final, owner.name);
+          }
           send({ type: 'done' });
           return;
         }
@@ -489,14 +593,15 @@ export async function POST(req: NextRequest) {
         const r1: Said[] = [];
         await Promise.all(
           agents.map(async (a) => {
-            const text = live
-              ? await round1(skillOf(a), a, question, room, creds, company)
+            const c = credsOf(a);
+            const text = c
+              ? await round1(skillOf(a), a, question, room, c, company)
               : (await sleep(1800 + Math.random() * 1500), mockText(a, 1));
             r1.push(asSaid(a, text));
             send({
               type: 'opinion',
               agentId: a.id, agentName: a.name, agentRole: roleTh(a), deptId: a.deptId,
-              round: 1, text,
+              round: 1, text, model: await modelOf(c),
             });
           }),
         );
@@ -506,28 +611,31 @@ export async function POST(req: NextRequest) {
         await Promise.all(
           agents.map(async (a) => {
             const others = r1.filter((o) => o.name !== a.name);
-            const text = live
-              ? await round2(skillOf(a), a, question, others, room, creds, company)
+            const c = credsOf(a);
+            const text = c
+              ? await round2(skillOf(a), a, question, others, room, c, company)
               : (await sleep(1500 + Math.random() * 1500), mockText(a, 2));
             r2.push(asSaid(a, text));
             send({
               type: 'opinion',
               agentId: a.id, agentName: a.name, agentRole: roleTh(a), deptId: a.deptId,
-              round: 2, text,
+              round: 2, text, model: await modelOf(c),
             });
           }),
         );
 
         send({ type: 'phase', phase: 'synthesis', label: 'ประธานสรุปก่อนมารายงาน' });
-        // ประธานมาจากแผนกเจ้าของเรื่อง เลือกผู้ตรวจสอบก่อนเพราะเป็นบทบาทที่ไม่เข้าข้างใคร
-        const pool = agents.filter((a) => a.deptId === ownerDeptId);
-        const chair = pool.find((a) => a.role === 'verifier') ?? pool[0] ?? agents[0];
+        // ประธาน = หัวหน้าแผนกที่ผู้ใช้เลือกไว้ (เลือกไว้แล้วข้างบน) - ถกมาด้วยแล้ว ตอนนี้สวมหมวกประธาน
         const deptNames = deptIds.map((id) => DEPT_BY_ID.get(id)?.nameTh ?? id);
-        const final = live
-          ? await synthesize(skillOf(chair), chair, question, deptNames, r1, r2, creds, company)
+        const final = chairC
+          ? await synthesize(skillOf(chair), chair, question, deptNames, r1, r2, chairC, company)
           : (await sleep(1500), mockFinal(question));
 
-        send({ type: 'final', text: final, leadAgentId: chair.id, leadAgentName: chair.name });
+        send({ type: 'final', text: final, leadAgentId: chair.id, leadAgentName: chair.name, model: await modelOf(chairC) });
+        if (chairC) {
+          const dump = ['## รอบแรก', dumpSaid(r1), '', '## รอบสอง (ค้าน)', dumpSaid(r2)].join('\n\n');
+          await minutes(dump, final, chair.name);
+        }
         send({ type: 'done' });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

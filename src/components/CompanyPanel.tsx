@@ -1,16 +1,18 @@
 'use client';
 
 import {
-  BookOpen, Check, FileText, LoaderCircle, Save, ShieldAlert, Trash2, Upload,
+  ArrowDown, ArrowUp, BookOpen, Check, FileText, LoaderCircle, Package, Plus, Save, ShieldAlert,
+  Trash2, Upload,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { DEPARTMENTS, DEPT_BY_ID } from '@/lib/departments';
 import {
-  DEPT_NOTE_HINTS, DEPT_NOTE_MAX, PROFILE_FIELDS, PROFILE_MAX_TOTAL, profileLength,
+  DEPT_NOTE_HINTS, DEPT_NOTE_MAX, PRODUCT_LIMITS, PRODUCT_MAX_COUNT, PROFILE_FIELDS,
+  PROFILE_MAX_TOTAL, emptyProduct, productIssue, profileLength, type Product,
 } from '@/lib/company';
 import {
-  canEditOffice, createDoc, deleteDoc, insertChunks, listDocs, saveDeptNote, saveProfile,
-  sbError, updateDoc, uploadDocFile, type DocRow,
+  canEditOffice, createDoc, deleteDoc, insertChunks, listDocs, saveDeptNote, saveProducts,
+  saveProfile, sbError, updateDoc, uploadDocFile, type DocRow,
 } from '@/lib/supabase';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,8 +22,9 @@ import { Hint } from '@/components/ui/panel';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 /* ============================================================
-   ข้อมูลบริษัท - สามชั้นที่ agent จะอ่านก่อนตอบ
+   ข้อมูลบริษัท - สี่ชั้นที่ agent จะอ่านก่อนตอบ
      โปรไฟล์  ทุกแผนกเห็นเหมือนกัน (ฟอร์มมีโครง)
+     สินค้า   รายการสินค้า/บริการพร้อมราคา ทุกแผนกเห็น
      แผนก     โน้ตเฉพาะแผนก แผนกไหนเห็นของแผนกนั้น
      เอกสาร   ไฟล์จริง ตัดชิ้น + embedding เก็บใน Supabase ค้นตอนถาม (เฟส 3)
    ============================================================ */
@@ -32,6 +35,7 @@ interface Props {
   officeId: string | null;
   userId: string | null;
   profile: Record<string, string>;
+  products: Product[];
   deptNotes: Record<string, string>;
   /** บันทึกเสร็จแล้วให้ page โหลดใหม่ - state ของจริงอยู่ที่ page */
   onChanged: () => void;
@@ -42,12 +46,13 @@ interface Props {
 }
 
 export default function CompanyPanel({
-  open, onClose, officeId, userId, profile, deptNotes, onChanged, llmHeaders, llmLabel, blocked,
+  open, onClose, officeId, userId, profile, products, deptNotes, onChanged, llmHeaders, llmLabel, blocked,
 }: Props) {
   const [tab, setTab] = useState('profile');
   const [canEdit, setCanEdit] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [items, setItems] = useState<Product[]>([]);
   const [noteDept, setNoteDept] = useState(DEPARTMENTS[0].id);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -66,6 +71,7 @@ export default function CompanyPanel({
     if (!open) return;
     setDraft({ ...profile });
     setNotes({ ...deptNotes });
+    setItems(products.map((p) => ({ ...p })));
     setMsg(null);
     if (officeId) {
       canEditOffice(officeId).then(setCanEdit).catch(() => setCanEdit(false));
@@ -97,6 +103,39 @@ export default function CompanyPanel({
       setSaving(false);
     }
   };
+
+  // แถวเปล่าที่ผู้ใช้กด "เพิ่ม" แล้วไม่ได้กรอกอะไรเลย ไม่นับเป็นความผิด แค่ไม่บันทึก
+  const isBlank = (p: Product) => !p.name.trim() && !p.description.trim() && !p.price.trim() && !p.note.trim();
+  const filledItems = items.filter((p) => !isBlank(p));
+  const productProblem = filledItems.map(productIssue).find(Boolean) ?? null;
+  const productsDirty = JSON.stringify(filledItems) !== JSON.stringify(products);
+
+  const doSaveProducts = async () => {
+    if (!officeId) return;
+    setSaving(true); setMsg(null);
+    try {
+      await saveProducts(officeId, filledItems, userId);
+      onChanged();
+      setItems(filledItems.map((p) => ({ ...p })));
+      setMsg({ ok: true, text: `บันทึกสินค้า ${filledItems.length} รายการแล้ว - agent ทุกตัวจะเห็นในคำถามถัดไป` });
+    } catch (e) {
+      setMsg({ ok: false, text: sbError(e) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const setItem = (id: string, patch: Partial<Product>) =>
+    setItems((xs) => xs.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  const moveItem = (id: string, dir: -1 | 1) =>
+    setItems((xs) => {
+      const i = xs.findIndex((p) => p.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= xs.length) return xs;
+      const next = [...xs];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
 
   const doSaveNote = async () => {
     if (!officeId) return;
@@ -189,6 +228,7 @@ export default function CompanyPanel({
             <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-col">
               <TabsList className="rounded-t-box border border-b-0 border-wood-deep">
                 <TabsTrigger value="profile"><BookOpen /> โปรไฟล์</TabsTrigger>
+                <TabsTrigger value="products"><Package /> สินค้า{products.length ? ` ${products.length}` : ''}</TabsTrigger>
                 <TabsTrigger value="depts">แผนก</TabsTrigger>
                 <TabsTrigger value="docs"><FileText /> เอกสาร{docs.length ? ` ${docs.length}` : ''}</TabsTrigger>
               </TabsList>
@@ -226,6 +266,96 @@ export default function CompanyPanel({
                   </span>
                   <Button variant="primary" className="ml-auto" disabled={!canEdit || saving || overTotal} onClick={doSaveProfile}>
                     {saving ? <LoaderCircle className="animate-spin" /> : <Save />} บันทึกโปรไฟล์
+                  </Button>
+                </div>
+              </TabsContent>
+
+              {/* ---------- สินค้า/บริการ ---------- */}
+              <TabsContent value="products" className="min-h-0">
+                <div className="flex max-h-[56vh] flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5">
+                  <Hint>
+                    รายการนี้ถูกส่งให้ agent ทุกตัวพร้อมโปรไฟล์ - ใส่ชื่อกับราคาให้ตรงของจริง agent จะอ้างตามนี้และไม่แต่งราคาเอง
+                    ราคาพิมพ์เป็นข้อความได้เลย เช่น "990-2,990 บาท/เดือน" หรือ "เริ่มต้น 15,000 บาท/โปรเจกต์"
+                  </Hint>
+
+                  {!items.length ? (
+                    <Hint className="py-2 text-center">ยังไม่มีสินค้า - กด "เพิ่มสินค้า" ด้านล่าง</Hint>
+                  ) : (
+                    <ul className="flex flex-col gap-1.5">
+                      {items.map((p, i) => {
+                        const issue = productIssue(p);
+                        const blank = isBlank(p);
+                        return (
+                          <li key={p.id} className={`flex flex-col gap-1.5 rounded-box border bg-ink-700 p-2 ${issue && !blank ? 'border-brass/60' : 'border-ink-600'}`}>
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-5 shrink-0 text-center text-[10px] text-dim">{i + 1}</span>
+                              <Input
+                                value={p.name}
+                                disabled={!canEdit}
+                                maxLength={PRODUCT_LIMITS.name}
+                                onChange={(e) => setItem(p.id, { name: e.target.value })}
+                                placeholder="ชื่อสินค้า/บริการ *"
+                                className="min-w-0 flex-1 font-semibold"
+                              />
+                              <Input
+                                value={p.price}
+                                disabled={!canEdit}
+                                maxLength={PRODUCT_LIMITS.price}
+                                onChange={(e) => setItem(p.id, { price: e.target.value })}
+                                placeholder="ราคา"
+                                className="w-40 shrink-0"
+                              />
+                              {canEdit && (
+                                <>
+                                  <Button size="icon" variant="ghost" className="size-7" title="เลื่อนขึ้น" disabled={i === 0} onClick={() => moveItem(p.id, -1)}><ArrowUp /></Button>
+                                  <Button size="icon" variant="ghost" className="size-7" title="เลื่อนลง" disabled={i === items.length - 1} onClick={() => moveItem(p.id, 1)}><ArrowDown /></Button>
+                                  <Button size="icon" variant="ghost" className="size-7" title="ลบรายการนี้" onClick={() => setItems((xs) => xs.filter((x) => x.id !== p.id))}><Trash2 /></Button>
+                                </>
+                              )}
+                            </div>
+                            <div className="flex gap-1.5 pl-6">
+                              <Textarea
+                                rows={2}
+                                value={p.description}
+                                disabled={!canEdit}
+                                maxLength={PRODUCT_LIMITS.description}
+                                onChange={(e) => setItem(p.id, { description: e.target.value })}
+                                placeholder="รายละเอียด - ทำอะไร ให้ใคร จุดขาย"
+                                className="h-auto min-w-0 flex-1 text-[11px]"
+                              />
+                              <Textarea
+                                rows={2}
+                                value={p.note}
+                                disabled={!canEdit}
+                                maxLength={PRODUCT_LIMITS.note}
+                                onChange={(e) => setItem(p.id, { note: e.target.value })}
+                                placeholder="หมายเหตุ - ต้นทุน/มาร์จิน เงื่อนไข สถานะ (เช่น กำลังจะเลิกขาย)"
+                                className="h-auto w-56 shrink-0 text-[11px]"
+                              />
+                            </div>
+                            {issue && !blank && <span className="pl-6 text-[10px] text-brass">{issue}</span>}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+
+                  {canEdit && (
+                    <Button
+                      variant="outline" size="sm" className="self-start"
+                      disabled={items.length >= PRODUCT_MAX_COUNT}
+                      onClick={() => setItems((xs) => [...xs, emptyProduct(crypto.randomUUID())])}
+                    >
+                      <Plus /> เพิ่มสินค้า{items.length >= PRODUCT_MAX_COUNT ? ` (เต็ม ${PRODUCT_MAX_COUNT} รายการ)` : ''}
+                    </Button>
+                  )}
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <span className={`text-[11px] ${productProblem ? 'text-brass' : 'text-dim'}`}>
+                    {productProblem ?? `${filledItems.length}/${PRODUCT_MAX_COUNT} รายการ`}
+                  </span>
+                  <Button variant="primary" className="ml-auto" disabled={!canEdit || saving || !!productProblem || !productsDirty} onClick={doSaveProducts}>
+                    {saving ? <LoaderCircle className="animate-spin" /> : <Save />} บันทึกรายการสินค้า
                   </Button>
                 </div>
               </TabsContent>

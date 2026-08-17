@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, ClipboardList, LoaderCircle, Play, Sparkles, Users } from 'lucide-react';
+import { Check, ClipboardList, Crown, LoaderCircle, Play, Sparkles, Users } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { DEPARTMENTS, DEPT_BY_ID, ROLE_ORDER } from '@/lib/departments';
 import { MAX_ATTENDEES, MEETING_MODES, type Agenda, type MeetingMode } from '@/lib/protocol';
@@ -10,11 +10,15 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/input';
 import { Hint } from '@/components/ui/panel';
+import Portrait from '@/components/Portrait';
+import { deptHeadIds } from '@/lib/heads';
 
 export interface AgendaPick {
   agentIds: string[];
   mode: MeetingMode;
   ownerDeptId: string;
+  /** ประธานที่ประชุม/คนสรุป - หัวหน้าแผนกคนหนึ่งที่อยู่ในรายชื่อผู้เข้าประชุม */
+  chairId: string;
 }
 
 interface Props {
@@ -57,7 +61,8 @@ export default function AgendaPanel({
   open, question, agenda, loading, error, roster, onCancel, onStart,
 }: Props) {
   const [mode, setMode] = useState<MeetingMode>('roundtable');
-  const [owner, setOwner] = useState('');
+  /** ประธานที่เลือกไว้ (id พนักงาน) - แผนกเจ้าของเรื่องคือแผนกของคนนี้ */
+  const [chair, setChair] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
   // ผู้ใช้แก้รายชื่อเองแล้วหรือยัง - ถ้าแก้แล้ว การสลับโหมดต้องไม่ไปล้างของที่เขาเลือก
   const [touched, setTouched] = useState(false);
@@ -65,7 +70,7 @@ export default function AgendaPanel({
   useEffect(() => {
     if (!agenda) return;
     setMode(agenda.mode);
-    setOwner(agenda.ownerDeptId);
+    setChair(deptHeadIds(roster).get(agenda.ownerDeptId) ?? '');
     setPicked(autoPick(agenda, roster, agenda.mode));
     setTouched(false);
     // roster เปลี่ยนตลอดจาก game loop - ผูกกับ agenda อย่างเดียว ไม่งั้นเลือกใหม่ทุก 400ms
@@ -100,9 +105,23 @@ export default function AgendaPanel({
     if (!touched && agenda) setPicked(autoPick(agenda, roster, m));
   };
 
-  // เจ้าของเรื่องต้องเป็นแผนกที่มีคนเข้าประชุมจริง ไม่งั้นสายพานจะไม่มีคนถือคำถาม
-  const ownerValid = pickedDepts.includes(owner);
-  const effectiveOwner = ownerValid ? owner : pickedDepts[0] ?? '';
+  /**
+   * ประธานเลือกได้เฉพาะหัวหน้าแผนก (คนแรกที่จ้าง) ของแผนกที่มีคนเข้าประชุม
+   * หัวหน้าเป็นคนที่ใช้โมเดลเก่งสุดอยู่แล้ว และเป็นคนที่ผู้ใช้จำได้ว่าเป็นใคร
+   */
+  const heads = deptHeadIds(roster);
+  const chairOptions = pickedDepts
+    .map((d) => roster.find((r) => r.id === heads.get(d)))
+    .filter((r): r is EmployeeSnapshot => !!r);
+  const chairValid = chairOptions.some((r) => r.id === chair);
+  const effectiveChair = chairValid ? chair : chairOptions[0]?.id ?? '';
+  // แผนกเจ้าของเรื่องคือแผนกของประธาน - relay ใช้เป็นคนถือคำถาม
+  const effectiveOwner = roster.find((r) => r.id === effectiveChair)?.deptId ?? pickedDepts[0] ?? '';
+  const chooseChair = (id: string) => {
+    setChair(id);
+    // ประธานต้องนั่งอยู่ในห้องจริง - ถ้าผู้ใช้เอาหัวหน้าออกไปแล้ว ดึงกลับเข้ามา
+    if (!pickedSet.has(id) && !full) { setTouched(true); setPicked((p) => [...p, id]); }
+  };
   const relayTooSmall = mode === 'relay' && pickedDepts.length < 2;
 
   const blocked = !picked.length
@@ -167,25 +186,30 @@ export default function AgendaPanel({
             </Field>
 
             <Field
-              label={mode === 'relay' ? 'เจ้าของเรื่อง (คนถือคำถาม)' : 'ประธานที่ประชุม (คนสรุป)'}
+              label={mode === 'relay' ? 'เจ้าของเรื่อง (คนถือคำถามและสรุป)' : mode === 'direct' ? 'คนตอบ' : 'ประธานที่ประชุม (คนสรุป)'}
+              hint="เลือกได้เฉพาะหัวหน้าแผนก (คนแรกที่จ้างในแผนก) - หัวหน้าถกในรอบปกติด้วย แล้วสวมหมวกประธานตอนสรุป"
             >
               <div className="flex flex-wrap gap-1.5">
-                {pickedDepts.map((id) => {
-                  const d = DEPT_BY_ID.get(id);
-                  const on = effectiveOwner === id;
+                {chairOptions.map((r) => {
+                  const d = DEPT_BY_ID.get(r.deptId);
+                  const on = effectiveChair === r.id;
                   return (
                     <button
-                      key={id}
-                      onClick={() => setOwner(id)}
-                      className={`rounded-box border-2 px-2 py-1 text-[11px] font-semibold ${
+                      key={r.id}
+                      onClick={() => chooseChair(r.id)}
+                      title={`${r.name} - ${r.title}`}
+                      className={`flex items-center gap-1.5 rounded-box border-2 py-1 pl-1 pr-2 text-[11px] font-semibold ${
                         on ? 'border-brass bg-ink-700 text-parchment' : 'border-ink-600 bg-ink-800 text-dim hover:border-ink-500'
                       }`}
                     >
-                      {d?.nameTh ?? id}
+                      <Portrait palette={r.palette} size={1} className="block shrink-0" />
+                      {on && <Crown className="size-3 text-brass" />}
+                      {r.name}
+                      <span className={on ? 'font-normal text-parchment-2/70' : 'font-normal text-dim'}>{d?.shortTh ?? r.deptId}</span>
                     </button>
                   );
                 })}
-                {!pickedDepts.length && <Hint>เลือกคนก่อน แล้วค่อยเลือกเจ้าของเรื่อง</Hint>}
+                {!chairOptions.length && <Hint>เลือกคนก่อน แล้วค่อยเลือกประธาน</Hint>}
               </div>
             </Field>
 
@@ -242,6 +266,7 @@ export default function AgendaPanel({
                               >
                                 {on && <Check className="size-2.5 text-carpet-dark" />}
                               </span>
+                              {heads.get(m.deptId) === m.id && <Crown className="size-3 text-brass" />}
                               <b className="font-semibold">{m.name}</b>
                               <span className={on ? 'text-white/70' : 'text-dim'}>{m.title}</span>
                             </button>
@@ -270,7 +295,7 @@ export default function AgendaPanel({
           <Button
             variant="primary"
             disabled={loading || !!blocked || !picked.length}
-            onClick={() => onStart({ agentIds: picked, mode, ownerDeptId: effectiveOwner })}
+            onClick={() => onStart({ agentIds: picked, mode, ownerDeptId: effectiveOwner, chairId: effectiveChair })}
           >
             <Play /> เริ่มประชุม
           </Button>

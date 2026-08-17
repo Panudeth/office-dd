@@ -113,6 +113,11 @@ export default function ChatPanel({ messages, busy, phase, onSend }: Props) {
                         {MEETING_MODES.find((x) => x.id === m.mode)?.th}
                       </Badge>
                     )}
+                    {m.model && (
+                      <span className="text-[10px] text-dim" title="โมเดลของคนสรุปคำตอบนี้">
+                        · {m.model}
+                      </span>
+                    )}
                     {/* แผนกที่เข้าประชุมจริง - จุดสีเดียวกับเสื้อพนักงานบนแผนที่ */}
                     {m.deptIds?.map((id) => {
                       const d = DEPT_BY_ID.get(id);
@@ -181,6 +186,18 @@ export default function ChatPanel({ messages, busy, phase, onSend }: Props) {
                           บวกบทบาท บวกมุมมองของแผนก
                           <br />
                           skill ถูกอ่าน<b className="text-parchment">ตอนถามคำถามนี้</b> ไม่ใช่ตอนกดจ้าง
+                          {m.proof.agentModels && new Set(m.proof.agentModels.map((x) => x.model)).size > 1 && (
+                            <>
+                              <br />
+                              ประชุมนี้ใช้หลายโมเดล:{' '}
+                              {m.proof.agentModels.map((x, i) => (
+                                <span key={x.agentId}>
+                                  {i > 0 && ' · '}
+                                  <b className="text-parchment">{x.agentName}</b> <code>{x.model}</code>
+                                </span>
+                              ))}
+                            </>
+                          )}
                           {m.proof.company && (
                             <>
                               <br />
@@ -253,6 +270,9 @@ export default function ChatPanel({ messages, busy, phase, onSend }: Props) {
                                       {od && (
                                         <span className="text-[10px] text-dim">{od.shortTh}</span>
                                       )}
+                                      {o.model && (
+                                        <span className="ml-auto truncate text-[10px] text-dim/80" title="โมเดลที่ใช้ตอบ">{o.model}</span>
+                                      )}
                                     </div>
                                     <div>{fmt(o.text)}</div>
                                   </div>
@@ -291,6 +311,9 @@ export default function ChatPanel({ messages, busy, phase, onSend }: Props) {
                                               />
                                               {od.shortTh}
                                             </span>
+                                          )}
+                                          {o.model && (
+                                            <span className="ml-auto truncate text-[10px] text-dim/80" title="โมเดลที่ใช้ตอบ">{o.model}</span>
                                           )}
                                         </div>
                                         <div>{fmt(o.text)}</div>

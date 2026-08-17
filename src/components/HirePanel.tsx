@@ -1,14 +1,28 @@
 'use client';
 
-import { AlertTriangle, Lock, Minus, NotebookPen, UserPlus, Users } from 'lucide-react';
-import type { ReactNode } from 'react';
+import {
+  AlertTriangle, Cpu, Crown, LayoutGrid, List, Lock, Minus, NotebookPen, UserPlus, Users,
+} from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { DEPARTMENTS } from '@/lib/departments';
+import { SECRETARY_NAME, SECRETARY_PAL } from '@/game/map';
+import { deptHeadIds } from '@/lib/heads';
+import type { LlmRoles } from '@/components/KeyPanel';
 import type { AgentState, EmployeeSnapshot } from '@/game/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Hint, Panel, PanelBody } from '@/components/ui/panel';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import Portrait from '@/components/Portrait';
+
+/** ตัวเลือกโมเดลต่อคน - id ของชุดคีย์ใน KeyPanel + ป้ายสั้น ๆ */
+export interface LlmOption {
+  id: string;
+  label: string;
+}
 
 /** สถานะจาก game loop - แปลให้อ่านออกว่าตอนนี้เขาทำอะไรอยู่บนแผนที่ */
 const STATE_TH: Record<AgentState, string> = {
@@ -47,13 +61,47 @@ interface Props {
   /** เนื้อหาแท็บสมุดเลขาฯ - ประกอบจากข้างนอก (page มีข้อมูล meetings อยู่แล้ว) */
   secretary: ReactNode;
   meetingCount: number;
+  /**
+   * โมเดลต่อคน - ชุดคีย์ที่บันทึกไว้ใน KeyPanel  ว่างเปล่า = ไม่โชว์ตัวเลือกเลย
+   * llmOf คืน id ที่ตั้งไว้ให้คนนี้ (undefined = ตามค่าเริ่มต้น) และ llmDefaultLabel บอกว่าค่าเริ่มต้นคืออะไร
+   */
+  llmOptions?: LlmOption[];
+  llmOf?: (employeeId: string) => string | undefined;
+  llmDefaultLabel?: string;
+  onLlm?: (employeeId: string, connId: string | null) => void;
+  /** โมเดลของตำแหน่งพิเศษ (ประธาน / ลูกทีม / เลขาฯ) - ค่าเดียวกับที่ตั้งใน "คีย์ของฉัน" */
+  roleLlm?: LlmRoles;
+  onRoleLlm?: (k: keyof LlmRoles, connId: string | null) => void;
+  /** ชุดที่ active อยู่ - ค่าเริ่มต้นสุดท้ายของทุกคน */
+  llmActiveLabel?: string;
+  /** ป้ายค่าเริ่มต้นของหัวหน้าแผนก (ค่า chair หรือถอยไปค่าลูกทีม) */
+  llmHeadLabel?: string;
 }
+
+/** มุมมองแผงพนักงาน - จำไว้ข้ามรีเฟรช */
+const VIEW_KEY = 'visual-company.staffview';
+type StaffView = 'card' | 'list';
 
 export default function HirePanel({
   roster, seatsLeft, roomLeft, onHire, onFire, onFocus, disabled, lock, onUnlock,
   tab, onTab: setTab, secretary, meetingCount,
+  llmOptions = [], llmOf, llmDefaultLabel = 'ค่าเริ่มต้น', onLlm,
+  roleLlm, onRoleLlm, llmActiveLabel = 'คีย์ของเซิร์ฟเวอร์', llmHeadLabel = llmDefaultLabel,
 }: Props) {
   const off = disabled || !!lock;
+
+  const [view, setViewState] = useState<StaffView>('card');
+  // localStorage อ่านได้เฉพาะฝั่ง client - โหลดหลัง mount ไม่งั้น SSR ไม่ตรง
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(VIEW_KEY);
+      if (v === 'list' || v === 'card') setViewState(v);
+    } catch { /* ใช้ค่าเริ่มต้น */ }
+  }, []);
+  const setView = (v: StaffView) => {
+    setViewState(v);
+    try { localStorage.setItem(VIEW_KEY, v); } catch { /* โหมดส่วนตัว */ }
+  };
 
   // บอกเหตุผลที่กดไม่ได้ พร้อมทางออก - ปุ่มเทาเฉย ๆ ไม่ช่วยให้รู้ว่าต้องทำอะไร
   const lockNote = lock && (
@@ -67,6 +115,9 @@ export default function HirePanel({
       )}
     </div>
   );
+
+  /** หัวหน้าแผนก = คนแรกที่จ้าง - โชว์มงกุฎ และเป็นคนที่ใช้โมเดล "หัวหน้าแผนก" */
+  const heads = deptHeadIds(roster);
 
   // จัดกลุ่มตามแผนกโดยคงลำดับของ DEPARTMENTS ไว้ จะได้ไม่สลับที่ทุกครั้งที่ poll
   const groups = DEPARTMENTS.map((d) => ({
@@ -100,6 +151,71 @@ export default function HirePanel({
           <PanelBody className="gap-1.5">
             {lockNote}
 
+            {/* ตำแหน่งพิเศษ - ไม่ใช่พนักงานที่จ้าง แต่มีโมเดลของตัวเอง
+                ประธานเปลี่ยนคนตามแผนกเจ้าของเรื่อง เลขาฯ เป็นตัวละครประจำ */}
+            {llmOptions.length > 0 && onRoleLlm && (
+              <div className="flex flex-col gap-1 rounded-box border-2 border-wood-dark bg-wood-deep/40 p-1.5">
+                {(
+                  [
+                    {
+                      k: 'chair' as const,
+                      icon: <Crown className="size-3.5 text-brass" />,
+                      name: 'หัวหน้าแผนกทุกคน',
+                      sub: 'คนแรกที่จ้างในแต่ละแผนก - ใช้ทุกรอบ และเป็นประธานที่ประชุมได้',
+                      def: `ค่าเริ่มต้น · ${llmDefaultLabel}`,
+                    },
+                    {
+                      k: 'member' as const,
+                      icon: <Users className="size-3.5 text-dim" />,
+                      name: 'ลูกทีมที่เหลือ',
+                      sub: 'ค่าเริ่มต้นของคนที่ไม่ได้ตั้งรายคน',
+                      def: `ค่าเริ่มต้น · ${llmActiveLabel}`,
+                    },
+                    {
+                      k: 'secretary' as const,
+                      icon: <Portrait palette={SECRETARY_PAL} size={1} className="block shrink-0" />,
+                      name: SECRETARY_NAME,
+                      sub: 'เลขาฯ จดรายงานการประชุมหลังจบ',
+                      def: 'ตามค่าลูกทีม',
+                    },
+                  ]
+                ).map(({ k, icon, name, sub, def }) => {
+                  const cur = roleLlm?.[k];
+                  const isOff = k === 'secretary' && cur === 'off';
+                  const opt = llmOptions.find((o) => o.id === cur);
+                  return (
+                    <div key={k} className="flex items-center gap-1.5">
+                      <span className="flex w-5 shrink-0 items-center justify-center">{icon}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[11px] font-semibold text-parchment">{name}</span>
+                        <span className="block truncate text-[10px] text-dim">{sub}</span>
+                      </span>
+                      <Select
+                        value={opt ? opt.id : isOff ? 'off' : '_default'}
+                        onValueChange={(v) => onRoleLlm(k, v === '_default' ? null : v)}
+                        disabled={disabled}
+                      >
+                        <SelectTrigger
+                          className={`h-6 w-40 shrink-0 gap-1 px-1.5 text-[10px] ${opt || isOff ? 'border-brass/60 text-parchment' : 'text-dim'}`}
+                          title={opt ? `${name} ใช้ ${opt.label}` : def}
+                        >
+                          <Cpu className="size-3 shrink-0" />
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="_default">{def}</SelectItem>
+                          {k === 'secretary' && <SelectItem value="off">ไม่จดรายงาน</SelectItem>}
+                          {llmOptions.map((o) => (
+                            <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {!roster.length ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 py-6 text-center">
                 <Hint>ยังไม่มีพนักงานในบริษัท</Hint>
@@ -109,6 +225,23 @@ export default function HirePanel({
               </div>
             ) : (
               <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
+                {/* สลับมุมมอง - การ์ดเห็นหน้าชัด รายการเห็นทีเดียวหลายคนและตั้งโมเดลง่าย */}
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] text-dim">มุมมอง</span>
+                  <Button
+                    size="icon" variant={view === 'card' ? 'primary' : 'ghost'} className="size-6"
+                    title="การ์ด" onClick={() => setView('card')}
+                  >
+                    <LayoutGrid className="size-3" />
+                  </Button>
+                  <Button
+                    size="icon" variant={view === 'list' ? 'primary' : 'ghost'} className="size-6"
+                    title="รายการ" onClick={() => setView('list')}
+                  >
+                    <List className="size-3" />
+                  </Button>
+                </div>
+
                 {groups.map(({ dept, team }) => (
                   <div key={dept.id}>
                     <div className="mb-1 flex items-center gap-1.5">
@@ -127,39 +260,101 @@ export default function HirePanel({
                       )}
                     </div>
 
-                    <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-1.5">
+                    <div
+                      className={
+                        view === 'card'
+                          ? 'grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-1.5'
+                          : 'flex flex-col gap-1'
+                      }
+                    >
                       {team.map((m) => {
                         const working = BUSY_STATES.includes(m.state);
-                        return (
-                          <button
-                            key={m.id}
-                            onClick={() => onFocus(m.id)}
-                            title={`เลื่อนกล้องไปหา ${m.name}`}
-                            className="flex items-center gap-1.5 rounded-box border-2 border-ink-600 bg-ink-700 p-1 text-left hover:border-brass"
+                        const isHead = heads.get(m.deptId) === m.id;
+                        const picked = llmOf?.(m.id);
+                        const pickedOpt = picked ? llmOptions.find((o) => o.id === picked) : undefined;
+                        const select = llmOptions.length > 0 && onLlm && (
+                          <Select
+                            value={pickedOpt ? pickedOpt.id : '_default'}
+                            onValueChange={(v) => onLlm(m.id, v === '_default' ? null : v)}
+                            disabled={disabled}
                           >
-                            {/* รูปนี้วาดด้วยโค้ดเดียวกับตัวบนแผนที่ สีจึงตรงกันเสมอ */}
-                            <span
-                              className="shrink-0 rounded-[3px] border border-ink-500"
-                              style={{ background: 'rgba(0,0,0,.25)' }}
+                            <SelectTrigger
+                              className={`h-6 gap-1 px-1.5 text-[10px] ${view === 'card' ? 'w-full' : 'w-40 shrink-0'} ${pickedOpt ? 'border-brass/60 text-parchment' : 'text-dim'}`}
+                              title={pickedOpt ? `คนนี้ใช้ ${pickedOpt.label}` : `ใช้ค่าเริ่มต้น (${isHead ? llmHeadLabel : llmDefaultLabel})`}
                             >
-                              <Portrait palette={m.palette} size={2} className="block" />
-                            </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[11px] font-semibold text-parchment">
-                                {m.name}
-                              </span>
-                              <span className="block truncate text-[10px] text-dim">
-                                {m.title}
-                              </span>
-                              <span
-                                className={`block truncate text-[10px] ${
-                                  working ? 'text-brass' : 'text-carpet-lite'
-                                }`}
+                              <Cpu className="size-3 shrink-0" />
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="_default">{isHead ? 'ตามหัวหน้าแผนก' : 'ตามลูกทีม'} · {isHead ? llmHeadLabel : llmDefaultLabel}</SelectItem>
+                              {llmOptions.map((o) => (
+                                <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        );
+
+                        if (view === 'list') {
+                          return (
+                            <div
+                              key={m.id}
+                              className={`flex items-center gap-1.5 rounded-box border-2 bg-ink-700 px-1.5 py-1 ${pickedOpt ? 'border-brass/50' : 'border-ink-600'}`}
+                            >
+                              <button
+                                onClick={() => onFocus(m.id)}
+                                title={`เลื่อนกล้องไปหา ${m.name}`}
+                                className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:text-brass"
                               >
-                                {STATE_TH[m.state]}
+                                <Portrait palette={m.palette} size={1} className="block shrink-0" />
+                                {isHead && <Crown className="size-3 shrink-0 text-brass" aria-label="หัวหน้าแผนก" />}
+                                <span className="truncate text-[11px] font-semibold text-parchment">{m.name}</span>
+                                <span className="hidden truncate text-[10px] text-dim sm:inline">{m.title}</span>
+                                <span className={`ml-auto shrink-0 text-[10px] ${working ? 'text-brass' : 'text-carpet-lite'}`}>
+                                  {STATE_TH[m.state]}
+                                </span>
+                              </button>
+                              {select}
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div
+                            key={m.id}
+                            className={`flex flex-col rounded-box border-2 bg-ink-700 ${pickedOpt ? 'border-brass/50' : 'border-ink-600'}`}
+                          >
+                            <button
+                              onClick={() => onFocus(m.id)}
+                              title={`เลื่อนกล้องไปหา ${m.name}`}
+                              className="flex items-center gap-1.5 rounded-box p-1 text-left hover:bg-ink-600"
+                            >
+                              {/* รูปนี้วาดด้วยโค้ดเดียวกับตัวบนแผนที่ สีจึงตรงกันเสมอ */}
+                              <span
+                                className="shrink-0 rounded-[3px] border border-ink-500"
+                                style={{ background: 'rgba(0,0,0,.25)' }}
+                              >
+                                <Portrait palette={m.palette} size={2} className="block" />
                               </span>
-                            </span>
-                          </button>
+                              <span className="min-w-0 flex-1">
+                                <span className="flex items-center gap-1 text-[11px] font-semibold text-parchment">
+                                  {isHead && <Crown className="size-3 shrink-0 text-brass" aria-label="หัวหน้าแผนก" />}
+                                  <span className="truncate">{m.name}</span>
+                                </span>
+                                <span className="block truncate text-[10px] text-dim">
+                                  {m.title}
+                                </span>
+                                <span
+                                  className={`block truncate text-[10px] ${
+                                    working ? 'text-brass' : 'text-carpet-lite'
+                                  }`}
+                                >
+                                  {STATE_TH[m.state]}
+                                </span>
+                              </span>
+                            </button>
+                            {/* โมเดลของคนนี้ - โชว์ต่อเมื่อมีชุดคีย์ให้เลือก ค่าเริ่มต้นตามที่ตั้งใน "คีย์ของฉัน" */}
+                            {select && <div className="px-1 pb-1">{select}</div>}
+                          </div>
                         );
                       })}
                     </div>
