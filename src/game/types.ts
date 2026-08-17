@@ -27,6 +27,8 @@ export interface Palette {
   shirt: string;
   pants: string;
   shoes: string;
+  /** ผู้หญิง = ผมยาว + กระโปรง (อ่านออกจากไกล ๆ ว่าใครเป็นใคร) - ไม่มีค่า = ผู้ชาย */
+  fem?: boolean;
 }
 
 export interface Tile { x: number; y: number }
@@ -87,6 +89,11 @@ export interface Employee {
    * จึงไม่กินโต๊ะจากโควตา ไม่โผล่ในทะเบียนพนักงาน และไม่ถูกล้างตอนสลับออฟฟิศ
    */
   isSecretary?: boolean;
+  /**
+   * แขก/ลูกค้าที่เดินเข้ามาถามหน้าเคาน์เตอร์ (LINE / MCP / API) - ไม่ใช่พนักงาน
+   * ไม่กินโควตา ไม่โผล่ในทะเบียน ไม่ถูกบันทึก เดินออกแล้วหายไปเลย
+   */
+  isVisitor?: boolean;
 
   /**
    * ใครเป็นเจ้าของการเคลื่อนที่ของตัวนี้

@@ -7,3 +7,6 @@ out/
 next-env.d.ts
 *.tsbuildinfo
 .DS_Store
+
+# token ออฟฟิศสำหรับ MCP (สร้างจากปุ่มเชื่อมต่อ) - ห้าม commit
+.mcp.json

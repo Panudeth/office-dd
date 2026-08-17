@@ -2,7 +2,7 @@
 
 import {
   BookOpen, Building2, KeyRound, LogIn, Maximize2, PanelRightClose, PanelRightOpen, Pause, Play,
-  UserRound, Video, ZoomIn, ZoomOut,
+  BellRing, LoaderCircle, MessagesSquare, Plug, UserRound, Video, ZoomIn, ZoomOut,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
@@ -13,6 +13,10 @@ import Portrait from '@/components/Portrait';
 import SecretaryTab from '@/components/SecretaryTab';
 import CompanyPanel from '@/components/CompanyPanel';
 import ChatPanel from '@/components/ChatPanel';
+import MeetingStatus, { type Activity } from '@/components/MeetingStatus';
+import MeetingRoomPanel from '@/components/MeetingRoomPanel';
+import IntegrationsPanel from '@/components/IntegrationsPanel';
+import OperatorPanel from '@/components/OperatorPanel';
 import HirePanel from '@/components/HirePanel';
 import KeyPanel, {
   activeOf, authHeaders, connSubtitle, llmAssignment, loadStore, pruneStore, saveStore,
@@ -22,7 +26,8 @@ import OfficePanel from '@/components/OfficePanel';
 import {
   accountAvatar, accountName, deleteEmployee, deleteMeeting, listMeetings, listOffices,
   listProducts, loadDeptNotes, loadEmployees, loadProfile, matchChunks, readOAuthReturn, rememberOffice,
-  rememberedOfficeId, sb, saveEmployee, saveMeeting, sbError, supabaseConfigured,
+  rememberedOfficeId, sb, saveEmployee, saveMeeting, sbError, supabaseConfigured, updateMeetingMinutes,
+  accessToken,
   type MeetingRow, type OAuthReturn, type Office, type User,
 } from '@/lib/supabase';
 import { profileIsEmpty, type CompanyContext, type Product } from '@/lib/company';
@@ -31,7 +36,9 @@ import type { World } from '@/game/world';
 import { BOSS_RECT, MAX_STAFF, MEETING_RECT, SECRETARY_NAME, SECRETARY_PAL } from '@/game/map';
 import { DEPARTMENTS, DEPT_BY_ID } from '@/lib/departments';
 import { deptHeadIds } from '@/lib/heads';
-import type { Agenda, AskEvent, ChatMessage, Consult, Opinion } from '@/lib/protocol';
+import type {
+  Agenda, AskAgent, AskEvent, ChatMessage, Consult, MeetingAttendeeLite, MeetingMode, Opinion,
+} from '@/lib/protocol';
 
 const GameCanvas = dynamic(() => import('@/components/GameCanvas'), { ssr: false });
 
@@ -126,6 +133,15 @@ export default function Page() {
   const [deptNotes, setDeptNotes] = useState<Record<string, string>>({});
   const [companyOpen, setCompanyOpen] = useState(false);
   const [meetingsLoading, setMeetingsLoading] = useState(false);
+  /** สถานะสดของการประชุม - ใครกำลังคิดอะไร นานแค่ไหน (แผง MeetingStatus เหนือแชท) */
+  const [meetingStart, setMeetingStart] = useState<number | null>(null);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  /** ข้อความแชทของการประชุมล่าสุด - หน้าต่าง "ห้องประชุม" อ่าน transcript สดจากตัวนี้ */
+  const [liveMsgId, setLiveMsgId] = useState<string | null>(null);
+  const [liveQuestion, setLiveQuestion] = useState('');
+  const [roomOpen, setRoomOpen] = useState(false);
+  const [integrationsOpen, setIntegrationsOpen] = useState(false);
+  const [operatorOpen, setOperatorOpen] = useState(false);
   const [meetingsErr, setMeetingsErr] = useState<string | null>(null);
   const dragging = useRef(false);
   const vDragging = useRef(false);
@@ -265,9 +281,12 @@ export default function Page() {
   // ข้อมูลบริษัทผูกกับออฟฟิศ - สลับออฟฟิศต้องโหลดใหม่ ไม่งั้นเอาโปรไฟล์บริษัท A ไปตอบเรื่องบริษัท B
   const refreshCompany = useCallback(() => {
     if (!officeId) { setProfile({}); setProducts([]); setDeptNotes({}); return; }
-    Promise.all([loadProfile(officeId), listProducts(officeId), loadDeptNotes(officeId)])
-      .then(([p, pr, n]) => { setProfile(p); setProducts(pr); setDeptNotes(n); })
-      .catch((e) => setSaveErr(sbError(e)));
+    // โหลดแยกกัน - ส่วนไหนพัง (เช่นยังไม่ได้รัน schema ตารางใหม่) ให้ว่างเฉพาะส่วนนั้น
+    // ห้ามลากโปรไฟล์กับโน้ตแผนกที่โหลดได้ปกติล้มไปด้วย ไม่งั้นผู้ใช้เห็นฟอร์มว่างแล้วคิดว่าข้อมูลหาย
+    const fail = (e: unknown) => { setSaveErr(sbError(e)); };
+    loadProfile(officeId).then(setProfile).catch(fail);
+    loadDeptNotes(officeId).then(setDeptNotes).catch(fail);
+    listProducts(officeId).then(setProducts).catch((e) => { setProducts([]); fail(e); });
   }, [officeId]);
   useEffect(() => { refreshCompany(); }, [refreshCompany]);
 
@@ -431,12 +450,22 @@ export default function Page() {
    * ขั้นที่ 1 - เลขาฯ อ่านคำถามแล้วเสนอว่าควรเรียกแผนกไหนเข้าประชุม
    * ยังไม่ยิงประชุมจริง เพราะผู้ใช้ต้องได้ตรวจและแก้รายชื่อก่อน
    */
-  async function proposeAgenda(question: string) {
+  async function proposeAgenda(question: string, directDept?: string) {
     const w = worldRef.current;
     if (!w || busy || locked) return;
 
     const hiredDeptIds = [...new Set(w.roster().map((r) => r.deptId))];
     setMessages((ms) => [...ms, { id: newId(), role: 'user', text: question }]);
+
+    // ถามแผนกโดยตรง - ข้ามหน้าวาระ ให้หัวหน้าแผนกนั้นตอบคนเดียว (คำขอ LLM ครั้งเดียว เร็ว)
+    if (directDept && hiredDeptIds.includes(directDept)) {
+      const snap = w.roster();
+      const headId = deptHeadIds(snap).get(directDept);
+      if (headId) {
+        void runMeeting(question, { agentIds: [headId], mode: 'direct', ownerDeptId: directDept, chairId: headId });
+        return;
+      }
+    }
 
     if (!hiredDeptIds.length) {
       setMessages((ms) => [
@@ -471,15 +500,363 @@ export default function Page() {
     }
   }
 
-  /** ขั้นที่ 2 - ประชุมจริงตามรายชื่อที่ผู้ใช้ยืนยันแล้ว */
-  async function runMeeting(question: string, pick: AgendaPick) {
-    const w = worldRef.current;
-    if (!w || busy) return;
+  /* ============================================================
+     การประชุมหนึ่งครั้ง = session เดียว ไม่ว่าจะเริ่มจากจอนี้ (SSE) หรือจากที่อื่น (Realtime)
+     session ถือ state ทั้งหมด (ข้อความในแชท, animation, บันทึก) แล้วรับ event ทีละตัวผ่าน handle()
+     ตัวยิง event เป็นใครก็ได้ - นี่คือสิ่งที่ทำให้ MCP/LINE เรียกประชุมแล้วทุกจอเห็นเหมือนกัน
+     ============================================================ */
 
+  interface SessionInit {
+    question: string;
+    mode: MeetingMode;
+    team: AskAgent[];
+    /** ประธาน/เจ้าของเรื่อง */
+    owner: AskAgent;
+    attendees: MeetingAttendeeLite[];
+    /** จอนี้เป็นคนเริ่มไหม - remote คือคนอื่น/ระบบอื่นเริ่ม จอนี้แค่ดู */
+    source: 'local' | 'remote';
+    /** id ในสมุด ถ้าเซิร์ฟเวอร์บันทึกให้ - remote มีเสมอ, local มีเมื่อได้ event 'meeting' */
+    serverMeetingId?: string | null;
+    /**
+     * คำถามจากคนนอก (LINE/MCP/API) ที่ถามแผนกตรง ๆ - ไม่ใช่ประชุม
+     * ให้ "แขก" เดินเข้ามาหาคนตอบ คุยกันหน้าเคาน์เตอร์ แล้วเดินออก
+     */
+    visitor?: { name: string };
+  }
+
+  interface Session {
+    handle: (ev: AskEvent) => void;
+    /** ปิดฉาก - errorText มีค่า = พัง */
+    end: (errorText?: string) => Promise<void>;
+    /** จัดตัวละครเข้าที่ก่อนเริ่ม (เดินเข้าห้อง / เดินไปหาบอส) */
+    stage: () => Promise<void>;
+    readonly id: string;
+  }
+
+  function openSession(init: SessionInit): Session {
+    const w = worldRef.current!;
+    const { question, owner, attendees } = init;
+    let mode = init.mode;
+    // ทีมเปลี่ยนได้กลางทาง: ลูกค้าถาม PR แล้ว PR ต้องพาทีมเข้าประชุม (event escalate)
+    let team = init.team;
+    let ids = team.map((t) => t.id);
+    let names = team.map((t) => t.name);
     const snap = w.roster();
-    // หัวหน้าแผนกคำนวณจากทั้งบริษัท ไม่ใช่จากคนที่เข้าประชุม - หัวหน้าไม่เข้าห้องก็ยังเป็นหัวหน้า
+    let deptIds = [...new Set(team.map((t) => t.deptId))];
+    let relay = mode === 'relay';
+    const direct = mode === 'direct';
+    let serverMeetingId = init.serverMeetingId ?? null;
+    /** แขกที่เดินเข้ามาถาม (เฉพาะ init.visitor) - id ตัวละครชั่วคราวใน world */
+    let visitorId: string | null = null;
+    /** PR พาทีมไปประชุมก่อนตอบลูกค้า - แขกนั่งรอ */
+    let escalated = false;
+    /** คำตอบที่กรองแล้วสำหรับลูกค้า - สิ่งเดียวที่แขกได้ยิน */
+    let customerReply = '';
+
+    const pendingId = newId();
+    setLiveMsgId(pendingId);
+    setLiveQuestion(question);
+    setMessages((ms) => [
+      ...ms,
+      // remote: โชว์คำถามด้วย เพราะจอนี้ไม่ได้พิมพ์เอง จะได้รู้ว่าประชุมเรื่องอะไร
+      ...(init.source === 'remote'
+        ? [{ id: newId(), role: 'user' as const, text: `[ถามผ่านระบบภายนอก] ${question}` }]
+        : []),
+      {
+        id: pendingId, role: 'agent', text: '', pending: true,
+        departmentId: owner.deptId, authorName: owner.name,
+        mode, deptIds, transcript: [], consults: [],
+      },
+    ]);
+
+    setBusy(true);
+    busyRef.current = true;
+    setPhase('เรียกทีมเข้าห้องประชุม...');
+    setMeetingStart(Date.now());
+    setActivities([]);
+
+    /** ใครเริ่มคิด - ถ้าคนเดิมเพิ่งทำงานก่อนหน้าเสร็จ เก็บเวลาไว้ใน history แล้วเริ่มนับใหม่ */
+    const startWork = (ev: { agentId: string; agentName: string; task: Activity['task']; label: string; model?: string }) => {
+      const r = snap.find((x) => x.id === ev.agentId);
+      const isSec = ev.agentId === 'secretary';
+      setActivities((xs) => {
+        const cur = xs.find((a) => a.agentId === ev.agentId);
+        const history = cur ? [...cur.history, ...(cur.doneAt ? [{ task: cur.task, ms: cur.doneAt - cur.startedAt }] : [])] : [];
+        const next: Activity = {
+          agentId: ev.agentId, name: ev.agentName, deptId: r?.deptId,
+          palette: r?.palette ?? (isSec ? SECRETARY_PAL : undefined),
+          model: ev.model, task: ev.task, label: ev.label, startedAt: Date.now(), history,
+        };
+        return cur ? xs.map((a) => (a.agentId === ev.agentId ? next : a)) : [...xs, next];
+      });
+    };
+    const doneWork = (agentId: string, failed = false) =>
+      setActivities((xs) => xs.map((a) => (a.agentId === agentId && !a.doneAt ? { ...a, doneAt: Date.now(), failed } : a)));
+    /** ประชุมหยุดกลางทาง - ทุกคนที่ยังคิดอยู่ถือว่าถูกตัด จะได้ไม่มีนาฬิกาเดินค้างทั้งที่ห้องว่างแล้ว */
+    const abortWork = (why: string) =>
+      setActivities((xs) => xs.map((a) => (a.doneAt ? a : { ...a, doneAt: Date.now(), failed: true, label: `${a.label} (${why})` })));
+
+    const transcript: Opinion[] = [];
+    const consults: Consult[] = [];
+    let finalText = '';
+    let leadId = owner.id;
+    let leadName = owner.name;
+    let finalModel: string | undefined;
+    let minutesText = '';
+
+    /**
+     * ปิดฉากการประชุม: ให้ประธานพูดสรุป โชว์คำตอบ แล้วบันทึกลงสมุด
+     * เรียกทันทีที่ได้ final - ไม่รอเลขาฯ ที่ยังเขียนรายงานอยู่ (โมเดลเล็กใช้เวลาเป็นนาที)
+     * ถ้าเซิร์ฟเวอร์บันทึกให้แล้ว (serverMeetingId) จอนี้ไม่บันทึกซ้ำ แค่โหลดสมุดใหม่
+     */
+    let finishP: Promise<void> | null = null;
+    let savedRowP: Promise<{ id: string } | null> | null = null;
+    const finish = () => {
+      if (finishP) return finishP;
+      finishP = (async () => {
+        if (visitorId) {
+          // ตอบแขก - เฉพาะข้อความที่กรองแล้ว (customerReply) ไม่ใช่สรุปภายใน
+          setPhase(`${owner.name} กำลังตอบ${init.visitor?.name ?? 'ลูกค้า'}...`);
+          await w.waitForSpeech();
+          if (escalated) {
+            // เลิกประชุม ทีมกลับที่ แล้ว PR เดินไปหาแขกที่นั่งรออยู่
+            w.disperse(ids.filter((id) => id !== owner.id));
+            w.focus(owner.id);
+            await w.visitorReturn(owner.id, visitorId);
+          }
+          w.bubble(owner.id, 'talk', 1);
+          const spoken = (customerReply || finalText).replace(/\*\*/g, '').trim();
+          w.say(owner.id, spoken.length > 700 ? `${spoken.slice(0, 700)}...` : spoken || 'ขออภัยค่ะ ตอนนี้ยังตอบไม่ได้', 4, () => {
+            w.faceToward(owner.id, visitorId!);
+          });
+          w.say(visitorId, 'ขอบคุณมากค่ะ', 2, () => { w.react(owner.id, 'idea', 2); });
+          await w.waitForSpeech();
+        } else {
+          setPhase('รอทีมถกให้จบ...');
+          await w.waitForSpeech();
+
+          setPhase('สรุปให้ผู้บริหาร...');
+          w.faceToward(leadId, w.bossId);
+          if (finalText) w.sayNow(leadId, summaryLine(finalText), 5);
+          await new Promise((r) => setTimeout(r, 1800));
+          w.react(w.bossId, 'idea', 3);
+          await new Promise((r) => setTimeout(r, 900));
+        }
+
+        patch(pendingId, {
+          pending: false,
+          text: finalText || '(ไม่ได้รับคำตอบ)',
+          authorName: leadName,
+          model: finalModel,
+          transcript: [...transcript],
+          consults: [...consults],
+        });
+
+        if (serverMeetingId) {
+          // เซิร์ฟเวอร์เขียนแถวไว้แล้วตั้งแต่เริ่ม - แค่ดึงสมุดใหม่ให้เห็นแถวนั้น
+          refreshMeetings();
+        } else if (office && init.source === 'local') {
+          savedRowP = saveMeeting({
+            office_id: office.id,
+            asked_by: user?.id ?? null,
+            question,
+            mode,
+            owner_dept: owner.deptId,
+            dept_ids: deptIds,
+            attendees,
+            summary: finalText,
+            minutes: minutesText,
+            transcript,
+            consults,
+          })
+            .then((row) => {
+              if (row) setMeetings((ms) => [row, ...ms]);
+              return row;
+            })
+            .catch((e) => { setSaveErr(sbError(e)); return null; });
+        }
+      })();
+      return finishP;
+    };
+
+    /** รายงานเลขาฯ มาทีหลัง - เติมลงแถวที่จอนี้บันทึกไว้ (เซิร์ฟเวอร์บันทึกให้อยู่แล้วก็แค่โหลดสมุดใหม่) */
+    const attachMinutes = (text: string) => {
+      if (serverMeetingId) { refreshMeetings(); return; }
+      if (!savedRowP) return;
+      void savedRowP.then((row) => {
+        if (!row) return;
+        updateMeetingMinutes(row.id, text)
+          .then(() => setMeetings((ms) => ms.map((m) => (m.id === row.id ? { ...m, minutes: text } : m))))
+          .catch((e) => setSaveErr(sbError(e)));
+      });
+    };
+
+    const handle = (ev: AskEvent) => {
+      if (ev.type === 'meeting') {
+        serverMeetingId = ev.id;
+      } else if (ev.type === 'skill') {
+        patch(pendingId, { proof: ev.proof });
+      } else if (ev.type === 'phase') {
+        setPhase(ev.label);
+        if (!visitorId || escalated) ids.forEach((id) => w.bubble(id, ev.phase === 'synthesis' ? 'board' : 'talk', 2));
+      } else if (ev.type === 'working') {
+        startWork(ev);
+      } else if (ev.type === 'consult') {
+        doneWork(ev.fromAgentId);
+        const c: Consult = {
+          step: ev.step, fromName: ev.fromName, toName: ev.toName,
+          toDeptId: ev.toDeptId, text: ev.text,
+        };
+        consults.push(c);
+        patch(pendingId, { consults: [...consults] });
+        w.say(ev.fromAgentId, `ถาม${ev.toName}: ${excerpt(ev.text, 1)}`, undefined, () => {
+          w.faceToward(ev.fromAgentId, ev.toAgentId);
+          w.react(ev.toAgentId, 'question', 2.6);
+        });
+      } else if (ev.type === 'opinion') {
+        doneWork(ev.agentId);
+        const op: Opinion = {
+          agentId: ev.agentId, agentName: ev.agentName, agentRole: ev.agentRole,
+          deptId: ev.deptId, round: ev.round, step: ev.step, askedBy: ev.askedBy,
+          text: ev.text, model: ev.model,
+        };
+        transcript.push(op);
+        patch(pendingId, { transcript: [...transcript] });
+
+        if (relay) {
+          w.say(ev.agentId, excerpt(ev.text, 1), undefined, () => {
+            w.faceToward(ev.agentId, owner.id);
+            w.react(owner.id, 'idea', 2.4);
+          });
+        } else {
+          const targetName = op.round === 2 ? objectionTarget(op.text, names) : null;
+          const target = team.find((t) => t.name === targetName && t.id !== op.agentId);
+          w.say(op.agentId, excerpt(op.text, op.round), undefined, () => {
+            if (!target) return;
+            w.faceToward(op.agentId, target.id);
+            w.react(target.id, 'question', 2.6);
+          });
+        }
+      } else if (ev.type === 'final') {
+        doneWork(ev.leadAgentId);
+        finalText = ev.text;
+        leadId = ev.leadAgentId;
+        leadName = ev.leadAgentName;
+        finalModel = ev.model;
+        // แขก: รอ customer_reply (ข้อความที่กรองแล้ว) ก่อนค่อยปิดฉาก - สรุปภายในโชว์ในแชท/สมุดเท่านั้น
+        if (!visitorId) void finish();
+        else patch(pendingId, { text: finalText, transcript: [...transcript], consults: [...consults] });
+      } else if (ev.type === 'escalate') {
+        // PR ตอบเองไม่ได้ - บอกแขกให้รอ พาทีมเข้าห้องประชุม (สายพาน: PR ถือคำถามไปถามทีละแผนก)
+        escalated = true;
+        mode = 'relay'; relay = true;
+        team = ev.agents;
+        ids = team.map((t) => t.id);
+        names = team.map((t) => t.name);
+        deptIds = [...new Set(team.map((t) => t.deptId))];
+        patch(pendingId, { mode: 'relay', deptIds });
+        setMessages((ms) => [...ms, { id: newId(), role: 'system', text: `${ev.agentName} ขอปรึกษาทีมก่อนตอบลูกค้า: "${ev.internalQuestion}"` }]);
+        if (visitorId) {
+          const vid = visitorId;
+          w.say(ev.agentId, ev.text, 3, () => w.faceToward(ev.agentId, vid));
+          void (async () => {
+            await w.waitForSpeech();
+            setPhase(`${init.visitor?.name ?? 'ลูกค้า'} นั่งรอ - ${ev.agentName} ไปปรึกษาทีม...`);
+            await w.visitorWait(vid);
+            w.focusRect(MEETING_RECT);
+            await w.gather(ids);
+            w.setDeliberating(ids);
+          })();
+        }
+      } else if (ev.type === 'customer_reply') {
+        customerReply = ev.text;
+        patch(pendingId, { customerReply: ev.text });
+        if (visitorId) void finish();
+      } else if (ev.type === 'minutes') {
+        doneWork('secretary', !!ev.error);
+        if (ev.error) {
+          setMessages((ms) => [...ms, { id: newId(), role: 'system', text: `เลขาฯ จดรายงานการประชุมไม่สำเร็จ: ${ev.error}` }]);
+        } else if (ev.text) {
+          minutesText = ev.text;
+          w.say(w.secretaryId, 'จดรายงานการประชุมเรียบร้อยค่ะ', 3);
+          attachMinutes(ev.text);
+          patch(pendingId, { minutes: ev.text });
+        }
+      }
+      // 'error' / 'done' ให้คนขับ (SSE loop หรือ Realtime) เรียก end() เอง เพราะต้องปิดแหล่ง event ด้วย
+    };
+
+    const stage = async () => {
+      w.saveView();
+      if (init.visitor && direct) {
+        // แขกโผล่ที่ประตูสวน เดินมาหาคนตอบ (PR = หน้าเคาน์เตอร์ / แผนกอื่น = หน้าประตูห้อง)
+        setPhase(`${init.visitor.name} กำลังเดินเข้ามา...`);
+        visitorId = w.spawnVisitor(init.visitor.name);
+        w.focus(visitorId);
+        await w.visitorApproach(visitorId, owner.id);
+        w.focus(owner.id);
+        w.say(visitorId, question, 3, () => { w.faceToward(owner.id, visitorId!); });
+        w.visitorHostThinking(owner.id);
+        setPhase(`${owner.name} กำลังหาคำตอบให้${init.visitor.name}...`);
+        return;
+      }
+      if (direct) {
+        setPhase(`${owner.name} กำลังเดินไปหาคุณ...`);
+        w.focusRect(BOSS_RECT);
+        await w.report(owner.id);
+        w.say(w.bossId, question, 3);
+      } else {
+        w.focusRect(MEETING_RECT);
+        await w.gather(ids);
+        w.setDeliberating(ids);
+        w.say(w.bossId, `วาระวันนี้: ${question}`, 3);
+      }
+      setPhase(direct ? `${owner.name} กำลังตอบ...` : relay ? `${owner.name} รับเรื่องไปเดินสาย...` : 'ทีมกำลังถกกัน...');
+    };
+
+    let ended = false;
+    const end = async (errorText?: string) => {
+      if (ended) return;
+      ended = true;
+      try {
+        if (errorText) {
+          abortWork('ประชุมหยุดเพราะ error');
+          setPhase(`ประชุมหยุด: ${errorText.slice(0, 80)}`);
+          w.clearSay(ids);
+          patch(pendingId, {
+            pending: false,
+            role: 'system',
+            text: `เกิดข้อผิดพลาด: ${errorText}`,
+            transcript: transcript.length ? [...transcript] : undefined,
+          });
+          return;
+        }
+        if (!finalText) abortWork('การเชื่อมต่อถูกตัดก่อนตอบ');
+        else abortWork('ไม่ได้ผลลัพธ์');
+        await finish();
+      } finally {
+        if (visitorId) {
+          // แขกเดินออก คนตอบกลับที่ - กล้องตามแขกจนพ้นจอ แล้วค่อยคืนมุมกล้องเดิม
+          w.clearSay();
+          w.focus(visitorId);
+          void w.visitorLeave(visitorId, owner.id).then(() => { w.focus(null); w.restoreView(); });
+        } else {
+          w.disperse(ids);
+          w.restoreView();
+        }
+        setPhase(null);
+        setBusy(false);
+        busyRef.current = false;
+      }
+    };
+
+    return { handle, end, stage, id: pendingId };
+  }
+
+  /** แปลง roster เป็น AskAgent (พร้อมป้ายหัวหน้าแผนก) - ใช้ทั้งเริ่มเองและเวลาต้องส่งไป headless */
+  function toAgents(snap: EmployeeSnapshot[], agentIds: string[]): AskAgent[] {
     const heads = deptHeadIds(snap);
-    const team = pick.agentIds
+    return agentIds
       .map((id) => snap.find((r) => r.id === id))
       .filter((r): r is EmployeeSnapshot => !!r)
       .map((r) => {
@@ -490,82 +867,55 @@ export default function Page() {
           isHead: heads.get(r.deptId) === r.id,
         };
       });
-    if (!team.length) return;
+  }
 
-    // สำเนาผู้เข้าประชุม เก็บลงบันทึกด้วย เพราะคนอาจถูกเลิกจ้างไปแล้ว
-    // แต่บันทึกการประชุมต้องยังบอกได้ว่าตอนนั้นใครนั่งอยู่ในห้อง
-    const attendees = pick.agentIds
+  const toAttendees = (snap: EmployeeSnapshot[], agentIds: string[]): MeetingAttendeeLite[] =>
+    agentIds
       .map((id) => snap.find((r) => r.id === id))
       .filter((r): r is EmployeeSnapshot => !!r)
-      .map((r) => ({
-        id: r.id, name: r.name, title: r.title, deptId: r.deptId, palette: r.palette,
-      }));
+      .map((r) => ({ id: r.id, name: r.name, title: r.title, deptId: r.deptId, palette: r.palette }));
 
-    const deptIds = [...new Set(team.map((t) => t.deptId))];
-    const ids = team.map((t) => t.id);
-    const relay = pick.mode === 'relay';
-    const direct = pick.mode === 'direct';
-    // ประธาน/เจ้าของเรื่อง = คนที่ผู้ใช้เลือกในหน้าวาระ (หัวหน้าแผนก) - ตกหล่นค่อยถอยไปหัวหน้าของแผนกเจ้าของเรื่อง
+  /** ขั้นที่ 2 - ประชุมจริงตามรายชื่อที่ผู้ใช้ยืนยันแล้ว (จอนี้เป็นคนขับ รับ event ทาง SSE) */
+  async function runMeeting(question: string, pick: AgendaPick) {
+    const w = worldRef.current;
+    if (!w || busyRef.current) return;
+
+    const snap = w.roster();
+    const team = toAgents(snap, pick.agentIds);
+    if (!team.length) return;
+    const attendees = toAttendees(snap, pick.agentIds);
     const owner = team.find((t) => t.id === pick.chairId)
       ?? team.find((t) => t.deptId === pick.ownerDeptId && t.isHead)
       ?? team.find((t) => t.deptId === pick.ownerDeptId)
       ?? team[0];
+    const ids = team.map((t) => t.id);
+    const deptIds = [...new Set(team.map((t) => t.deptId))];
 
-    const pendingId = newId();
-    setMessages((ms) => [
-      ...ms,
-      {
-        id: pendingId, role: 'agent', text: '', pending: true,
-        departmentId: owner.deptId, authorName: owner.name,
-        mode: pick.mode, deptIds, transcript: [], consults: [],
-      },
-    ]);
-
-    setBusy(true);
-    setPhase('เรียกทีมเข้าห้องประชุม...');
-    const transcript: Opinion[] = [];
-    const consults: Consult[] = [];
-    const names = team.map((t) => t.name);
-    let finalText = '';
+    const s = openSession({ question, mode: pick.mode, team, owner, attendees, source: 'local' });
+    // จอนี้เป็นคนเริ่ม - event ที่ Realtime ส่งย้อนกลับมาของประชุมนี้ต้องไม่ถูกเล่นซ้ำ
     let errorText = '';
-    let leadId = owner.id;
-    let leadName = owner.name;
-    let finalModel: string | undefined;
-    let minutesText = '';
-
     try {
       // ประกอบข้อมูลบริษัทระหว่างที่คนกำลังเดิน - ไม่ให้ผู้ใช้รอสองต่อ
       const companyPromise = buildCompanyContext(question, deptIds);
-
-      w.saveView();
-      if (direct) {
-        // ตอบตรง: คนเดียวเดินไปหาบอสที่ห้อง ไม่เข้าห้องประชุม
-        setPhase(`${owner.name} กำลังเดินไปหาคุณ...`);
-        w.focusRect(BOSS_RECT);
-        await w.report(owner.id);
-        w.say(w.bossId, question, 3);
-      } else {
-        w.focusRect(MEETING_RECT);
-        await w.gather(ids);
-        w.setDeliberating(ids);
-        // ผู้บริหาร (ตัวผู้ใช้) เปิดประชุมด้วยคำถามของตัวเอง
-        // ผูก animation เข้ากับคำถามจริง และไม่ให้จอว่างระหว่างรอ LLM รอบแรก
-        w.say(w.bossId, `วาระวันนี้: ${question}`, 3);
-      }
-      setPhase(direct ? `${owner.name} กำลังตอบ...` : relay ? `${owner.name} รับเรื่องไปเดินสาย...` : 'ทีมกำลังถกกัน...');
-
+      await s.stage();
       const company = await companyPromise;
+      const token = await accessToken();
       const res = await fetch('/api/ask', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders(llm) },
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders(llm),
+          ...(token ? { 'x-sb-token': token } : {}),
+        },
         body: JSON.stringify({
           question,
           mode: pick.mode,
           ownerDeptId: owner.deptId,
           chairId: owner.id,
           agents: team,
+          attendees,
+          officeId: office?.id,
           company,
-          // ใครใช้โมเดลไหน - ส่งคีย์เฉพาะชุดที่ถูกอ้างถึงจริงในทีมนี้ ไม่มีใครตั้งก็ไม่ส่ง
           llm: llmAssignment(llmStore, ids),
         }),
       });
@@ -575,7 +925,6 @@ export default function Page() {
       const decoder = new TextDecoder();
       let buf = '';
       let streaming = true;
-
       while (streaming) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -587,138 +936,84 @@ export default function Page() {
           const line = chunk.split('\n').find((l) => l.startsWith('data: '));
           if (!line) continue;
           const ev = JSON.parse(line.slice(6)) as AskEvent;
-
-          if (ev.type === 'skill') {
-            patch(pendingId, { proof: ev.proof });
-          } else if (ev.type === 'phase') {
-            setPhase(ev.label);
-            ids.forEach((id) => w.bubble(id, ev.phase === 'synthesis' ? 'board' : 'talk', 2));
-          } else if (ev.type === 'consult') {
-            // สายพาน: เจ้าของเรื่องหันไปถามอีกแผนกต่อหน้าทุกคน
-            const c: Consult = {
-              step: ev.step, fromName: ev.fromName, toName: ev.toName,
-              toDeptId: ev.toDeptId, text: ev.text,
-            };
-            consults.push(c);
-            patch(pendingId, { consults: [...consults] });
-            w.say(ev.fromAgentId, `ถาม${ev.toName}: ${excerpt(ev.text, 1)}`, undefined, () => {
-              w.faceToward(ev.fromAgentId, ev.toAgentId);
-              w.react(ev.toAgentId, 'question', 2.6);
-            });
-          } else if (ev.type === 'opinion') {
-            const op: Opinion = {
-              agentId: ev.agentId, agentName: ev.agentName, agentRole: ev.agentRole,
-              deptId: ev.deptId, round: ev.round, step: ev.step, askedBy: ev.askedBy,
-              text: ev.text, model: ev.model,
-            };
-            transcript.push(op);
-            patch(pendingId, { transcript: [...transcript] });
-
-            if (relay) {
-              // สายพานมาทีละคนตามลำดับอยู่แล้ว ต่อคิวพูดได้เลย ไม่ต้องพักรอ
-              w.say(ev.agentId, excerpt(ev.text, 1), undefined, () => {
-                w.faceToward(ev.agentId, owner.id);
-                w.react(owner.id, 'idea', 2.4);
-              });
-            } else {
-              // พูดทันทีที่ความเห็นมาถึง - คิวคำพูดใน world เรียงให้ทีละคนอยู่แล้ว
-              // เดิมพักไว้จนครบทั้งรอบเพื่อเรียงตามบทบาท แต่ประชุม 12 คนแปลว่าเงียบเป็นนาที
-              // ก่อนใครจะพูด - ดูเหมือนค้าง แลกลำดับบทบาทกับความสดแล้วสดชนะ
-              const targetName = op.round === 2 ? objectionTarget(op.text, names) : null;
-              const target = team.find((t) => t.name === targetName && t.id !== op.agentId);
-              w.say(op.agentId, excerpt(op.text, op.round), undefined, () => {
-                if (!target) return;
-                w.faceToward(op.agentId, target.id);
-                w.react(target.id, 'question', 2.6);
-              });
-            }
-          } else if (ev.type === 'final') {
-            finalText = ev.text;
-            leadId = ev.leadAgentId;
-            leadName = ev.leadAgentName;
-            finalModel = ev.model;
-          } else if (ev.type === 'minutes') {
-            minutesText = ev.text;
-            // เลขาฯ บอกให้รู้ว่าจดเสร็จแล้ว - บันทึกจริงอยู่ในสมุด (แท็บเลขาฯ)
-            w.say(w.secretaryId, 'จดรายงานการประชุมเรียบร้อยค่ะ', 3);
-          } else if (ev.type === 'error') {
-            // error ไม่ควรกลายเป็นฟองคำพูดของ agent - ส่งเข้าแชทอย่างเดียว
-            errorText = ev.message;
-            streaming = false;
-          } else if (ev.type === 'done') {
-            streaming = false;
-          }
+          if (ev.type === 'meeting') localMeetingIds.current.add(ev.id);
+          if (ev.type === 'error') { errorText = ev.message; streaming = false; break; }
+          if (ev.type === 'done') { streaming = false; break; }
+          s.handle(ev);
         }
       }
-
-      // ถ้าพัง ไม่ต้องให้ใครเดินมารายงาน - เลิกประชุมแล้วบอกในแชทตรง ๆ
-      if (errorText) {
-        w.clearSay(ids);
-        patch(pendingId, {
-          pending: false,
-          role: 'system',
-          text: `เกิดข้อผิดพลาด: ${errorText}`,
-          transcript: transcript.length ? [...transcript] : undefined,
-        });
-        return;
-      }
-
-      // รอให้ถกกันจบก่อน ไม่งั้นบทสรุปจะทับบทสนทนาที่ยังพูดไม่หมด
-      setPhase('รอทีมถกให้จบ...');
-      await w.waitForSpeech();
-
-      // สรุปให้ผู้บริหารฟังคาโต๊ะประชุม ไม่ต้องเดินไปไหน
-      setPhase('สรุปให้ผู้บริหาร...');
-      w.faceToward(leadId, w.bossId);
-      if (finalText) w.sayNow(leadId, summaryLine(finalText), 5);
-      await new Promise((r) => setTimeout(r, 1800));
-      w.react(w.bossId, 'idea', 3);
-      await new Promise((r) => setTimeout(r, 900));
-
-      patch(pendingId, {
-        pending: false,
-        text: finalText || '(ไม่ได้รับคำตอบ)',
-        authorName: leadName,
-        model: finalModel,
-        transcript: [...transcript],
-        consults: [...consults],
-      });
-
-      // เลขาฯ จดบันทึกให้เอง - เก็บที่ Supabase ผูกกับออฟฟิศ ไม่ใช่กับเครื่อง
-      // ยิงแบบไม่รอ ผู้ใช้ได้อ่านคำตอบไปก่อนแล้ว บันทึกพลาดก็แค่แจ้งในแถบสถานะ
-      if (office) {
-        saveMeeting({
-          office_id: office.id,
-          asked_by: user?.id ?? null,
-          question,
-          mode: pick.mode,
-          owner_dept: owner.deptId,
-          dept_ids: deptIds,
-          attendees,
-          summary: finalText,
-          minutes: minutesText,
-          transcript,
-          consults,
-        })
-          .then((row) => { if (row) setMeetings((ms) => [row, ...ms]); })
-          .catch((e) => setSaveErr(sbError(e)));
-      }
+      await s.end(errorText || undefined);
     } catch (err) {
-      patch(pendingId, {
-        pending: false,
-        text: `เกิดข้อผิดพลาด: ${err instanceof Error ? err.message : String(err)}`,
-        transcript: [...transcript],
-        consults: [...consults],
-      });
-    } finally {
-      w.disperse(ids);
-      w.restoreView(); // คืนมุมกล้องเดิมที่ผู้ใช้ตั้งไว้ก่อนเริ่มประชุม
-      setPhase(null);
-      setBusy(false);
+      await s.end(err instanceof Error ? err.message : String(err));
     }
   }
 
+  /**
+   * ประชุมที่เริ่มจากที่อื่น (จออื่น / API / MCP / LINE) - เซิร์ฟเวอร์เขียน event ลง DB
+   * จอนี้ subscribe แล้วเล่น animation ตามเหมือนนั่งอยู่ในห้อง
+   * ประชุมนี้จอนี้ไม่ได้ขับ ไม่ต้องยิง API ไม่ต้องบันทึก แค่ดู
+   */
+  const openSessionRef = useRef(openSession);
+  openSessionRef.current = openSession;
+  const remoteSessions = useRef<Map<string, Session>>(new Map());
+  const localMeetingIds = useRef<Set<string>>(new Set());
+  const busyRef = useRef(false);
+  const onRemoteEvent = useCallback((meetingId: string, ev: AskEvent) => {
+    if (localMeetingIds.current.has(meetingId)) return; // ของจอนี้เอง ได้ทาง SSE ไปแล้ว
+    const w = worldRef.current;
+    if (!w) return;
+    let s = remoteSessions.current.get(meetingId);
+    if (ev.type === 'meeting') {
+      if (s || busyRef.current) return; // มีประชุมอยู่แล้ว - จอเดียวเล่นได้ทีละเรื่อง
+      const snap = w.roster();
+      // ผู้เข้าประชุมต้องอยู่ในออฟฟิศนี้จริง (roster โหลดจาก DB เดียวกัน) - ไม่เจอเลยก็ดูไม่ได้ ข้าม
+      const team = ev.agents.filter((a) => snap.some((r) => r.id === a.id));
+      if (!team.length) return;
+      const owner = team.find((a) => a.id === ev.chairId) ?? team.find((a) => a.deptId === ev.ownerDeptId) ?? team[0];
+      // คำถามตรงจากคนนอก = แขกเดินเข้ามา ไม่ใช่ประชุม (ประชุมข้ามแผนกยังเข้าห้องประชุมตามเดิม)
+      // ลูกค้า (audience customer) = "ลูกค้า (ช่องทาง)"  agent ภายในที่ถามผ่าน MCP/API = "Agent (ช่องทาง)"
+      const via = ev.source === 'line' ? 'LINE' : ev.source === 'mcp' ? 'MCP' : ev.source === 'api' ? 'API' : null;
+      const visitorName = !via ? null : ev.audience === 'customer' ? `ลูกค้า (${via})` : `Agent (${via})`;
+      s = openSessionRef.current({
+        question: ev.question, mode: ev.mode, team, owner,
+        attendees: ev.attendees, source: 'remote', serverMeetingId: meetingId,
+        visitor: ev.mode === 'direct' && visitorName ? { name: visitorName } : undefined,
+      });
+      remoteSessions.current.set(meetingId, s);
+      void s.stage();
+      return;
+    }
+    if (!s) return;
+    if (ev.type === 'error') { remoteSessions.current.delete(meetingId); void s.end(ev.message); return; }
+    if (ev.type === 'done') { remoteSessions.current.delete(meetingId); void s.end(); return; }
+    s.handle(ev);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // subscribe event ของออฟฟิศนี้ - เปิดไว้ตลอดที่ล็อกอินและเลือกออฟฟิศอยู่
+  useEffect(() => {
+    const c = sb();
+    if (!c || !officeId || !ready) return;
+    const ch = c
+      .channel(`meeting_event:${officeId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'meeting_event', filter: `office_id=eq.${officeId}` },
+        (payload) => {
+          const row = payload.new as { meeting_id: string; payload: AskEvent };
+          if (row?.meeting_id && row.payload) onRemoteEvent(row.meeting_id, row.payload);
+        },
+      )
+      .subscribe();
+    return () => { void c.removeChannel(ch); };
+  }, [officeId, ready, onRemoteEvent]);
+
   const hiredDeptIds = [...new Set(roster.map((r) => r.deptId))];
+  /**
+   * สมุดเลขาฯ = เรื่องภายในล้วน (การประชุมของคนใน)
+   * ทุกอย่างที่ลูกค้าติดต่อเข้ามา - รวมที่ต้องปรึกษาทีม - อยู่สมุดประชาสัมพันธ์ที่เดียว (กางดูสรุป/รายงานภายในได้ตรงนั้น)
+   * แถวเก่าที่ยังไม่มีคอลัมน์ audience ถือเป็นภายใน
+   */
+  const secretaryMeetings = meetings.filter((m) => m.audience !== 'customer');
   const busyAgents = roster.filter((r) => ['meet', 'think', 'report'].includes(r.state)).length;
 
   return (
@@ -792,6 +1087,19 @@ export default function Page() {
             </>
           )}
 
+          {/* เชื่อมต่อ MCP/API/LINE - แยกจากปุ่มออฟฟิศ เพราะเป็นเรื่องระบบภายนอก ไม่ใช่การเลือกออฟฟิศ */}
+          {supabaseConfigured && user && office && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIntegrationsOpen(true)}
+              title="token สำหรับ MCP / API / LINE - ให้ agent ข้างนอกหรือลูกค้าถามออฟฟิศนี้ได้"
+              className="border-wood-deep text-parchment-2 hover:bg-wood-dark"
+            >
+              <Plug /> เชื่อมต่อ
+            </Button>
+          )}
+
           {/* ทุกปุ่มที่เหลือใช้ไม่ได้จนกว่าจะเข้าสู่ระบบ - inert กันทั้งคลิกและคีย์บอร์ด */}
           <div
             inert={locked || undefined}
@@ -809,6 +1117,49 @@ export default function Page() {
             {llm ? llm.label : 'คีย์ของฉัน'}
           </Button>
 
+          {/* ห้องประชุม - โผล่เฉพาะตอนมีประชุม (หรือเพิ่งจบ) เปิดดูเต็ม ๆ ว่าใครทำอะไร คุยอะไรไปแล้ว */}
+          {meetingStart !== null && (
+            <Button
+              variant={busy ? 'primary' : 'outline'}
+              size="sm"
+              onClick={() => setRoomOpen(true)}
+              title="ดูสถานะรายคนและบทสนทนาสดของการประชุม"
+              className={busy ? undefined : 'border-brass text-brass hover:bg-wood-dark'}
+            >
+              {busy ? <LoaderCircle className="animate-spin" /> : <MessagesSquare />}
+              การประชุม
+              {(() => {
+                const n = messages.find((m) => m.id === liveMsgId)?.transcript?.length ?? 0;
+                return n > 0 ? (
+                  <span className="rounded-box bg-brass px-1 text-[10px] font-bold text-ink-900">{n}</span>
+                ) : null;
+              })()}
+            </Button>
+          )}
+
+          {/* ประชาสัมพันธ์ (operator) - ลูกค้าติดต่ออะไรเข้ามาบ้าง คู่กับสมุดเลขาฯ ที่เป็นเรื่องภายใน */}
+          {(() => {
+            const customers = meetings.filter((m) => m.audience === 'customer');
+            const today = new Date().toDateString();
+            const todayCount = customers.filter((m) => new Date(m.created_at).toDateString() === today).length;
+            const running = customers.some((m) => m.status === 'running');
+            return (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setOperatorOpen(true)}
+                title="สมุดประชาสัมพันธ์ - ลูกค้าติดต่ออะไรเข้ามา ตอบไปว่าอะไร"
+                className={`gap-1 ${running ? 'border-brass text-brass' : 'border-wood-deep text-parchment-2'} hover:bg-wood-dark`}
+              >
+                {running ? <LoaderCircle className="animate-spin" /> : <BellRing />}
+                ลูกค้า
+                {todayCount > 0 && (
+                  <span className="rounded-box bg-brass px-1 text-[10px] font-bold text-ink-900" title="วันนี้">{todayCount}</span>
+                )}
+              </Button>
+            );
+          })()}
+
           {/* เลขาฯ - รูปเดียวกับตัวที่ยืนหน้าห้องประชุม กดแล้วเปิดสมุดบันทึกการประชุม */}
           <Button
             variant="outline"
@@ -819,9 +1170,9 @@ export default function Page() {
           >
             <Portrait palette={SECRETARY_PAL} size={1} className="block shrink-0" />
             เลขาฯ
-            {meetings.length > 0 && (
+            {secretaryMeetings.length > 0 && (
               <span className="rounded-box bg-brass px-1 text-[10px] font-bold text-ink-900">
-                {meetings.length}
+                {secretaryMeetings.length}
               </span>
             )}
           </Button>
@@ -1005,7 +1356,7 @@ export default function Page() {
           {/* ความสูงมาจากผู้ใช้ลากเอง - [&>section] คือตัว Panel ข้างใน ต้องยืดเต็มกรอบ
               ไม่งั้นมันจะสูงตามเนื้อหาแล้วการลากไม่มีผลอะไรเลย */}
           <div
-            className="flex min-h-0 shrink-0 flex-col [&>section]:min-h-0 [&>section]:flex-1"
+            className="flex min-h-0 shrink-0 flex-col overflow-hidden [&>section]:min-h-0 [&>section]:flex-1"
             style={{ height: hireH }}
           >
             <HirePanel
@@ -1020,7 +1371,7 @@ export default function Page() {
               onUnlock={() => setOfficeOpen(true)}
               tab={sideTab}
               onTab={setSideTab}
-              meetingCount={meetings.length}
+              meetingCount={secretaryMeetings.length}
               llmOptions={llmOptions}
               llmOf={(id) => llmStore.byEmployee?.[id]}
               llmDefaultLabel={llmDefaultLabel}
@@ -1031,7 +1382,7 @@ export default function Page() {
               llmHeadLabel={llmHeadLabel}
               secretary={
                 <SecretaryTab
-                  meetings={meetings}
+                  meetings={secretaryMeetings}
                   loading={meetingsLoading}
                   error={meetingsErr}
                   blocked={secBlocked}
@@ -1081,11 +1432,18 @@ export default function Page() {
             <span className="h-0.5 w-10 rounded-full bg-ink-500 group-hover:bg-brass" />
           </div>
 
+          <MeetingStatus
+            startedAt={meetingStart}
+            phase={phase}
+            activities={activities}
+            onClose={() => { setMeetingStart(null); setActivities([]); }}
+          />
           <ChatPanel
             messages={messages}
             busy={busy || agendaOpen}
             phase={phase}
             onSend={proposeAgenda}
+            hiredDeptIds={hiredDeptIds}
           />
         </aside>
         )}
@@ -1126,6 +1484,23 @@ export default function Page() {
         blocked={secBlocked}
       />
 
+      <IntegrationsPanel open={integrationsOpen} onClose={() => setIntegrationsOpen(false)} office={office} />
+      <OperatorPanel
+        open={operatorOpen}
+        onClose={() => setOperatorOpen(false)}
+        meetings={meetings}
+        loading={meetingsLoading}
+        onRefresh={refreshMeetings}
+      />
+      <MeetingRoomPanel
+        open={roomOpen}
+        onClose={() => setRoomOpen(false)}
+        message={messages.find((m) => m.id === liveMsgId) ?? null}
+        question={liveQuestion}
+        startedAt={meetingStart}
+        phase={phase}
+        activities={activities}
+      />
       <KeyPanel
         open={keyOpen}
         store={llmStore}

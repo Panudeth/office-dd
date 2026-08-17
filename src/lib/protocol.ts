@@ -2,6 +2,7 @@
 
 import type { AgentRole } from './departments';
 import type { CompanyContext } from './company';
+import type { Palette } from '@/game/types';
 
 /**
  * รูปแบบการประชุม
@@ -133,9 +134,54 @@ export interface AskRequest {
   llm?: LlmAssignment;
   /** ประธานที่ประชุม/คนสรุป - ผู้ใช้เลือกจากหัวหน้าแผนกในหน้าวาระ ไม่ส่งมาใช้หัวหน้าของแผนกเจ้าของเรื่อง */
   chairId?: string;
+  /** ออฟฟิศที่ประชุมนี้สังกัด - มีแล้วเซิร์ฟเวอร์จะบันทึก event ลง DB ให้ (ต้องส่ง x-sb-token มาด้วย) */
+  officeId?: string;
+  /** สำเนาผู้เข้าประชุมสำหรับบันทึก - คนอาจถูกเลิกจ้างไปแล้วแต่บันทึกต้องอ่านออก */
+  attendees?: MeetingAttendeeLite[];
 }
 
+export interface MeetingAttendeeLite {
+  id: string;
+  name: string;
+  title: string;
+  deptId: string;
+  palette: Palette;
+}
+
+/** แหล่งที่เรียกประชุม - โชว์ในสมุดว่าใครสั่ง */
+export type MeetingSource = 'web' | 'api' | 'mcp' | 'line';
+/** ใครถาม - internal เห็นทุกอย่าง, customer ได้เฉพาะคำตอบที่ PR กรองแล้ว */
+export type MeetingAudience = 'internal' | 'customer';
+
+export type WorkTask = 'round1' | 'round2' | 'ask' | 'answer' | 'synthesis' | 'direct' | 'minutes';
+
 export type AskEvent =
+  /**
+   * แถวแรกเมื่อเซิร์ฟเวอร์บันทึกการประชุมลง DB - บอก id และบริบทพอที่จออื่นจะเล่น animation ตามได้
+   * เบราว์เซอร์ที่ได้ event นี้ทาง SSE รู้ว่าไม่ต้องบันทึกซ้ำ
+   */
+  | {
+      type: 'meeting';
+      id: string;
+      source: MeetingSource;
+      question: string;
+      mode: MeetingMode;
+      ownerDeptId: string;
+      chairId?: string;
+      agents: AskAgent[];
+      attendees: MeetingAttendeeLite[];
+      audience?: MeetingAudience;
+    }
+  /**
+   * PR ตอบลูกค้าเองไม่ได้ ต้องปรึกษาทีมภายใน - บอกลูกค้าให้รอ แล้วเปิดประชุม (agents/chair คือทีมที่จะเข้าห้อง)
+   * จอ: PR พูด text ให้ลูกค้าฟัง ลูกค้าไปนั่งรอ ทีมเดินเข้าห้องประชุม
+   */
+  | {
+      type: 'escalate'; agentId: string; agentName: string; text: string; internalQuestion: string;
+      agents: AskAgent[]; attendees: MeetingAttendeeLite[]; chairId: string;
+    }
+  /** คำตอบที่ PR กรองแล้วสำหรับลูกค้า - มาหลัง final (สรุปภายใน) จอ: PR เดินกลับมาบอกลูกค้า */
+  | { type: 'customer_reply'; agentId: string; agentName: string; text: string; model?: string }
   | { type: 'skill'; proof: SkillProof }
   | { type: 'phase'; phase: 'round1' | 'round2' | 'consult' | 'synthesis' | 'direct'; label: string }
   | {
@@ -166,7 +212,12 @@ export type AskEvent =
     }
   | { type: 'final'; text: string; leadAgentId: string; leadAgentName: string; model?: string }
   /** รายงานการประชุมของเลขาฯ - มาหลัง final เสมอ เขียนโดยคนละคน/คนละโมเดลกับประธาน */
-  | { type: 'minutes'; text: string; model?: string }
+  | { type: 'minutes'; text: string; model?: string; error?: string }
+  /**
+   * ใครเริ่มคิดอะไร - ยิงก่อนเรียก LLM ทุกครั้ง หน้าเว็บเอาไปโชว์ว่าใครยังคิดอยู่นานแค่ไหน
+   * จบเมื่อมี opinion/consult/final/minutes ของคนนั้นตามมา
+   */
+  | { type: 'working'; agentId: string; agentName: string; task: WorkTask; label: string; model?: string }
   | { type: 'error'; message: string }
   | { type: 'done' };
 
@@ -209,5 +260,9 @@ export interface ChatMessage {
   proof?: SkillProof;
   /** โมเดลของคนที่สรุปคำตอบสุดท้าย */
   model?: string;
+  /** รายงานการประชุมของเลขาฯ - มาทีหลังคำตอบ */
+  minutes?: string;
+  /** คำตอบที่ PR กรองให้ลูกค้า (คำถามจากคนนอก) - ต่างจาก text ที่เป็นสรุปภายใน */
+  customerReply?: string;
   pending?: boolean;
 }

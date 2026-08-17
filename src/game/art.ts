@@ -324,21 +324,63 @@ function drawWorkDesk(v: number): Sprite {
  * เก้าอี้ - back=หันหลังให้กล้อง (คนนั่งหันขึ้น)
  * v=สี 0 ฟ้า 1 หนังน้ำตาลบอส 2 ทองเลขาฯ 3 เก้าอี้สำนักงานดำ (ห้องแผนก)
  */
-function drawChair(back: boolean, v = 0): Sprite {
+const CHAIR_PAL = (back: boolean): [string, string][] => [
+  back ? ['#8c5f6a', '#5e3d46'] : ['#5f7f8c', '#3f5a66'],
+  ['#7a4a2a', '#4e2c14'],
+  ['#b8862a', '#7a5618'],
+  ['#4a5058', '#2a3038'],
+  ['#3f8fa0', '#26606c'],
+];
+
+/**
+ * เก้าอี้ "ชั้นหลัง" - วาดก่อนตัวคน
+ * dir คือทิศที่คนนั่งหัน พนักพิงอยู่ด้านตรงข้าม:
+ *   down  = พนักพิงอยู่บน (หลังคน) เห็นเต็ม   up = เห็นแค่เบาะ (พนักพิงอยู่ล่าง วาดทับคนใน drawChairFront)
+ *   left/right = เบาะ + พนักพิงบางส่วนฝั่งตรงข้าม (ส่วนที่บังตัวคนไปอยู่ชั้นหน้า)
+ */
+function drawChair(back: boolean, v = 0, dir: 'up' | 'down' | 'left' | 'right' = 'down'): Sprite {
   const o = mk(16, 19), g = o.g;
-  const pal: [string, string][] = [
-    back ? ['#8c5f6a', '#5e3d46'] : ['#5f7f8c', '#3f5a66'],
-    ['#7a4a2a', '#4e2c14'],
-    ['#b8862a', '#7a5618'],
-    ['#4a5058', '#2a3038'],
-    ['#3f8fa0', '#26606c'],
-  ];
-  const [A, D] = pal[v % pal.length];
-  P(g, 4, 0, 8, 7, D); P(g, 5, 1, 6, 5, A); P(g, 5, 1, 6, 1, shade(A, 1.2));
-  P(g, 7, 7, 2, 1, D);
-  P(g, 2, 8, 12, 4, D); P(g, 3, 8, 10, 3, shade(A, 1.05)); P(g, 3, 8, 10, 1, shade(A, 1.25));
-  P(g, 2, 9, 1, 3, D); P(g, 13, 9, 1, 3, D);
-  P(g, 7, 12, 2, 3, D); P(g, 4, 15, 3, 2, '#2f3742'); P(g, 9, 15, 3, 2, '#2f3742');
+  const [A, D] = CHAIR_PAL(back)[v % 5];
+  const seat = () => {
+    P(g, 2, 8, 12, 4, D); P(g, 3, 8, 10, 3, shade(A, 1.05)); P(g, 3, 8, 10, 1, shade(A, 1.25));
+    P(g, 2, 9, 1, 3, D); P(g, 13, 9, 1, 3, D);
+    P(g, 7, 12, 2, 3, D); P(g, 4, 15, 3, 2, '#2f3742'); P(g, 9, 15, 3, 2, '#2f3742');
+  };
+  if (dir === 'down') {
+    // พนักพิงตั้งอยู่บน หลังคน
+    P(g, 4, 0, 8, 7, D); P(g, 5, 1, 6, 5, A); P(g, 5, 1, 6, 1, shade(A, 1.2));
+    P(g, 7, 7, 2, 1, D);
+    seat();
+  } else if (dir === 'up') {
+    // หันหลังให้เรา - เห็นแค่เบาะกับขาเก้าอี้ พนักพิงไปอยู่ชั้นหน้า
+    seat();
+  } else {
+    // หันข้าง - พนักพิงอยู่ฝั่งตรงข้ามกับที่หัน (หัน right = พนักพิงซ้าย) ชิ้นบนของพนักพิงอยู่หลังคน
+    seat();
+    const bx = dir === 'right' ? 1 : 12;
+    P(g, bx, 1, 3, 8, D); P(g, bx + 1, 2, 1, 6, A);
+  }
+  return { c: o.c, oy: 3 };
+}
+
+/**
+ * เก้าอี้ "ชั้นหน้า" - วาดหลังตัวคน (ทับ) เฉพาะเก้าอี้ที่หัน up / left / right
+ * up: พนักพิงบังสะโพก-ขา ให้ดูออกว่านั่งพิงอยู่ ไม่ใช่ยืนหน้าเก้าอี้
+ * left/right: ส่วนล่างของพนักพิงกับที่วางแขนบังลำตัวด้านข้าง
+ */
+function drawChairFront(back: boolean, v = 0, dir: 'up' | 'down' | 'left' | 'right' = 'up'): Sprite {
+  const o = mk(16, 19), g = o.g;
+  const [A, D] = CHAIR_PAL(back)[v % 5];
+  if (dir === 'up') {
+    P(g, 3, 9, 10, 8, D); P(g, 4, 10, 8, 6, A); P(g, 4, 10, 8, 1, shade(A, 1.2));
+    dith4(g, 9, 11, 2, 5, shade(A, 0.85), 0);
+    P(g, 3, 17, 10, 1, shade(D, 0.8));
+  } else if (dir === 'left' || dir === 'right') {
+    const bx = dir === 'right' ? 1 : 12;
+    P(g, bx, 9, 3, 6, D); P(g, bx + 1, 10, 1, 4, A);
+    // ที่วางแขน
+    P(g, bx, 9, 3, 1, shade(A, 1.2));
+  }
   return { c: o.c, oy: 3 };
 }
 /** เคาน์เตอร์เลขาฯ 3 ชิ้น (part 0 ซ้าย 1 กลาง 2 ขวา) - หน้าเคาน์เตอร์หันลงหาล็อบบี้ */
@@ -715,7 +757,7 @@ function drawLamp(): Sprite {
 const objCache = new Map<string, Sprite>();
 export function objSprite(o: MapObject): Sprite {
   const key = `${o.type}|${o.v ?? 0}${o.part ?? 0}${o.top ? 'T' : ''}${o.bot ? 'B' : ''}` +
-    `${o.left ? 'L' : ''}${o.right ? 'R' : ''}${o.back ? 'K' : ''}`;
+    `${o.left ? 'L' : ''}${o.right ? 'R' : ''}${o.back ? 'K' : ''}${o.dir ?? ''}`;
   const hit = objCache.get(key);
   if (hit) return hit;
 
@@ -723,7 +765,8 @@ export function objSprite(o: MapObject): Sprite {
   switch (o.type) {
     case 'desk': s = drawDesk(o.v ?? 0); break;
     case 'bossdesk': s = drawBossDesk(o.v ?? 0); break;
-    case 'chair': s = drawChair(!!o.back, o.v ?? 0); break;
+    case 'chair': s = drawChair(!!o.back, o.v ?? 0, o.dir ?? 'down'); break;
+    case 'chairfront': s = drawChairFront(!!o.back, o.v ?? 0, o.dir ?? 'up'); break;
     case 'workdesk': s = drawWorkDesk(o.v ?? 0); break;
     case 'counter2': s = drawCounter2(o.part ?? 0); break;
     case 'prcounter': s = drawPrCounter(o.part ?? 0, o.v ?? 1); break;

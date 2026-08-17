@@ -15,8 +15,8 @@ const P = (g: G, x: number, y: number, w: number, h: number, c: string) => {
   g.fillRect(x, y, w, h);
 };
 
-/** สร้าง palette จาก seed - สีเสื้อมาจากแผนก จะได้แยกทีมออกบนแผนที่ */
-export function makePalette(seed: number, shirt: string): Palette {
+/** สร้าง palette จาก seed - สีเสื้อมาจากแผนก จะได้แยกทีมออกบนแผนที่ (fem = ผมยาว+กระโปรง) */
+export function makePalette(seed: number, shirt: string, fem?: boolean): Palette {
   const pick = <T,>(arr: T[], salt: number) => arr[Math.abs((seed * 2654435761 + salt * 97) | 0) % arr.length];
   return {
     skin: pick(SKIN, 1),
@@ -24,6 +24,7 @@ export function makePalette(seed: number, shirt: string): Palette {
     shirt,
     pants: pick(PANTS, 3),
     shoes: pick(SHOES, 4),
+    ...(fem ? { fem: true } : {}),
   };
 }
 
@@ -38,6 +39,7 @@ export function drawChar(g: G, pal: Palette, dir: Dir, pose: Pose, frame: number
   const bob = pose === 'walk' && (frame === 1 || frame === 3) ? -1 : 0;
   const dy = (sit ? 2 : 0) + bob;
   const mirror = dir === 'left';
+  const fem = !!pal.fem;
 
   g.save();
   if (mirror) { g.translate(16, 0); g.scale(-1, 1); }
@@ -79,6 +81,22 @@ export function drawChar(g: G, pal: Palette, dir: Dir, pose: Pose, frame: number
   if (d === 'down') { P(g, 6, 12 + dy, 4, 2, shade(sh, 0.92)); P(g, 7, 14 + dy, 2, 4, shD); }
   if (d === 'up') P(g, 6, 12 + dy, 4, 1, shD);
 
+  /* ---- ผมยาว (ผู้หญิง) - วาดหลังลำตัวให้ทับไหล่ ---- */
+  if (fem) {
+    if (d === 'down') {
+      P(g, 2, 6 + dy, 2, 7, OUT_H); P(g, 12, 6 + dy, 2, 7, OUT_H);
+      P(g, 2, 6 + dy, 1, 6, ha); P(g, 13, 6 + dy, 1, 6, ha);
+      P(g, 3, 6 + dy, 1, 5, haL); P(g, 12, 6 + dy, 1, 5, haL);
+    } else if (d === 'up') {
+      // ผมปรกหลังลงมาถึงกลางหลัง
+      P(g, 3, 9 + dy, 10, 5, OUT_H); P(g, 4, 9 + dy, 8, 4, ha); P(g, 4, 9 + dy, 8, 1, haL);
+      dith4(g, 9, 10 + dy, 3, 3, shade(ha, 0.78), 0);
+    } else {
+      // หันข้าง - ผมยาวอยู่ด้านหลังศีรษะ (ฝั่งซ้ายเมื่อหันขวา)
+      P(g, 2, 5 + dy, 3, 8, OUT_H); P(g, 3, 5 + dy, 2, 7, ha); P(g, 3, 5 + dy, 1, 5, haL);
+    }
+  }
+
   /* ---- แขน ---- */
   let aL = 0, aR = 0;
   if (pose === 'walk') { aL = frame === 0 ? -1 : frame === 2 ? 1 : 0; aR = -aL; }
@@ -97,11 +115,35 @@ export function drawChar(g: G, pal: Palette, dir: Dir, pose: Pose, frame: number
   }
 
   /* ---- ขา ---- */
-  if (sit) {
+  if (sit && d === 'right') {
+    // นั่งหันข้าง: ต้นขายื่นไปข้างหน้า (ทางที่หัน) แล้วหน้าแข้งห้อยลง - ไม่ใช่ขายืนตรง
+    P(g, 4, 18 + dy, 10, 3, OUT_P);           // ต้นขา (ขอบ)
+    P(g, 5, 18 + dy, 8, 2, pa);
+    P(g, 5, 18 + dy, 8, 1, shade(pa, 1.1));
+    P(g, 10, 20 + dy, 4, 4, OUT_P);           // หน้าแข้ง (ขอบ)
+    P(g, 11, 20 + dy, 2, 3, pa);
+    P(g, 10, 22 + dy, 5, 2, so); P(g, 10, 23 + dy, 5, 1, OUT_F);   // รองเท้า
+  } else if (sit) {
     P(g, 4, 18 + dy, 8, 6, OUT_P);
     P(g, 4, 19 + dy, 8, 5, pa);
     P(g, 7, 19 + dy, 2, 5, shade(pa, 0.8));
     dith4(g, 9, 19 + dy, 3, 5, shade(pa, 0.82), 0);
+  } else if (fem) {
+    // กระโปรงบานเล็กน้อย + ขา 2 ข้างโผล่ใต้ชายกระโปรง (เดินแล้วขาสลับเหมือนกางเกง)
+    const step = pose === 'walk' ? (frame === 0 ? 1 : frame === 2 ? -1 : 0) : 0;
+    P(g, 3, 18 + dy, 10, 4, OUT_P);
+    P(g, 4, 18 + dy, 8, 2, pa);
+    P(g, 3, 20 + dy, 10, 1, pa); P(g, 4, 21 + dy, 8, 1, shade(pa, 0.85));
+    P(g, 3, 20 + dy, 10, 1, shade(pa, 1.1));
+    if (d === 'right') {
+      const fx = 8 + step, bx = 5 - step;
+      P(g, bx, 22 + dy, 3, 1, shade(sk, 0.85)); P(g, bx, 23 + dy, 3, 1, shade(so, 0.7));
+      P(g, fx, 22 + dy, 3, 1, sk); P(g, fx, 23 + dy, 3, 1, so);
+    } else {
+      const lu = step > 0 ? 1 : 0, ru = step < 0 ? 1 : 0;
+      P(g, 5, 22 + dy - lu, 2, 1, sk); P(g, 9, 22 + dy - ru, 2, 1, sk);
+      P(g, 5, 23 + dy - lu, 2, 1, so); P(g, 9, 23 + dy - ru, 2, 1, so);
+    }
   } else {
     const step = pose === 'walk' ? (frame === 0 ? 1 : frame === 2 ? -1 : 0) : 0;
     if (d === 'right') {

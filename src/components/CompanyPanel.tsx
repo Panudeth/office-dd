@@ -61,6 +61,8 @@ export default function CompanyPanel({
   const [docs, setDocs] = useState<DocRow[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [uploadDepts, setUploadDepts] = useState<string[]>([]);
+  /** ลูกค้าที่ถามผ่าน LINE/ช่องทางสาธารณะเห็นเอกสารนี้ได้ไหม - ค่าเริ่มต้นภายใน ต้องตั้งใจเปิด */
+  const [uploadPublic, setUploadPublic] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
   const [pasteName, setPasteName] = useState('');
   const [pasteText, setPasteText] = useState('');
@@ -162,7 +164,10 @@ export default function CompanyPanel({
     setUploading(name); setMsg(null);
     let row: DocRow | null = null;
     try {
-      row = await createDoc({ office_id: officeId, name, dept_ids: uploadDepts, bytes: size, uploaded_by: userId });
+      row = await createDoc({
+        office_id: officeId, name, dept_ids: uploadDepts, bytes: size, uploaded_by: userId,
+        visibility: uploadPublic ? 'public' : 'internal',
+      });
       setDocs((d) => [row!, ...d]);
       const res = await fetch('/api/embed', {
         method: 'POST',
@@ -245,6 +250,10 @@ export default function CompanyPanel({
                         label={
                           <span className="flex items-center gap-2">
                             {f.label}
+                            {/* ชั้นข้อมูล - ลูกค้าที่ถามผ่าน LINE/ช่องทางสาธารณะเห็นเฉพาะฟิลด์ที่ติดป้ายนี้ */}
+                            {f.public
+                              ? <Badge variant="brass" title="ลูกค้าที่ถามผ่านช่องทางสาธารณะเห็นได้">ลูกค้าเห็น</Badge>
+                              : <Badge title="เฉพาะคนในและ agent ภายใน">ภายใน</Badge>}
                             <span className={`ml-auto text-[10px] font-normal ${over ? 'text-brass' : 'text-dim'}`}>{v.length}/{f.max}</span>
                           </span>
                         }
@@ -329,7 +338,7 @@ export default function CompanyPanel({
                                 disabled={!canEdit}
                                 maxLength={PRODUCT_LIMITS.note}
                                 onChange={(e) => setItem(p.id, { note: e.target.value })}
-                                placeholder="หมายเหตุ - ต้นทุน/มาร์จิน เงื่อนไข สถานะ (เช่น กำลังจะเลิกขาย)"
+                                placeholder="หมายเหตุ (ภายใน - ลูกค้าไม่เห็น) ต้นทุน/มาร์จิน เงื่อนไข สถานะ"
                                 className="h-auto w-56 shrink-0 text-[11px]"
                               />
                             </div>
@@ -416,6 +425,19 @@ export default function CompanyPanel({
                     ตอนถาม ระบบค้นชิ้นที่เกี่ยวมาแนบให้ agent พร้อมอ้างอิงชื่อไฟล์ - ต้องใช้คีย์ที่ทำ embedding ได้ (Gemini / OpenAI / Ollama ที่ pull nomic-embed-text แล้ว)
                   </Hint>
 
+                  <Field label="ชั้นข้อมูล" hint="ภายใน = คนในและ agent ภายในเท่านั้น  สาธารณะ = ลูกค้าที่ถามผ่าน LINE/ช่องทางสาธารณะให้ PR ค้นตอบได้ด้วย (เช่น โบรชัวร์ ราคา FAQ เงื่อนไขบริการ)">
+                    <div className="flex gap-1">
+                      <button onClick={() => setUploadPublic(false)} disabled={!canEdit}
+                        className={`rounded-box border-2 px-2 py-0.5 text-[10px] ${!uploadPublic ? 'border-brass bg-ink-700 text-parchment' : 'border-ink-600 bg-ink-800 text-dim hover:border-ink-500'}`}>
+                        ภายใน
+                      </button>
+                      <button onClick={() => setUploadPublic(true)} disabled={!canEdit}
+                        className={`rounded-box border-2 px-2 py-0.5 text-[10px] ${uploadPublic ? 'border-brass bg-brass/20 text-brass' : 'border-ink-600 bg-ink-800 text-dim hover:border-ink-500'}`}>
+                        สาธารณะ - ลูกค้าเห็นได้
+                      </button>
+                    </div>
+                  </Field>
+
                   <Field label="ให้แผนกไหนอ่านได้" hint="ไม่เลือก = ทุกแผนก  เอกสารกฎหมายเลือกเฉพาะกฎหมาย จะได้ไม่ไปรกหัวการตลาด">
                     <div className="flex flex-wrap gap-1">
                       {DEPARTMENTS.map((d) => {
@@ -467,6 +489,7 @@ export default function CompanyPanel({
                               {d.status === 'ready' && <Badge variant="good">{d.chunk_count} ชิ้น</Badge>}
                               {d.status === 'processing' && <Badge variant="brass">กำลังประมวลผล</Badge>}
                               {d.status === 'error' && <Badge variant="bad" title={d.error ?? ''}>พัง - {d.error?.slice(0, 60)}</Badge>}
+                              {d.visibility === 'public' && <Badge variant="brass">สาธารณะ</Badge>}
                               {d.dept_ids.length ? d.dept_ids.map((id) => DEPT_BY_ID.get(id)?.shortTh ?? id).join(', ') : 'ทุกแผนก'}
                               <span>· {(d.bytes / 1024).toFixed(1)} KB</span>
                             </span>

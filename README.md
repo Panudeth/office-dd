@@ -192,6 +192,48 @@ classifier ปฏิเสธคำถามจะได้มีโมเดล
 ตอนว่าง agent จะสุ่มพฤติกรรมเอง: นั่งทำงาน ชงกาแฟ กินข้าว นั่งโซฟา
 ออกไปนั่งม้านั่งในสวน ยืนดูบ่อน้ำ หรือเดินไปคุยกับเพื่อน (`World.decide()`)
 
+## เชื่อมต่อจากข้างนอก - MCP / API / LINE (ต้องมี Supabase + secret key)
+
+การประชุมไม่ได้ผูกกับเบราว์เซอร์อีกแล้ว: ตรรกะอยู่ใน `src/lib/engine.ts` (engine) ใครจะเรียกก็ได้
+เซิร์ฟเวอร์เขียน event ลงตาราง `meeting_event` แล้วทุกจอที่เปิดออฟฟิศนั้นอยู่จะเห็นคนลุกไปประชุมผ่าน Realtime
+ระบบภายนอกได้คำตอบกลับเป็น JSON ส่วนบันทึกอยู่ในสมุดเลขาฯ เหมือนถามจากหน้าเว็บ
+
+**เปิดใช้** (ทั้งหมดไม่ใส่ก็รันได้ - แอปจะทำงานแบบเบราว์เซอร์ล้วนเหมือนเดิม)
+
+1. รัน `supabase/schema.sql` รอบล่าสุด (มีตาราง `meeting_event`, `office_token`, publication realtime)
+2. ใส่ `SUPABASE_SECRET_KEY=sb_secret_...` ใน `.env` ของเซิร์ฟเวอร์ (ห้ามใส่ NEXT_PUBLIC_)
+3. ใส่คีย์ LLM ฝั่งเซิร์ฟเวอร์สำหรับงานที่ไม่มีเบราว์เซอร์ เช่น Ollama: `LLM_PROVIDER=openai` `OPENAI_BASE_URL=http://localhost:11434/v1` `OPENAI_MODEL=qwen3.5:9b`
+4. กดปุ่ม **🔌 เชื่อมต่อ** บนแถบบน -> สร้าง token (โชว์ครั้งเดียว) เลือก scope:
+   - **internal** = agent ของเราเอง (Claude Code, pugbase): ถามทุกแผนก, ประชุม, อ่านสมุด/บทถกได้
+   - **public** = ช่องทางลูกค้า (LINE, widget): ถามฝ่ายบริการลูกค้าได้อย่างเดียว ได้เฉพาะคำตอบที่กรองแล้ว **ไม่เห็นสมุด**
+
+| ช่องทาง | ใช้ยังไง | หมายเหตุ |
+|---|---|---|
+| **MCP** | `POST /api/mcp` + `Authorization: Bearer <token>` (Streamable HTTP) - Claude Code: `claude mcp add --transport http visual-company https://<โดเมน>/api/mcp --header "Authorization: Bearer <token>"` | internal: `list_departments`, `ask_department` (เร็ว), `hold_meeting` (ช้า), `get_meeting`, `list_meetings` · public: `ask_customer_service` เท่านั้น · โมเดลช้า -> ได้ `status: running` + meetingId แล้วเรียกซ้ำ |
+| **API** | `POST /api/office/ask` `{ question, deptIds?, mode?, publicOnly? }` | token public ได้เฉพาะ `answer` ที่กรองแล้ว |
+| **LINE** | ตั้ง `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_OFFICE_ID` แล้วชี้ Webhook ไป `/api/line/webhook` | ลูกค้าเสมอ - ตอบทันที "รับเรื่องแล้ว" แล้ว push คำตอบตาม |
+
+**ลูกค้าถาม = ไม่ใช่การประชุม** ([headless.ts](src/lib/headless.ts)): ลูกค้าเดินเข้าออฟฟิศมาหน้าเคาน์เตอร์ PR → PR ตอบจากข้อมูลสาธารณะ (โปรไฟล์ สินค้า โน้ต/เอกสารของ PR) →
+ถ้าเป็นเรื่องที่ต้องตัดสินใจภายใน (ส่วนลด/ข้อยกเว้น) PR บอกให้รอ ลูกค้าไปนั่งโซฟา PR พาแผนกที่เกี่ยวเข้าห้องประชุม (สายพาน) →
+PR เอาผลมา **เขียนใหม่ให้ลูกค้า** (ไม่มีตัวเลขภายใน/ข้อค้าน/ชื่อคน) → เดินกลับมาบอก → ลูกค้าเดินออก
+บทถกและสรุปภายในอยู่ในสมุดเลขาฯ (คนในเห็น) ลูกค้าเห็นเฉพาะ `customer_reply`
+
+**ชั้นข้อมูล (ภายใน / สาธารณะ)** - โมเดลที่คุยกับลูกค้า "ไม่เห็น" ของภายในตั้งแต่แรก ไม่ใช่เห็นแล้วห้ามพูด (กัน prompt injection)
+
+| ข้อมูล | ลูกค้าเห็น | ภายในเท่านั้น |
+|---|---|---|
+| โปรไฟล์ | ฟิลด์ที่ติดป้าย "ลูกค้าเห็น" (ชื่อ ทำอะไร ลูกค้าคือใคร ภาพรวมสินค้า โทน ช่องทางติดต่อ) | รายได้ ขนาด นิติบุคคล เส้นแดง เป้าหมาย ปัญหา |
+| สินค้า | ชื่อ รายละเอียด ราคา | หมายเหตุ (ต้นทุน/มาร์จิน/สถานะ) |
+| โน้ตแผนก | เฉพาะของแผนกรับลูกค้า (PR = สคริปต์ operator) | ทุกแผนก |
+| เอกสาร | เฉพาะที่ติด "สาธารณะ" ตอนอัปโหลด | ทั้งหมด (ค่าเริ่มต้น) |
+| สมุด/บทถก | ไม่เห็น | ทั้งหมด |
+
+**ถามแผนกโดยตรง** จากหน้าเว็บก็ได้ - dropdown เหนือช่องแชท เลือกแผนก แล้วหัวหน้าแผนกตอบคนเดียว (คำขอ LLM ครั้งเดียว) ไม่ต้องผ่านหน้าวาระ
+
+**ความปลอดภัย**: token ออฟฟิศเก็บเป็น hash, ใครถือ token ถามได้และอ่านบันทึกได้ (เพิกถอนได้จากหน้าเดียวกัน)
+LINE ใช้ `publicOnly` - เห็นเฉพาะที่เปิดเผยได้ แต่ LLM ก็ยังโดน prompt injection ได้ อย่าใส่ความลับในโปรไฟล์/สินค้า/โน้ต PR
+Ollama ในเครื่องเรียกได้เฉพาะเมื่อเซิร์ฟเวอร์รันบนเครื่องเดียวกัน - deploy บน cloud ต้องเปิด Ollama ออกเน็ต (cloudflared/tailscale)
+
 ## โครงไฟล์
 
 ```
@@ -202,7 +244,13 @@ src/lib/claude.ts           อะแดปเตอร์ Claude (จัดก�
 src/lib/gemini.ts           อะแดปเตอร์ Gemini
 src/components/KeyPanel.tsx แผงใส่คีย์ (BYOK, เก็บใน localStorage)
 src/lib/skills.ts           อ่าน skills/*.md
-src/app/api/ask/route.ts    วงจรถกกัน 2 รอบ + สรุป -> SSE
+src/lib/engine.ts           วงจรประชุม (ถก 2 รอบ / สายพาน / ตอบตรง + เลขาฯ จดรายงาน) - ยิง event ไม่รู้จัก HTTP
+src/lib/meeting-store.ts    เขียน event ลง DB แบบสด (service key) ให้ทุกจอเห็น
+src/lib/headless.ts         ประชุมโดยไม่มีเบราว์เซอร์ - โหลดพนักงาน/ข้อมูลบริษัทเองแล้วรัน engine
+src/app/api/ask/route.ts    ประชุมจากเบราว์เซอร์ -> SSE (+ บันทึกลง DB ถ้ามี secret key)
+src/app/api/office/*        token ออฟฟิศ + ask จากข้างนอก
+src/app/api/mcp/route.ts    MCP server (Streamable HTTP, Bearer = token ออฟฟิศ)
+src/app/api/line/webhook    LINE -> แผนกประชาสัมพันธ์
 src/app/api/models/route.ts ดึงรายชื่อโมเดลของคีย์ (ใช้ตรวจคีย์ไปในตัว)
 src/game/map.ts             แผนที่ ที่นั่ง pathfinding (BFS)
 src/game/art.ts             ไทล์/วัตถุทั้งหมด วาดด้วยโค้ด

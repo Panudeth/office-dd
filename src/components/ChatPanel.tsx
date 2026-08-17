@@ -4,7 +4,10 @@ import {
   ChevronDown, ChevronRight, MessagesSquare, ReceiptText, SendHorizontal, Swords,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { DEPT_BY_ID } from '@/lib/departments';
+import { DEPARTMENTS, DEPT_BY_ID } from '@/lib/departments';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import { MEETING_MODES, type ChatMessage, type Opinion } from '@/lib/protocol';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -30,7 +33,10 @@ interface Props {
   messages: ChatMessage[];
   busy: boolean;
   phase: string | null;
-  onSend: (q: string) => void;
+  /** ส่งคำถาม - directDept มีค่า = ถามหัวหน้าแผนกนั้นตรง ๆ ข้ามหน้าวาระ */
+  onSend: (q: string, directDept?: string) => void;
+  /** แผนกที่มีพนักงาน - ตัวเลือก "ถามแผนกโดยตรง" โชว์เฉพาะแผนกที่ถามได้จริง */
+  hiredDeptIds?: string[];
 }
 
 /** ปุ่มพับ/กางที่ใช้ซ้ำสองที่ ให้หน้าตาเหมือนกันเป๊ะ */
@@ -57,8 +63,10 @@ function Disclosure({
   );
 }
 
-export default function ChatPanel({ messages, busy, phase, onSend }: Props) {
+export default function ChatPanel({ messages, busy, phase, onSend, hiredDeptIds = [] }: Props) {
   const [draft, setDraft] = useState('');
+  /** '' = ให้เลขาฯ จัดวาระ (ประชุม), id แผนก = ถามหัวหน้าแผนกนั้นตรง ๆ */
+  const [directDept, setDirectDept] = useState('');
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -71,8 +79,9 @@ export default function ChatPanel({ messages, busy, phase, onSend }: Props) {
     const q = draft.trim();
     if (!q || busy) return;
     setDraft('');
-    onSend(q);
+    onSend(q, directDept && hiredDeptIds.includes(directDept) ? directDept : undefined);
   };
+  const directOn = !!directDept && hiredDeptIds.includes(directDept);
 
   const toggle = (k: string) => setOpen((o) => ({ ...o, [k]: !o[k] }));
 
@@ -145,6 +154,12 @@ export default function ChatPanel({ messages, busy, phase, onSend }: Props) {
                     fmt(m.text)
                   )}
                 </div>
+                {m.customerReply && (
+                  <div className="mt-1.5 rounded-box border border-brass/50 bg-wood-deep/40 px-2 py-1.5">
+                    <div className="mb-0.5 text-[10px] font-semibold text-brass">ตอบลูกค้าว่า (กรองแล้ว - ลูกค้าเห็นแค่นี้)</div>
+                    <div className="text-[12px] text-parchment-2">{fmt(m.customerReply)}</div>
+                  </div>
+                )}
 
                 {m.proof && (
                   <div className="mt-1.5 border-t border-ink-600 pt-1">
@@ -333,21 +348,41 @@ export default function ChatPanel({ messages, busy, phase, onSend }: Props) {
           <div ref={endRef} />
         </div>
 
-        <form className="flex items-end gap-1.5" onSubmit={submit}>
-          <Textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) submit(e);
-            }}
-            placeholder={busy ? 'ทีมกำลังประชุมอยู่' : 'พิมพ์คำถาม แล้วกด Enter'}
-            rows={2}
-            disabled={busy}
-            className="h-auto"
-          />
-          <Button type="submit" variant="primary" size="lg" disabled={busy || !draft.trim()}>
-            <SendHorizontal /> ถาม
-          </Button>
+        <form className="flex flex-col gap-1" onSubmit={submit}>
+          {/* ถามใคร: ประชุม (เลขาฯ จัดวาระ) หรือถามหัวหน้าแผนกโดยตรง (เร็ว คำขอเดียว ข้ามหน้าวาระ) */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-dim">ถาม</span>
+            <Select value={directDept || '_meeting'} onValueChange={(v) => setDirectDept(v === '_meeting' ? '' : v)} disabled={busy}>
+              <SelectTrigger className={`h-7 w-56 text-[11px] ${directOn ? 'border-brass/60 text-parchment' : 'text-dim'}`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_meeting">ประชุม - เลขาฯ จัดวาระให้</SelectItem>
+                {DEPARTMENTS.filter((d) => hiredDeptIds.includes(d.id)).map((d) => (
+                  <SelectItem key={d.id} value={d.id}>ถาม{d.nameTh}โดยตรง</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {directOn && (
+              <span className="truncate text-[10px] text-dim">หัวหน้าแผนกตอบคนเดียว ไม่ประชุม - เร็ว</span>
+            )}
+          </div>
+          <div className="flex items-end gap-1.5">
+            <Textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) submit(e);
+              }}
+              placeholder={busy ? 'ทีมกำลังประชุมอยู่' : directOn ? `ถาม${DEPT_BY_ID.get(directDept)?.nameTh ?? ''} แล้วกด Enter` : 'พิมพ์คำถาม แล้วกด Enter'}
+              rows={2}
+              disabled={busy}
+              className="h-auto"
+            />
+            <Button type="submit" variant="primary" size="lg" disabled={busy || !draft.trim()}>
+              <SendHorizontal /> ถาม
+            </Button>
+          </div>
         </form>
       </PanelBody>
     </Panel>

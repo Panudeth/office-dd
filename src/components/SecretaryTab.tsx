@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  ChevronDown, ChevronLeft, ChevronRight, LoaderCircle, RefreshCw, Search, Trash2,
+  CalendarDays, ChevronDown, ChevronLeft, ChevronRight, LoaderCircle, RefreshCw, Search, Trash2,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { DEPT_BY_ID } from '@/lib/departments';
@@ -51,6 +51,8 @@ export default function SecretaryTab({
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
   const [pickedDay, setPickedDay] = useState<string | null>(null);
+  /** ปฏิทินเต็มพับไว้ก่อน - แผงนี้พื้นที่น้อย เนื้อหาหลักคือรายการประชุม ไม่ใช่ตาราง */
+  const [calOpen, setCalOpen] = useState(false);
 
   // จำนวนประชุมต่อวัน - ใช้ทั้งเลขบนปฏิทินและกรองรายการ
   const byDay = useMemo(() => {
@@ -111,10 +113,10 @@ export default function SecretaryTab({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-1.5 p-2">
-      {/* ---------- ปฏิทิน ---------- */}
-      <div className="rounded-box border-2 border-ink-600 bg-ink-700 p-1.5">
-        <div className="mb-1 flex items-center gap-1">
+    <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden p-2">
+      {/* ---------- เดือน + ปฏิทิน (พับได้) ---------- */}
+      <div className="shrink-0 rounded-box border-2 border-ink-600 bg-ink-700 p-1.5">
+        <div className="flex items-center gap-1">
           <Button
             size="icon" variant="ghost" className="size-6" title="เดือนก่อน"
             onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))}
@@ -138,11 +140,19 @@ export default function SecretaryTab({
           >
             <ChevronRight />
           </Button>
+          <Button
+            size="icon" variant={calOpen ? 'primary' : 'ghost'} className="size-6"
+            title={calOpen ? 'พับปฏิทิน' : 'กางปฏิทิน - เลือกวัน'}
+            onClick={() => setCalOpen((v) => !v)}
+          >
+            <CalendarDays />
+          </Button>
           <Button size="icon" variant="ghost" className="size-6" onClick={onRefresh} disabled={loading} title="โหลดใหม่">
             <RefreshCw className={loading ? 'animate-spin' : undefined} />
           </Button>
         </div>
-        <div className="grid grid-cols-7 gap-0.5 text-center text-[9px] text-dim">
+        {calOpen && (
+        <div className="mt-1 grid grid-cols-7 gap-0.5 text-center text-[9px] text-dim">
           {WEEKDAYS.map((w) => <div key={w} className="py-0.5">{w}</div>)}
           {grid.map((d) => {
             const k = dayKey(d);
@@ -160,7 +170,7 @@ export default function SecretaryTab({
                 onClick={() => setPickedDay(on ? null : k)}
                 disabled={!n}
                 title={n ? `${fmtDay.format(d)} - ${n} เรื่อง` : undefined}
-                className={`relative flex h-7 flex-col items-center justify-center rounded-[3px] border text-[10px] disabled:cursor-default ${tone} ${inMonth ? '' : 'opacity-40'} ${k === todayKey ? 'font-bold underline' : ''}`}
+                className={`relative flex h-6 flex-col items-center justify-center rounded-[3px] border text-[10px] disabled:cursor-default ${tone} ${inMonth ? '' : 'opacity-40'} ${k === todayKey ? 'font-bold underline' : ''}`}
               >
                 {d.getDate()}
                 {n > 0 && (
@@ -172,8 +182,9 @@ export default function SecretaryTab({
             );
           })}
         </div>
+        )}
         <div className="mt-1 flex items-center justify-between text-[10px] text-dim">
-          <span>เดือนนี้ {monthTotal} เรื่อง</span>
+          <span>เดือนนี้ {monthTotal} เรื่อง{pickedDay ? ` · กรองวันที่ ${pickedDay.slice(-2)}` : ''}</span>
           {pickedDay && (
             <button className="text-brass hover:underline" onClick={() => setPickedDay(null)}>
               ดูทั้งเดือน
@@ -183,7 +194,7 @@ export default function SecretaryTab({
       </div>
 
       {/* ---------- ค้นหา ---------- */}
-      <div className="relative">
+      <div className="relative shrink-0">
         <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-dim" />
         <Input
           value={q}
@@ -277,6 +288,16 @@ export default function SecretaryTab({
                     <div className="text-[12px] leading-relaxed text-parchment-2">
                       {m.summary ? fmt(m.summary) : <Hint>ไม่มีข้อสรุปบันทึกไว้</Hint>}
                     </div>
+                    {m.audience === 'customer' && (
+                      <div className="mt-1.5 rounded-box border border-brass/50 bg-wood-deep/40 px-2 py-1.5">
+                        <div className="mb-0.5 text-[10px] font-semibold text-brass">
+                          ลูกค้าถาม{m.source ? ` (${m.source.toUpperCase()})` : ''} - ตอบลูกค้าว่า (สิ่งที่ลูกค้าเห็น)
+                        </div>
+                        <div className="text-[12px] leading-relaxed text-parchment-2">
+                          {m.customer_reply ? fmt(m.customer_reply) : <Hint>ยังไม่ได้ตอบ</Hint>}
+                        </div>
+                      </div>
+                    )}
                     {(!!ops.length || !!cs.length) && (
                       <details className="mt-1.5">
                         <summary className="cursor-pointer text-[11px] text-dim hover:text-parchment">

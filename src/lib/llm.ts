@@ -104,6 +104,13 @@ export function resolveCreds(byok: ByokInput): Creds | null {
   const envProvider = isProvider(process.env.LLM_PROVIDER) ? process.env.LLM_PROVIDER : null;
   const claudeKey = envClaudeKey();
   const openAiKey = envOpenAiKey();
+  // Ollama/LM Studio ในเครื่องเดียวกับเซิร์ฟเวอร์ไม่มีคีย์ - ชี้ OPENAI_BASE_URL ไป localhost ก็พอ
+  // จำเป็นสำหรับงานที่ไม่มีเบราว์เซอร์ส่งคีย์มา (MCP / LINE / API)
+  const openAiReady = Boolean(openAiKey) || isLocalBase(DEFAULT_OPENAI_BASE);
+  const openAiEnv = (): Creds => ({
+    provider: 'openai', apiKey: openAiKey, baseUrl: DEFAULT_OPENAI_BASE,
+    model: process.env.OPENAI_MODEL || undefined, source: 'env',
+  });
 
   if (envProvider === 'gemini' && hasGeminiKey()) {
     return { provider: 'gemini', apiKey: geminiEnvKey(), source: 'env' };
@@ -111,15 +118,11 @@ export function resolveCreds(byok: ByokInput): Creds | null {
   if (envProvider === 'anthropic' && claudeKey) {
     return { provider: 'anthropic', apiKey: claudeKey, source: 'env' };
   }
-  if (envProvider === 'openai' && openAiKey) {
-    return { provider: 'openai', apiKey: openAiKey, baseUrl: DEFAULT_OPENAI_BASE, source: 'env' };
-  }
+  if (envProvider === 'openai' && openAiReady) return openAiEnv();
   // ไม่ได้ระบุ LLM_PROVIDER - ใช้อันที่มีคีย์
   if (claudeKey) return { provider: 'anthropic', apiKey: claudeKey, source: 'env' };
   if (hasGeminiKey()) return { provider: 'gemini', apiKey: geminiEnvKey(), source: 'env' };
-  if (openAiKey) {
-    return { provider: 'openai', apiKey: openAiKey, baseUrl: DEFAULT_OPENAI_BASE, source: 'env' };
-  }
+  if (openAiReady) return openAiEnv();
   return null;
 }
 
@@ -127,10 +130,33 @@ function geminiEnvKey() {
   return process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? '';
 }
 
-export function ask(opts: AskOptions, creds: Creds): Promise<string> {
-  if (creds.provider === 'gemini') return askGemini(opts, creds);
-  if (creds.provider === 'openai') return askOpenAi(opts, creds);
-  return askClaude(opts, creds);
+/**
+ * โมเดลสาย reasoning (qwen3, deepseek-r1, ...) ที่รันผ่าน Ollama/OpenAI-compatible บางทีพ่นความคิดปนมาในคำตอบ
+ * ทั้งแบบ <think>...</think> และแบบข้อความดิบ "Thinking Process: ..." ก่อนถึงคำตอบจริง
+ * ตัดทิ้งที่จุดเดียว - ทุก provider ทุกบทบาทได้คำตอบสะอาดเหมือนกัน (บันทึกในสมุดจะได้ไม่มีความคิดในใจติดไป)
+ */
+export function stripThinking(text: string): string {
+  let s = text.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<\/?think>\s*/i, '');
+  // ความคิดดิบขึ้นต้นข้อความ (ทั้งแบบข้อความเปล่าและแบบหัวข้อตัวหนา "**Analyze the Request:**") - เอาเฉพาะคำตอบจริง
+  // คำตอบจริงมักตามหลังบรรทัดอย่าง "Draft:" / "Final answer:" / "คำตอบ:" หรือเริ่มที่หัวข้อไทยตัวหนา (**สรุป**)
+  const thinky = /^\s*(\*\*)?\s*(thinking process|thought process|thoughts?|reasoning|analysis|analyze the request|let me|okay,? (let|so)|ก่อนอื่น(ขอ)?คิด)/i;
+  if (thinky.test(s)) {
+    // บรรทัด "Draft:" / "**Final answer:**" (อาจมี bullet นำหน้า) - คำตอบจริงเริ่มบรรทัดถัดไป
+    const cut = s.search(/(^|\n)[ \t*-]*\*?\*?(draft|final answer|final response|answer|response|คำตอบ|ร่างคำตอบ)\s*[:：]?[ \t]*\*?\*?[ \t]*\n/i);
+    const th = s.search(/\*\*[฀-๿][^*]{0,40}\*\*/);
+    const i = cut >= 0 ? s.indexOf('\n', cut + 1) + 1 : th;
+    if (i > 0) s = s.slice(i);
+  }
+  return s.trim() || text.trim();
+}
+
+export async function ask(opts: AskOptions, creds: Creds): Promise<string> {
+  const raw = creds.provider === 'gemini'
+    ? await askGemini(opts, creds)
+    : creds.provider === 'openai'
+      ? await askOpenAi(opts, creds)
+      : await askClaude(opts, creds);
+  return stripThinking(raw);
 }
 
 export function listModels(creds: Creds): Promise<{ id: string; label: string }[]> {

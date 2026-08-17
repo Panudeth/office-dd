@@ -62,6 +62,53 @@ alter table public.meeting add constraint meeting_mode_check check (mode in ('ro
 alter table public.meeting add column if not exists minutes text not null default '';
 
 -- ============================================================
+-- การประชุมแบบ "สด" - engine รันฝั่ง server แล้วเขียน event ลง DB
+-- เบราว์เซอร์ทุกจอ (และระบบภายนอกที่เรียกผ่าน API/MCP/LINE) เห็นการประชุมเดียวกัน
+-- ============================================================
+
+-- สถานะ + ใครเป็นประธาน + เรียกจากไหน  (ค่าเริ่มต้น done เพื่อให้แถวเก่าที่บันทึกตอนจบยังถูกต้อง)
+alter table public.meeting add column if not exists status text not null default 'done';
+alter table public.meeting drop constraint if exists meeting_status_check;
+alter table public.meeting add constraint meeting_status_check check (status in ('running', 'done', 'error'));
+alter table public.meeting add column if not exists chair_id text;
+alter table public.meeting add column if not exists source text not null default 'web';
+alter table public.meeting add column if not exists error text;
+alter table public.meeting add column if not exists updated_at timestamptz not null default now();
+-- ใครถาม: internal (คนใน/agent ของเรา) หรือ customer (ลูกค้าผ่าน LINE/ช่องทางสาธารณะ)
+-- คำถามจากลูกค้า: บทถกภายในอยู่ในสมุดเหมือนเดิม แต่ลูกค้าได้เฉพาะ customer_reply ที่ PR กรองแล้ว
+alter table public.meeting add column if not exists audience text not null default 'internal';
+alter table public.meeting drop constraint if exists meeting_audience_check;
+alter table public.meeting add constraint meeting_audience_check check (audience in ('internal', 'customer'));
+alter table public.meeting add column if not exists customer_reply text not null default '';
+
+-- event ของการประชุม เรียงตาม seq - ตัวเดียวกับที่ส่งทาง SSE ให้เบราว์เซอร์
+create table if not exists public.meeting_event (
+  id          bigserial primary key,
+  meeting_id  uuid not null references public.meeting(id) on delete cascade,
+  office_id   uuid not null references public.office(id) on delete cascade,
+  seq         int not null,
+  type        text not null,
+  payload     jsonb not null default '{}',
+  created_at  timestamptz not null default now()
+);
+
+-- token สำหรับเรียกออฟฟิศจากข้างนอกโดยไม่มีเบราว์เซอร์ (MCP / LINE / API)
+-- เก็บเฉพาะ hash - token จริงโชว์ให้เห็นครั้งเดียวตอนสร้าง
+create table if not exists public.office_token (
+  id           uuid primary key default gen_random_uuid(),
+  office_id    uuid not null references public.office(id) on delete cascade,
+  name         text not null,
+  token_hash   text not null unique,
+  created_by   uuid references auth.users(id) on delete set null,
+  created_at   timestamptz not null default now(),
+  last_used_at timestamptz
+);
+-- scope: internal = agent ของเรา (ถามทุกแผนก ประชุม อ่านสมุดได้)  public = ช่องทางลูกค้า (ถาม PR ได้อย่างเดียว ไม่เห็นสมุด)
+alter table public.office_token add column if not exists scope text not null default 'internal';
+alter table public.office_token drop constraint if exists office_token_scope_check;
+alter table public.office_token add constraint office_token_scope_check check (scope in ('internal', 'public'));
+
+-- ============================================================
 -- ข้อมูลบริษัท - สิ่งที่ agent ทุกตัวต้องรู้ก่อนตอบ (แยกจาก skill ที่เป็น "วิธีคิด")
 -- ============================================================
 
@@ -113,6 +160,10 @@ create table if not exists public.office_doc (
   uploaded_by  uuid references auth.users(id) on delete set null,
   created_at   timestamptz not null default now()
 );
+-- ชั้นข้อมูล: internal (ค่าเริ่มต้น - เฉพาะคนใน) / public (ลูกค้าถามผ่าน LINE/ช่องทางสาธารณะเห็นได้)
+alter table public.office_doc add column if not exists visibility text not null default 'internal';
+alter table public.office_doc drop constraint if exists office_doc_visibility_check;
+alter table public.office_doc add constraint office_doc_visibility_check check (visibility in ('internal', 'public'));
 
 -- pgvector สำหรับค้นชิ้นเอกสารตามความหมาย
 create extension if not exists vector with schema extensions;
@@ -139,6 +190,9 @@ create index if not exists office_doc_chunk_embed_idx on public.office_doc_chunk
   using ivfflat (embedding extensions.vector_cosine_ops) with (lists = 20);
 create index if not exists office_member_user_idx on public.office_member (user_id);
 create index if not exists meeting_office_idx on public.meeting (office_id, created_at desc);
+create index if not exists meeting_event_meeting_idx on public.meeting_event (meeting_id, seq);
+create index if not exists meeting_event_office_idx on public.meeting_event (office_id, created_at desc);
+create index if not exists office_token_office_idx on public.office_token (office_id);
 
 -- ============================================================
 -- ฟังก์ชันช่วย RLS
@@ -190,6 +244,8 @@ alter table public.office        enable row level security;
 alter table public.office_member enable row level security;
 alter table public.employee      enable row level security;
 alter table public.meeting       enable row level security;
+alter table public.meeting_event enable row level security;
+alter table public.office_token  enable row level security;
 alter table public.office_profile   enable row level security;
 alter table public.office_dept_note enable row level security;
 alter table public.office_product   enable row level security;
@@ -252,6 +308,14 @@ create policy meeting_write on public.meeting
   using (public.is_office_member(office_id))
   with check (public.is_office_member(office_id));
 
+-- meeting_event: สมาชิกอ่านได้ (Realtime ใช้ policy นี้ตอน push) เขียนได้ - engine เขียนด้วย service key อยู่แล้ว
+drop policy if exists meeting_event_select on public.meeting_event;
+create policy meeting_event_select on public.meeting_event
+  for select using (public.is_office_member(office_id));
+drop policy if exists meeting_event_write on public.meeting_event;
+create policy meeting_event_write on public.meeting_event
+  for all using (public.is_office_member(office_id)) with check (public.is_office_member(office_id));
+
 -- ข้อมูลบริษัท ---------------------------------------------------
 -- อ่าน: สมาชิกออฟฟิศทุกคน  เขียน: เจ้าของหรือ exec เท่านั้น (viewer อ่านอย่างเดียว)
 create or replace function public.can_edit_office(oid uuid)
@@ -286,6 +350,11 @@ create policy office_product_select on public.office_product
   for select using (public.is_office_member(office_id));
 drop policy if exists office_product_write on public.office_product;
 create policy office_product_write on public.office_product
+  for all using (public.can_edit_office(office_id)) with check (public.can_edit_office(office_id));
+
+-- office_token: เจ้าของ/exec จัดการ - เห็นแค่ชื่อกับวันที่ (hash ไม่มีประโยชน์กับใคร)
+drop policy if exists office_token_all on public.office_token;
+create policy office_token_all on public.office_token
   for all using (public.can_edit_office(office_id)) with check (public.can_edit_office(office_id));
 
 drop policy if exists office_doc_select on public.office_doc;
@@ -358,5 +427,18 @@ begin
     where pubname = 'supabase_realtime' and tablename = 'employee'
   ) then
     alter publication supabase_realtime add table public.employee;
+  end if;
+  -- การประชุมสด: เบราว์เซอร์ subscribe event ที่ engine เขียน
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'meeting_event'
+  ) then
+    alter publication supabase_realtime add table public.meeting_event;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'meeting'
+  ) then
+    alter publication supabase_realtime add table public.meeting;
   end if;
 end $$;

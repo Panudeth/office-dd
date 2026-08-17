@@ -153,6 +153,7 @@ export const SECRETARY_PAL: Palette = {
   shirt: '#c8922f',
   pants: '#4a4038',
   shoes: '#403848',
+  fem: true, // คุณเมย์ - ผมยาว กระโปรง
 };
 
 /* ============================================================
@@ -187,6 +188,11 @@ export interface MapObject {
   v?: number;
   part?: number;
   back?: boolean;
+  /**
+   * ทิศที่คนนั่งบนเก้าอี้ตัวนี้หัน (เก้าอี้เท่านั้น) - พนักพิงอยู่ด้านตรงข้าม
+   *   down = พนักพิงอยู่บน (หลังคน)  up = พนักพิงอยู่ล่าง (วาดทับตัวคน)  left/right = พนักพิงด้านข้าง
+   */
+  dir?: 'up' | 'down' | 'left' | 'right';
   top?: boolean; bot?: boolean; left?: boolean; right?: boolean;
 }
 
@@ -197,7 +203,7 @@ const add = (type: string, x: number, y: number, extra: Partial<MapObject> = {})
 /* ---------- ห้องแผนก: โต๊ะคอมอยู่บน คนนั่งใต้โต๊ะหันขึ้น (เห็นหลังคน เห็นหน้าจอ) ---------- */
 DESK_SEATS.forEach((s) => {
   add('workdesk', s.x, s.y - 1, { v: (s.x * 7 + s.y * 3) % 3 });
-  add('chair', s.x, s.y, { back: true, v: 3 });
+  add('chair', s.x, s.y, { back: true, v: 3, dir: 'up' });
 });
 // คอลัมน์ขวาของห้อง (x0+2) เป็นทางเดินจากประตูลงมา ห้ามวางของขวางแถว 12-15
 // ของประจำห้อง + พื้นห้อง แยกตามธีมแผนก - แผนกไหนอยู่ห้องไหนดู ROOM_OF_DEPT
@@ -216,8 +222,8 @@ Object.entries(ROOM_OF_DEPT).forEach(([deptId, ri]) => {
 });
 
 /* ---------- ห้องประชุม ---------- */
-MEET_SEATS.forEach((s) => add('chair', s.x, s.y, { back: s.dir === 'down' }));
-add('chair', BOSS_SEAT.x, BOSS_SEAT.y, { back: true });
+MEET_SEATS.forEach((s) => add('chair', s.x, s.y, { back: s.dir === 'down', dir: s.dir }));
+add('chair', BOSS_SEAT.x, BOSS_SEAT.y, { back: true, dir: BOSS_SEAT.dir });
 for (let tx = MEET_TABLE.x0; tx <= MEET_TABLE.x1; tx++) {
   add('table', tx, MEET_TABLE.y0, {
     top: true, bot: true, left: tx === MEET_TABLE.x0, right: tx === MEET_TABLE.x1,
@@ -231,7 +237,7 @@ add('plant', 24, 5);
 
 /* ---------- ห้องผู้บริหาร ---------- */
 BOSS_DESK.forEach((t, i) => add('bossdesk', t.x, t.y, { v: i }));
-add('chair', BOSS_HOME.x, BOSS_HOME.y, { back: true, v: 1 });
+add('chair', BOSS_HOME.x, BOSS_HOME.y, { back: true, v: 1, dir: BOSS_HOME.dir });
 add('shelf', 1, 1);
 add('shelf', 2, 1);
 add('cabinet', 7, 1);
@@ -242,13 +248,13 @@ add('pot', 1, 5, { v: 0 });
 
 /* ---------- เคาน์เตอร์เลขาฯ หน้าห้องบอส ---------- */
 SEC_COUNTER.forEach((t, i) => add('counter2', t.x, t.y, { part: i }));
-add('chair', SEC_HOME.x, SEC_HOME.y, { back: true, v: 2 });
+add('chair', SEC_HOME.x, SEC_HOME.y, { back: true, v: 2, dir: SEC_HOME.dir });
 add('palm', 1, 9, { v: 1 });
 
 /* ---------- เคาน์เตอร์ประชาสัมพันธ์ กลางล็อบบี้ ---------- */
 PR_COUNTER.forEach((t, i) => add('prcounter', t.x, t.y, { part: i, v: PR_COUNTER.length }));
 PR_BACK.forEach((t, i) => add('prback', t.x, t.y, { part: i, v: PR_BACK.length }));
-PR_SEATS.forEach((t) => add('chair', t.x, t.y, { back: true, v: 4 }));
+PR_SEATS.forEach((t) => add('chair', t.x, t.y, { back: true, v: 4, dir: 'down' }));
 add('palm', 9, 6, { v: 0 });
 add('palm', 16, 6, { v: 1 });
 

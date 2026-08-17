@@ -15,6 +15,8 @@ const NAMES = [
   'ต้น', 'แนน', 'เอิร์ธ', 'ฟ้า', 'บอส', 'มิ้น', 'กาย', 'ปอ', 'แจ็ค', 'นุ่น',
   'โอ๊ต', 'พลอย', 'เบส', 'ใบเตย', 'กิ๊ฟ', 'ตูน',
 ];
+/** ชื่อเล่นที่อ่านเป็นผู้หญิง - ให้หน้าตาตรงกับชื่อ (ผมยาว กระโปรง) พนักงานเก่าที่ยังไม่มี fem ใน palette ก็ใช้ตัวนี้ */
+const FEM_NAMES = new Set(['แนน', 'ฟ้า', 'มิ้น', 'ปอ', 'นุ่น', 'พลอย', 'ใบเตย', 'กิ๊ฟ', 'ตูน']);
 
 const STATE_TH: Record<AgentState, string> = {
   work: 'ทำงาน', walk: 'กำลังเดิน', meet: 'ประชุม', think: 'กำลังถกกัน',
@@ -210,7 +212,7 @@ export class World {
      จ้าง / เลิกจ้าง
      ============================================================ */
   /** พนักงานที่จ้างมาจริง (ไม่รวมตัวผู้บริหาร) */
-  private get staff() { return this.employees.filter((e) => !e.isBoss && !e.isSecretary); }
+  private get staff() { return this.employees.filter((e) => !e.isBoss && !e.isSecretary && !e.isVisitor); }
 
   seatsLeft(): number {
     const taken = new Set(this.staff.map((e) => `${e.seat.x},${e.seat.y}`));
@@ -252,7 +254,7 @@ export class World {
     const n = this.headcount(dept.id);
     const usedNames = new Set(this.staff.map((e) => e.name));
     const name = NAMES.find((nm) => !usedNames.has(nm)) ?? `พนักงาน${this.nextId}`;
-    const pal = makePalette(this.nextId++ * 17 + dept.id.length, dept.color);
+    const pal = makePalette(this.nextId++ * 17 + dept.id.length, dept.color, FEM_NAMES.has(name));
     // คนที่ 1 = ผู้เสนอ, 2 = ผู้ค้าน, 3 = ผู้ตรวจสอบ, 4 = ผู้ดูความเป็นไปได้ แล้ววนใหม่
     const role = ROLE_ORDER[n % ROLE_ORDER.length];
 
@@ -270,7 +272,7 @@ export class World {
   /** สร้างพนักงานจากข้อมูลที่บันทึกไว้ (โหลดออฟฟิศกลับมา) */
   restore(rows: PersistedEmployee[]) {
     // บอสกับเลขาฯ ไม่ได้มาจากฐานข้อมูล จึงต้องรอดจากการล้างตอนสลับออฟฟิศ
-    this.employees = this.employees.filter((e) => e.isBoss || e.isSecretary);
+    this.employees = this.employees.filter((e) => e.isBoss || e.isSecretary || e.isVisitor);
     const taken = new Set<string>();
     for (const r of rows) {
       const dept = DEPT_BY_ID.get(r.deptId);
@@ -287,6 +289,8 @@ export class World {
   }
 
   private spawn(rec: PersistedEmployee, dept: Department): Employee {
+    // พนักงานที่บันทึกไว้ก่อนมีเพศใน palette - เดาจากชื่อ จะได้หน้าตาสม่ำเสมอทุกจอ
+    if (rec.palette.fem === undefined && FEM_NAMES.has(rec.name)) rec = { ...rec, palette: { ...rec.palette, fem: true } };
     const e: Employee = {
       id: rec.id,
       name: rec.name,
@@ -335,7 +339,7 @@ export class World {
 
   fire(deptId?: string): boolean {
     // ห้ามไล่ตัวผู้บริหารกับเลขาฯ ออก - สองคนนี้ไม่ใช่พนักงานที่จ้างมา
-    const fixed = (e: Employee) => e.isBoss || e.isSecretary;
+    const fixed = (e: Employee) => e.isBoss || e.isSecretary || e.isVisitor;
     const idx = deptId
       ? this.employees.map((e) => (fixed(e) ? '' : e.deptId)).lastIndexOf(deptId)
       : this.employees.map((e) => !fixed(e)).lastIndexOf(true);
@@ -590,6 +594,150 @@ export class World {
   }
 
   /* ============================================================
+     แขก/ลูกค้าเดินเข้ามาถาม (คำถามจาก LINE / MCP / API)
+     ไม่ใช่การประชุม - คนนอกเดินจากประตูสวนเข้ามาหาคนตอบ คุยกันหน้าเคาน์เตอร์ แล้วเดินออกไป
+     server ตอบเร็วแค่ไหนก็ปล่อยไป animation เล่นตามจังหวะที่คนดูอ่านทัน (ฟองคำพูดแบ่งหน้าเอง)
+     ============================================================ */
+
+  /** จุดที่แขกโผล่/หายไป - ขอบขวาสุดของสวน แถวประตูล็อบบี้ */
+  private gateTile(): Tile {
+    for (const t of [{ x: MW - 1, y: 8 }, { x: MW - 1, y: 7 }, { x: MW - 2, y: 8 }, { x: MW - 2, y: 7 }, { x: MW - 1, y: 9 }]) {
+      if (tileFree(t.x, t.y)) return t;
+    }
+    return { x: MW - 1, y: 8 };
+  }
+
+  /**
+   * ที่ยืนของแขกเมื่อมาถึงคนตอบ + ที่ยืน/นั่งของคนตอบ
+   *   PR  = แขกยืนหน้าเคาน์เตอร์ (ใต้เคาน์เตอร์ 1 ช่อง) คนตอบนั่งที่เดิมหันลง - เหมือน Pokémon Center
+   *   แผนกอื่น = แขกยืนหน้าประตูห้อง (ทางเดินแถว 10) คนตอบเดินมายืนรับที่ประตูด้านใน
+   */
+  private visitorSpots(host: Employee): { guest: Tile; guestDir: Dir; host: Tile; hostDir: Dir; hostSit: boolean } {
+    if (host.deptId === 'pr' || PR_SEATS.some((s) => s.x === host.seat.x && s.y === host.seat.y)) {
+      return { guest: { x: host.seat.x, y: host.seat.y + 2 }, guestDir: 'up', host: host.seat, hostDir: 'down', hostSit: true };
+    }
+    const room = roomOfSeat(host.seat);
+    if (room) {
+      return {
+        guest: { x: room.door.x, y: room.door.y - 1 }, guestDir: 'down',
+        host: { x: room.door.x, y: room.door.y + 1 }, hostDir: 'up', hostSit: false,
+      };
+    }
+    // ไม่มีห้อง (ไม่น่าเกิด) - ยืนข้าง ๆ ที่นั่ง
+    return { guest: { x: host.seat.x, y: host.seat.y + 1 }, guestDir: 'up', host: host.seat, hostDir: 'down', hostSit: true };
+  }
+
+  /** สร้างแขกที่ประตูสวน - คืน id (สุ่มหน้าตาจากชื่อ จะได้คนเดิมหน้าเดิมถ้าถามซ้ำ) */
+  spawnVisitor(name: string, seed?: number): string {
+    const id = `visitor-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+    const gate = this.gateTile();
+    const s = seed ?? Array.from(name).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) >>> 0, 7);
+    // เสื้อโทนอบอุ่นให้ต่างจากพนักงาน (พนักงานใส่สีแผนก) - ดูออกทันทีว่าเป็นคนนอก
+    const shirts = ['#d9a066', '#c46b6b', '#7aa2c9', '#a08ad6', '#e0c060', '#8fbf7f'];
+    const pal = makePalette(s, shirts[s % shirts.length], s % 2 === 1);
+    this.employees.push({
+      id, name, title: 'ลูกค้า', deptId: '__visitor__', role: 'proposer', lens: '',
+      pal, atlas: buildAtlas(pal),
+      seat: { ...gate },
+      tx: gate.x, ty: gate.y, px: gate.x * TS + 8, py: gate.y * TS + TS,
+      dir: 'left', pose: 'stand', frame: 0, animT: 0,
+      state: 'idle', timer: Number.POSITIVE_INFINITY,
+      speed: 46,
+      path: null, after: null,
+      bubble: null, bubbleT: 0,
+      sayFull: '', sayChars: 0, sayT: 0, sayPage: 0, sayHold: 0,
+      gadget: null,
+      busy: true, isVisitor: true, owner: 'sim',
+    });
+    return id;
+  }
+
+  /**
+   * แขกเดินเข้ามาหาคนตอบ พร้อมกันนั้นคนตอบเตรียมรับ (PR นั่งหันลง / แผนกอื่นเดินมาที่ประตู)
+   * resolve เมื่อทั้งคู่เข้าที่ - จากนั้นใช้ say(guest, คำถาม) / say(host, คำตอบ) ได้เลย
+   */
+  async visitorApproach(visitorId: string, hostId: string): Promise<void> {
+    const g = this.employees.find((x) => x.id === visitorId);
+    const h = this.employees.find((x) => x.id === hostId);
+    if (!g) return;
+    if (!h) { await this.walk(g, IDLE_SPOTS[3].x, IDLE_SPOTS[3].y); return; }
+    const spot = this.visitorSpots(h);
+    h.busy = true; h.path = null; h.after = null;
+    this.clearSay([h.id]);
+    const hostGo = spot.hostSit
+      ? this.walk(h, spot.host.x, spot.host.y).then(() => this.sitAt(h, spot.host.x, spot.host.y, spot.hostDir, 'report', 9999))
+      : this.walk(h, spot.host.x, spot.host.y).then(() => { h.pose = 'stand'; h.dir = spot.hostDir; h.state = 'report'; h.timer = 9999; });
+    const guestGo = this.walk(g, spot.guest.x, spot.guest.y).then(() => { g.pose = 'stand'; g.dir = spot.guestDir; g.state = 'idle'; });
+    await Promise.all([hostGo, guestGo]);
+    if (h) { h.bubble = 'talk'; h.bubbleT = 2; }
+  }
+
+  /** คนตอบกำลังคิด (รอ LLM) - ฟองคิดค้างไว้จนกว่าจะพูด */
+  visitorHostThinking(hostId: string) {
+    const h = this.employees.find((x) => x.id === hostId);
+    if (h) { h.bubble = 'type'; h.bubbleT = 9999; }
+  }
+
+  /**
+   * แขกไปนั่งรอที่โซฟาล็อบบี้ (คนตอบต้องไปปรึกษาทีมก่อน) - resolve เมื่อนั่งแล้ว
+   * โซฟาเต็มก็ยืนรอข้าง ๆ - ไม่ให้แขกยืนขวางหน้าเคาน์เตอร์ระหว่างรอ
+   */
+  async visitorWait(visitorId: string): Promise<void> {
+    const g = this.employees.find((x) => x.id === visitorId);
+    if (!g) return;
+    g.path = null; g.after = null;
+    const free = SOFA_SEATS.find((s) => !this.employees.some((o) => o !== g && o.tx === s.x && o.ty === s.y));
+    if (free) {
+      await this.walk(g, free.x, free.y);
+      this.sitAt(g, free.x, free.y, 'down', 'lounge', Number.POSITIVE_INFINITY);
+    } else {
+      const spot = IDLE_SPOTS[4] ?? { x: 20, y: 10 };
+      await this.walk(g, spot.x, spot.y);
+      g.pose = 'stand'; g.dir = 'left'; g.state = 'idle';
+    }
+    g.bubble = 'coffee'; g.bubbleT = 3;
+  }
+
+  /** คนตอบเดินกลับมาหาแขก (ที่โซฟา/ที่ยืนรอ) มายืนตรงหน้า หันเข้าหากัน - resolve เมื่อถึง */
+  async visitorReturn(hostId: string, visitorId: string): Promise<void> {
+    const h = this.employees.find((x) => x.id === hostId);
+    const g = this.employees.find((x) => x.id === visitorId);
+    if (!h || !g) return;
+    h.busy = true; h.path = null; h.after = null;
+    // ยืนหน้าแขก 1 ช่อง (ด้านล่างถ้าเดินได้ ไม่งั้นซ้าย/ขวา)
+    const cands: Tile[] = [{ x: g.tx, y: g.ty + 1 }, { x: g.tx - 1, y: g.ty }, { x: g.tx + 1, y: g.ty }, { x: g.tx, y: g.ty - 1 }];
+    const spot = cands.find((t) => tileFree(t.x, t.y) && !this.employees.some((o) => o !== h && o.tx === t.x && o.ty === t.y)) ?? cands[0];
+    await this.walk(h, spot.x, spot.y);
+    h.pose = 'stand'; h.state = 'report'; h.timer = 9999;
+    this.faceToward(h.id, g.id);
+    this.faceToward(g.id, h.id);
+    if (g.pose === 'sit') g.pose = 'sit';
+  }
+
+  /** แขกเดินกลับออกประตูสวนแล้วหายไป คนตอบกลับที่ประจำ - resolve เมื่อแขกพ้นจอ */
+  async visitorLeave(visitorId: string, hostId?: string): Promise<void> {
+    const g = this.employees.find((x) => x.id === visitorId);
+    if (hostId) {
+      const h = this.employees.find((x) => x.id === hostId);
+      if (h) {
+        h.bubble = null; h.bubbleT = 0;
+        h.path = null; h.after = null;
+        this.goTo(h, h.seat.x, h.seat.y, () => {
+          this.sitAt(h, h.seat.x, h.seat.y, seatDir(h.seat), 'work', 6 + Math.random() * 6);
+          h.busy = false;
+        });
+      }
+    }
+    if (!g) return;
+    g.path = null; g.after = null;
+    const gate = this.gateTile();
+    await this.walk(g, gate.x, gate.y);
+    this.employees = this.employees.filter((x) => x.id !== g.id);
+    if (this.selected?.id === g.id) this.selected = null;
+    if (this.follow === g.id) this.follow = null;
+  }
+
+  /* ============================================================
      AI สุ่มพฤติกรรมตอนว่าง
      ============================================================ */
   private decide(e: Employee) {
@@ -790,6 +938,10 @@ export class World {
     OBJECTS.forEach((o) => {
       const seat = o.type === 'chair' || o.type === 'sofa' || o.type === 'bench';
       list.push({ sort: o.y * TS + TS - (seat ? 0.5 : 0), kind: 'obj', o });
+      // เก้าอี้ที่คนหันหลัง/หันข้าง: พนักพิงส่วนที่อยู่ "หน้า" คนต้องวาดทับตัวคน ไม่งั้นดูเหมือนยืนหน้าเก้าอี้
+      if (o.type === 'chair' && o.dir && o.dir !== 'down') {
+        list.push({ sort: o.y * TS + TS + 0.5, kind: 'obj', o: { ...o, type: 'chairfront' } });
+      }
     });
     this.employees.forEach((e) => list.push({ sort: e.py, kind: 'emp', e }));
     list.sort((a, b) => a.sort - b.sort);

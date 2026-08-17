@@ -311,23 +311,50 @@ export interface MeetingRow {
   summary: string;
   /** รายงานการประชุมโดยเลขาฯ - ว่างได้ถ้าปิดการจด หรือบันทึกเก่าก่อนมีฟีเจอร์นี้ */
   minutes?: string;
+  /** internal | customer - ใครถาม */
+  audience?: string;
+  /** คำตอบที่ PR กรองให้ลูกค้า (audience = customer) */
+  customer_reply?: string;
+  source?: string;
+  status?: string;
   transcript: unknown[];
   consults: unknown[];
   created_at: string;
 }
 
-/** คอลัมน์ที่อ่านตอนแสดงรายการ - ไม่ดึง transcript มาทั้งก้อนโดยไม่จำเป็น */
-const MEETING_COLS =
-  'id,office_id,asked_by,question,mode,owner_dept,dept_ids,attendees,summary,minutes,transcript,consults,created_at';
+/**
+ * อ่านทุกคอลัมน์ (*) แทนการระบุชื่อ - ฐานที่ยังไม่ได้รัน schema รอบใหม่จะไม่มี minutes
+ * ระบุชื่อไปจะพังทั้งสมุด ทั้งที่บันทึกเก่าอ่านได้ปกติ
+ */
+const MEETING_COLS = '*';
 
 export async function saveMeeting(
   row: Omit<MeetingRow, 'id' | 'created_at'>,
 ): Promise<MeetingRow | null> {
   const c = sb();
   if (!c) return null;
-  const { data, error } = await c.from('meeting').insert(row).select(MEETING_COLS).single();
+  // ไม่มีรายงานเลขาฯ ก็ไม่ส่งคอลัมน์ minutes ไป - ฐานเก่าที่ยังไม่มีคอลัมน์จะได้ยังบันทึกได้
+  const { minutes, ...rest } = row;
+  const payload = minutes ? row : rest;
+  const { data, error } = await c.from('meeting').insert(payload).select(MEETING_COLS).single();
   if (error) throw new Error(sbError(error));
   return data as MeetingRow;
+}
+
+/** access token ของ session ปัจจุบัน - แนบไปให้เซิร์ฟเวอร์ยืนยันว่าเราเป็นสมาชิกออฟฟิศ (ตอนบันทึกการประชุมฝั่ง server) */
+export async function accessToken(): Promise<string | null> {
+  const c = sb();
+  if (!c) return null;
+  const { data } = await c.auth.getSession();
+  return data.session?.access_token ?? null;
+}
+
+/** เลขาฯ เขียนรายงานเสร็จทีหลังคำตอบ - เติมลงแถวที่บันทึกไปแล้ว */
+export async function updateMeetingMinutes(id: string, minutes: string): Promise<void> {
+  const c = sb();
+  if (!c) return;
+  const { error } = await c.from('meeting').update({ minutes }).eq('id', id);
+  if (error) throw new Error(sbError(error));
 }
 
 export async function listMeetings(officeId: string, limit = 100): Promise<MeetingRow[]> {
@@ -465,10 +492,13 @@ export interface DocRow {
   chunk_count: number;
   status: 'processing' | 'ready' | 'error';
   error: string | null;
+  /** internal (ค่าเริ่มต้น) / public = ลูกค้าถามผ่านช่องทางสาธารณะเห็นได้ - ฐานเก่าอาจไม่มี */
+  visibility?: 'internal' | 'public';
   created_at: string;
 }
 
-const DOC_COLS = 'id,office_id,name,dept_ids,bytes,chunk_count,status,error,created_at';
+// อ่านทุกคอลัมน์ - ฐานที่ยังไม่ได้รัน schema รอบล่าสุดจะไม่มี visibility ระบุชื่อไปจะพังทั้งรายการ
+const DOC_COLS = '*';
 
 export async function listDocs(officeId: string): Promise<DocRow[]> {
   const c = sb();
@@ -483,17 +513,22 @@ export async function listDocs(officeId: string): Promise<DocRow[]> {
 }
 
 export async function createDoc(
-  row: { office_id: string; name: string; dept_ids: string[]; bytes: number; uploaded_by: string | null },
+  row: {
+    office_id: string; name: string; dept_ids: string[]; bytes: number; uploaded_by: string | null;
+    visibility?: 'internal' | 'public';
+  },
 ): Promise<DocRow> {
   const c = sb();
   if (!c) throw new Error('ยังไม่ได้ตั้งค่า Supabase');
-  const { data, error } = await c
-    .from('office_doc')
-    .insert({ ...row, status: 'processing' })
-    .select(DOC_COLS)
-    .single();
-  if (error) throw new Error(sbError(error));
-  return data as DocRow;
+  let res = await c.from('office_doc').insert({ ...row, status: 'processing' }).select(DOC_COLS).single();
+  // ฐานเก่าไม่มีคอลัมน์ visibility - บันทึกแบบเดิม (ถือเป็นภายใน)
+  if (res.error && /visibility/i.test(res.error.message)) {
+    const { visibility: _v, ...legacy } = row;
+    void _v;
+    res = await c.from('office_doc').insert({ ...legacy, status: 'processing' }).select(DOC_COLS).single();
+  }
+  if (res.error) throw new Error(sbError(res.error));
+  return res.data as DocRow;
 }
 
 export async function updateDoc(

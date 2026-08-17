@@ -59,6 +59,23 @@ function extractMessage(data: unknown): string {
   return '';
 }
 
+/**
+ * fetch ของ Node ตัดการเชื่อมต่อถ้าปลายทางไม่ตอบ header ภายใน 5 นาที (undici default)
+ * Ollama ที่รับหลายคำขอพร้อมกันจะเข้าคิว - คำขอท้ายคิวอาจรอเกิน 5 นาทีทั้งที่ไม่ได้ค้าง
+ * ปลายทางในเครื่องจึงใช้ dispatcher ที่ไม่มีเพดานเวลา (เครื่องตัวเองไม่มีทางถูกยิงค้างจากคนอื่น)
+ * ปลายทางบนเน็ตยังใช้ค่าปกติ เพราะรอเกิน 5 นาทีแปลว่ามีอะไรผิดจริง
+ */
+let localAgent: import('undici').Agent | null = null;
+async function localDispatcher() {
+  if (!localAgent) {
+    // ไฟล์นี้ถูก import จากฝั่งเบราว์เซอร์ด้วย (defaultModelForBase) - ห้ามให้ bundler ลากเอา undici
+    // (ซึ่งใช้ node: builtins) เข้า client bundle: บอกให้ข้าม แล้วให้ Node import จริงตอนรันฝั่งเซิร์ฟเวอร์เท่านั้น
+    const mod = await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ 'undici');
+    localAgent = new mod.Agent({ headersTimeout: 0, bodyTimeout: 0 });
+  }
+  return localAgent;
+}
+
 async function callJson(
   base: string,
   path: string,
@@ -67,8 +84,11 @@ async function callJson(
 ): Promise<unknown> {
   let res: Response;
   try {
+    // dispatcher ไม่อยู่ใน RequestInit มาตรฐาน แต่ Node fetch (undici) รับ
+    const extra = isLocalBase(base) ? { dispatcher: await localDispatcher() } : {};
     res = await fetch(`${trimBase(base)}${path}`, {
       ...init,
+      ...(extra as RequestInit),
       headers: {
         'Content-Type': 'application/json',
         // ปลายทางที่รันในเครื่องอย่าง Ollama ไม่มีคีย์ให้ใส่ - ส่ง Bearer เปล่าไปบางตัวจะ 401
@@ -170,6 +190,60 @@ export async function resolveLocalModel(base: string, apiKey: string): Promise<s
   }
 }
 
+/**
+ * ปลายทางในเครื่องนี้คือ Ollama ไหม (LM Studio ก็เป็น localhost เหมือนกันแต่ไม่มี /api/version)
+ * ถามครั้งเดียวต่อ base แล้วจำไว้ - ใช้เลือกว่าจะยิง native API ได้ไหม
+ */
+const ollamaCheck = new Map<string, Promise<boolean>>();
+function isOllama(base: string): Promise<boolean> {
+  const root = trimBase(base).replace(/\/v1$/i, '');
+  let p = ollamaCheck.get(root);
+  if (!p) {
+    p = fetch(`${root}/api/version`, { signal: AbortSignal.timeout(2500) })
+      .then((r) => r.ok)
+      .catch(() => false);
+    ollamaCheck.set(root, p);
+  }
+  return p;
+}
+
+/**
+ * ยิง Ollama ผ่าน native /api/chat แทน /v1/chat/completions เพื่อสั่ง think:false ได้
+ * โมเดลสาย reasoning (qwen3, deepseek-r1, gpt-oss) บน Ollama จะ "คิดในใจ" ยาวมากก่อนตอบ -
+ * ช้าหลายเท่า กิน token จนคำตอบจริงถูกตัด และบางทีพ่นความคิดปนมาในคำตอบ
+ * ปิด thinking = ตอบตรงเหมือนโมเดลปกติ ซึ่งพอสำหรับงานที่นี่ (prompt บอกวิธีคิดไว้ครบแล้ว)
+ * โมเดลที่ไม่รองรับ think จะถูกลองซ้ำแบบไม่ส่ง think
+ */
+async function askOllamaNative(base: string, model: string, opts: AskOptions, apiKey: string): Promise<string> {
+  const root = trimBase(base).replace(/\/v1$/i, '');
+  const body = (think: boolean | undefined) => JSON.stringify({
+    model,
+    messages: [
+      { role: 'system', content: opts.system },
+      { role: 'user', content: opts.user },
+    ],
+    stream: false,
+    ...(think === undefined ? {} : { think }),
+    options: { num_predict: opts.maxTokens ?? 6000 },
+  });
+  let data: unknown;
+  try {
+    data = await callJson(root, '/api/chat', apiKey, { method: 'POST', body: body(false) });
+  } catch (err) {
+    // โมเดลเก่าบางตัวไม่รับ think - ลองใหม่แบบไม่ระบุ
+    if (err instanceof HttpError && err.status === 400 && /think/i.test(err.message)) {
+      data = await callJson(root, '/api/chat', apiKey, { method: 'POST', body: body(undefined) });
+    } else {
+      throw err;
+    }
+  }
+  const msg = (data as { message?: { content?: string; thinking?: string } })?.message;
+  const content = typeof msg?.content === 'string' ? msg.content.trim() : '';
+  if (content) return content;
+  const thinking = typeof msg?.thinking === 'string' ? msg.thinking.trim() : '';
+  return thinking || `(ไม่มีคำตอบกลับมา - done_reason: ${(data as { done_reason?: string })?.done_reason ?? 'unknown'})`;
+}
+
 export async function askOpenAi(opts: AskOptions, creds: Creds): Promise<string> {
   const base = creds.baseUrl || DEFAULT_OPENAI_BASE;
   let model = creds.model || '';
@@ -183,6 +257,15 @@ export async function askOpenAi(opts: AskOptions, creds: Creds): Promise<string>
     model = found;
   }
   if (!model) model = defaultModelForBase(base);
+
+  // Ollama ในเครื่อง: ใช้ native API เพื่อปิด thinking (เร็วกว่ามาก คำตอบไม่มีความคิดปน)
+  if (isLocalBase(base) && (await isOllama(base))) {
+    try {
+      return await askOllamaNative(base, model, opts, creds.apiKey);
+    } catch (err) {
+      throw new Error(openAiFriendlyError(err, model, base));
+    }
+  }
 
   let data: unknown;
   try {
