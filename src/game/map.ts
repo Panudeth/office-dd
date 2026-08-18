@@ -107,13 +107,8 @@ export const ROOM_THEMES: Record<string, RoomTheme> = {
   marketing:   { floor: 'M', corner: 'easel' },
 };
 
-/** ทุกที่นั่งในโซนแผนก + เคาน์เตอร์ PR - โควตาพนักงานทั้งบริษัท (PR_SEATS ประกาศด้านล่าง) */
-export const DESK_SEATS: Tile[] = [...ROOMS.flatMap((r) => r.seats), { x: 12, y: 7 }, { x: 13, y: 7 }];
-export const MAX_STAFF = DESK_SEATS.length;
-
-export function roomOfSeat(t: Tile): Room | null {
-  return ROOMS.find((r) => r.seats.some((s) => s.x === t.x && s.y === t.y)) ?? null;
-}
+/** โควตาพนักงานทั้งบริษัท - ที่นั่งจริงมาจากผังเฟอร์นิเจอร์ (โต๊ะละคน) แต่เพดานคงที่ กันประชุมล้นโต๊ะ/ค่า LLM บาน */
+export const MAX_STAFF = 15;
 
 /* ============================================================
    ห้องประชุม (x 10..18, y 1..5) - โต๊ะยาว 5 ช่อง เก้าอี้บน 3 ล่าง 3 + หัวโต๊ะ
@@ -166,15 +161,8 @@ export const PR_COUNTER: Tile[] = [10, 11, 12, 13, 14, 15].map((x) => ({ x, y: 8
 export const PR_BACK: Tile[] = [10, 11, 12, 13, 14, 15].map((x) => ({ x, y: 6 }));
 
 /* ============================================================
-   โซนพัก / กลางแจ้ง
+   โซนพัก / กลางแจ้ง - โซฟา ม้านั่ง เครื่องกดน้ำ แพนทรี่ เป็นเฟอร์นิเจอร์ (furniture.ts) world หาตำแหน่งจากผัง
    ============================================================ */
-/** โซฟารับแขกในล็อบบี้ - ชุดเดียวมุมขวา (มุมซ้ายเป็นเลขา ตรงกลางเป็น PR) */
-export const SOFA_SEATS: Tile[] = [{ x: 22, y: 9 }, { x: 23, y: 9 }, { x: 24, y: 9 }];
-export const SOFA2_SEATS: Tile[] = [];
-/** แพนทรี่ย้ายมาชิดผนังขวาของล็อบบี้ (x 20-24, y 6-7) */
-export const COOLER_STAND: Tile = { x: 21, y: 7 };
-export const PANTRY_TABLE: Tile[] = [{ x: 22, y: 7 }, { x: 24, y: 7 }];
-export const BENCH_SEATS: Tile[] = [{ x: 28, y: 4 }, { x: 31, y: 4 }, { x: 28, y: 12 }];
 export const POND_SPOTS: Tile[] = [{ x: 31, y: 10 }, { x: 31, y: 11 }, { x: 30, y: 12 }];
 export const IDLE_SPOTS: Tile[] = [
   { x: 6, y: 9 }, { x: 9, y: 9 }, { x: 18, y: 9 }, { x: 12, y: 10 }, { x: 20, y: 10 },
@@ -194,144 +182,83 @@ export interface MapObject {
    */
   dir?: 'up' | 'down' | 'left' | 'right';
   top?: boolean; bot?: boolean; left?: boolean; right?: boolean;
+  /** ระดับซ้อนที่ผู้ใช้ตั้ง (หน่วยแถว) - บวก = วาดทีหลัง (ทับ), ลบ = วาดก่อน (อยู่หลัง) */
+  zb?: number;
 }
 
-export const OBJECTS: MapObject[] = [];
-const add = (type: string, x: number, y: number, extra: Partial<MapObject> = {}) =>
-  OBJECTS.push({ type, x, y, ...extra });
+/*
+ * ไม่มี "ของคงที่" อีกแล้ว - โต๊ะประชุม โต๊ะบอส เคาน์เตอร์เลขาฯ/PR เป็นเฟอร์นิเจอร์ในผังทั้งหมด (furniture.ts)
+ * ตัวแผนที่เองก็ทาสีได้: world เรียก setGround() เมื่อผังมี ground ของตัวเอง
+ * ค่าคงที่ตำแหน่งด้านบน (BOSS_HOME, MEET_SEATS ฯลฯ) เหลือไว้ใช้สร้างผังเริ่มต้นเท่านั้น
+ */
 
-/* ---------- ห้องแผนก: โต๊ะคอมอยู่บน คนนั่งใต้โต๊ะหันขึ้น (เห็นหลังคน เห็นหน้าจอ) ---------- */
-DESK_SEATS.forEach((s) => {
-  add('workdesk', s.x, s.y - 1, { v: (s.x * 7 + s.y * 3) % 3 });
-  add('chair', s.x, s.y, { back: true, v: 3, dir: 'up' });
-});
-// คอลัมน์ขวาของห้อง (x0+2) เป็นทางเดินจากประตูลงมา ห้ามวางของขวางแถว 12-15
-// ของประจำห้อง + พื้นห้อง แยกตามธีมแผนก - แผนกไหนอยู่ห้องไหนดู ROOM_OF_DEPT
+// พื้นห้องแผนกตามธีม (แถว 12-16 ในห้อง) - เป็นค่าเริ่มต้นของแผนที่
 Object.entries(ROOM_OF_DEPT).forEach(([deptId, ri]) => {
   const room = ROOMS[ri];
   const th = ROOM_THEMES[deptId];
   if (!room || !th) return;
-  // ปูพื้นห้องด้วยรหัสของธีม (แถว 12-16 ในห้อง)
   for (let y = room.rect.y; y < room.rect.y + room.rect.h; y++) {
     const row = GROUND[y].split('');
     for (let x = room.x0; x < room.x0 + ROOM_W; x++) row[x] = th.floor;
     GROUND[y] = row.join('');
   }
-  // มุมขวาล่างของห้อง - แถว 15-16 ว่างทั้งแถว คนออกจากที่นั่งได้ทุกทาง
-  add(th.corner, room.x0 + 3, 16);
 });
 
-/* ---------- ห้องประชุม ---------- */
-MEET_SEATS.forEach((s) => add('chair', s.x, s.y, { back: s.dir === 'down', dir: s.dir }));
-add('chair', BOSS_SEAT.x, BOSS_SEAT.y, { back: true, dir: BOSS_SEAT.dir });
-for (let tx = MEET_TABLE.x0; tx <= MEET_TABLE.x1; tx++) {
-  add('table', tx, MEET_TABLE.y0, {
-    top: true, bot: true, left: tx === MEET_TABLE.x0, right: tx === MEET_TABLE.x1,
-  });
-}
-add('board', 22, 1); // ไวท์บอร์ดตั้งพื้นท้ายห้อง
-add('plant', 10, 1);
-add('plant', 24, 1);
-add('plant', 10, 5);
-add('plant', 24, 5);
+/** รหัสพื้นที่เดินไม่ได้ - ผนัง กระจก น้ำ */
+const SOLID_GROUND = new Set(['#', 'G', '~']);
 
-/* ---------- ห้องผู้บริหาร ---------- */
-BOSS_DESK.forEach((t, i) => add('bossdesk', t.x, t.y, { v: i }));
-add('chair', BOSS_HOME.x, BOSS_HOME.y, { back: true, v: 1, dir: BOSS_HOME.dir });
-add('shelf', 1, 1);
-add('shelf', 2, 1);
-add('cabinet', 7, 1);
-add('plant', 8, 1);
-add('sofa2', 6, 5, { part: 0, v: 2 });
-add('sofa2', 7, 5, { part: 2, v: 2 });
-add('pot', 1, 5, { v: 0 });
-
-/* ---------- เคาน์เตอร์เลขาฯ หน้าห้องบอส ---------- */
-SEC_COUNTER.forEach((t, i) => add('counter2', t.x, t.y, { part: i }));
-add('chair', SEC_HOME.x, SEC_HOME.y, { back: true, v: 2, dir: SEC_HOME.dir });
-add('palm', 1, 9, { v: 1 });
-
-/* ---------- เคาน์เตอร์ประชาสัมพันธ์ กลางล็อบบี้ ---------- */
-PR_COUNTER.forEach((t, i) => add('prcounter', t.x, t.y, { part: i, v: PR_COUNTER.length }));
-PR_BACK.forEach((t, i) => add('prback', t.x, t.y, { part: i, v: PR_BACK.length }));
-PR_SEATS.forEach((t) => add('chair', t.x, t.y, { back: true, v: 4, dir: 'down' }));
-add('palm', 9, 6, { v: 0 });
-add('palm', 16, 6, { v: 1 });
-
-/* ---------- แพนทรี่ ชิดผนังขวาล็อบบี้ ---------- */
-add('counter', 22, 6);
-add('counter', 23, 6);
-add('cooler', COOLER_STAND.x, COOLER_STAND.y - 1);
-add('vending', 24, 6);
-add('printer', 20, 6);
-
-/* ---------- โซฟารับแขก มุมขวาล่างล็อบบี้ ---------- */
-SOFA_SEATS.forEach((s, i) => add('sofa', s.x, s.y, { part: i, v: 1 }));
-add('ctable', 21, 9);
-add('vasetable', 24, 10);
-
-/* ---------- โซนกลางแจ้ง ---------- */
-BENCH_SEATS.forEach((s) => add('bench', s.x, s.y));
-([[26, 0], [28, 0], [30, 0], [32, 0], [34, 0], [35, 0], [29, 1], [33, 1],
-  [26, 2], [35, 2], [34, 3], [26, 4], [35, 4], [35, 7], [26, 9], [26, 12], [26, 14],
-  [33, 14], [35, 14], [26, 16], [28, 16], [30, 16], [32, 16], [34, 16], [26, 17], [30, 17]] as const)
-  .forEach(([x, y]) => add('pine', x, y, { v: (x + y) % 2 }));
-([[27, 2], [34, 5], [27, 11], [34, 7], [32, 3], [26, 3], [33, 4], [27, 6], [32, 14]] as const)
-  .forEach(([x, y]) => add('bush', x, y));
-([[27, 13], [34, 13], [33, 6]] as const).forEach(([x, y]) => add('rock', x, y));
-([[27, 5], [32, 5], [27, 9], [32, 13], [34, 2], [26, 11], [35, 3], [27, 14], [32, 4]] as const)
-  .forEach(([x, y], i) => add('flower', x, y, { v: i % 3 }));
-add('sign', 26, 6);
-add('lamp', 28, 6);
-add('lamp', 31, 6);
-
-export const WALL_DECOR = [
-  // ห้องบอส
-  { type: 'frame0', x: 3, y: 0 }, { type: 'clock', x: 5, y: 0 }, { type: 'frame1', x: 6, y: 0 },
-  { type: 'window', x: 1, y: 0 },
-  // ห้องประชุม (กว้าง x 10..24)
-  { type: 'screen', x: 16, y: 0 }, { type: 'screen', x: 17, y: 0 },
-  { type: 'board', x: 13, y: 0 }, { type: 'board', x: 14, y: 0 }, { type: 'board', x: 15, y: 0 },
-  { type: 'board', x: 18, y: 0 }, { type: 'board', x: 19, y: 0 }, { type: 'board', x: 20, y: 0 },
-  { type: 'window', x: 11, y: 0 }, { type: 'window', x: 22, y: 0 }, { type: 'window', x: 23, y: 0 },
-  { type: 'hangplant', x: 10, y: 0 }, { type: 'hangplant', x: 24, y: 0 },
-  { type: 'clock', x: 12, y: 0 }, { type: 'frame1', x: 21, y: 0 },
-];
-
-/** ลวดลายพื้น วาดทับ tile ก่อนวางของ ไม่มีผลกับการเดิน */
-export const FLOOR_DECALS = [
-  { type: 'emblem' as const, x: 9, y: 9, w: 8, h: 2 },
-  { type: 'rug' as const, x: 10, y: 6, w: 6, h: 3, color: '#c85050' },
-  { type: 'rug' as const, x: 1, y: 7, w: 4, h: 3, color: '#c8a050' },
-  { type: 'rug' as const, x: 21, y: 8, w: 4, h: 2, color: '#c8a888' },
-  { type: 'mat' as const, x: 5, y: 6, w: 1, h: 1 },
-];
-
-const BLOCKING = new Set([
-  'desk', 'workdesk', 'bossdesk', 'table', 'lawshelf', 'safe', 'server', 'easel', 'plant', 'cooler', 'printer', 'shelf', 'cabinet', 'ctable',
-  'counter', 'counter2', 'prcounter', 'prback', 'board',
-  'pine', 'bush', 'rock', 'sign', 'lamp', 'palm', 'pot', 'vending', 'vasetable', 'sofa2',
-]);
-
-export const WALKABLE: boolean[][] = [];
-for (let y = 0; y < MH; y++) {
-  WALKABLE[y] = [];
-  for (let x = 0; x < MW; x++) {
-    const c = GROUND[y][x];
-    WALKABLE[y][x] = c !== '#' && c !== 'G' && c !== '~';
+/** เดินได้จากตัวแผนที่ล้วน ๆ (ยังไม่รวมเฟอร์นิเจอร์) - คำนวณใหม่ทุกครั้งที่ setGround */
+const BASE_WALKABLE: boolean[][] = [];
+function rebuildBase() {
+  for (let y = 0; y < MH; y++) {
+    BASE_WALKABLE[y] = BASE_WALKABLE[y] ?? [];
+    for (let x = 0; x < MW; x++) BASE_WALKABLE[y][x] = !SOLID_GROUND.has(GROUND[y][x]);
   }
 }
-OBJECTS.forEach((o) => {
-  if (BLOCKING.has(o.type)) WALKABLE[o.y][o.x] = false;
-});
+rebuildBase();
+
+/**
+ * เปลี่ยนพื้น/ผนังทั้งแผนที่ (จากผังของออฟฟิศ) - แก้ GROUND ในที่ เพราะ art.ts/furniture.ts อ่าน GROUND ตรง ๆ
+ * แถวไม่ครบ/สั้นเกินใช้ของเดิมเติม - ผู้เรียกควร parseGround ก่อน
+ */
+export function setGround(rows: string[]) {
+  for (let y = 0; y < MH; y++) {
+    const r = rows[y] ?? GROUND[y];
+    GROUND[y] = r.length >= MW ? r.slice(0, MW) : r + GROUND[y].slice(r.length);
+  }
+  rebuildBase();
+}
+
+/** ตารางเดินได้จริง - world เรียก rebuildWalkable ทุกครั้งที่ผังเปลี่ยน */
+export const WALKABLE: boolean[][] = BASE_WALKABLE.map((row) => [...row]);
+
+/** คำนวณ WALKABLE ใหม่จากฐาน + ช่องที่เฟอร์นิเจอร์ทึบกิน ("x,y") */
+export function rebuildWalkable(blocked: Iterable<string>) {
+  for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) WALKABLE[y][x] = BASE_WALKABLE[y][x];
+  for (const k of blocked) {
+    const [x, y] = k.split(',').map(Number);
+    if (y >= 0 && y < MH && x >= 0 && x < MW) WALKABLE[y][x] = false;
+  }
+}
+
+/** เดินได้ไหมบนตารางที่ระบุ (ใช้ตรวจผังทดลองก่อนบันทึกจริง) */
+export function tileFreeOn(grid: boolean[][], x: number, y: number): boolean {
+  return x >= 0 && y >= 0 && x < MW && y < MH && grid[y][x];
+}
+
+/** สำเนา BASE_WALKABLE สำหรับตรวจผังทดลอง */
+export const baseWalkableCopy = (): boolean[][] => BASE_WALKABLE.map((row) => [...row]);
+/** ตารางเดินได้ของ "พื้นทดลอง" (ตอนทาสี) - ยังไม่รวมเฟอร์นิเจอร์ */
+export const walkableOfGround = (rows: string[]): boolean[][] =>
+  rows.map((r) => Array.from({ length: MW }, (_, x) => !SOLID_GROUND.has(r[x])));
 
 export function tileFree(x: number, y: number): boolean {
   return x >= 0 && y >= 0 && x < MW && y < MH && WALKABLE[y][x];
 }
 
 /** BFS 4 ทิศ - คืน path (ไม่รวมช่องเริ่มต้น) หรือ null ถ้าไปไม่ถึง */
-export function findPath(sx: number, sy: number, gx: number, gy: number): Tile[] | null {
-  if (!tileFree(gx, gy)) return null;
+export function findPath(sx: number, sy: number, gx: number, gy: number, grid: boolean[][] = WALKABLE): Tile[] | null {
+  if (!tileFreeOn(grid, gx, gy)) return null;
   const start = sy * MW + sx;
   const goal = gy * MW + gx;
   if (start === goal) return [];
@@ -348,7 +275,7 @@ export function findPath(sx: number, sy: number, gx: number, gy: number): Tile[]
     const cy = (cur / MW) | 0;
     const nb: [number, number][] = [[cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]];
     for (const [nx, ny] of nb) {
-      if (!tileFree(nx, ny)) continue;
+      if (!tileFreeOn(grid, nx, ny)) continue;
       const ni = ny * MW + nx;
       if (seen[ni]) continue;
       seen[ni] = 1;

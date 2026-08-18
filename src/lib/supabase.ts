@@ -288,6 +288,37 @@ export async function saveEmployee(row: EmployeeRow): Promise<void> {
   if (error) throw new Error(sbError(error));
 }
 
+/** ย้ายที่นั่ง (ผังเปลี่ยน/สลับโต๊ะ) - seat ในแถวพนักงานเป็นสำเนาของผัง ให้ระบบอื่นอ่านง่าย */
+export async function updateEmployeeSeat(id: string, seat: { x: number; y: number }): Promise<void> {
+  const c = sb();
+  if (!c) return;
+  const { error } = await c.from('employee').update({ seat }).eq('id', id);
+  if (error) throw new Error(sbError(error));
+}
+
+/* ---------- ผังเฟอร์นิเจอร์ (office_layout) ---------- */
+
+/** ผังของออฟฟิศ (jsonb ดิบ ให้ parseLayout ตรวจ) - null ถ้ายังไม่เคยบันทึก / ตารางยังไม่มี */
+export async function loadLayout(officeId: string): Promise<unknown | null> {
+  const c = sb();
+  if (!c) return null;
+  const { data, error } = await c.from('office_layout').select('data').eq('office_id', officeId).maybeSingle();
+  if (error) {
+    // ตารางยังไม่มี (ยังไม่ได้รัน schema รอบล่าสุด) - ใช้ผังเริ่มต้นไปก่อน ไม่ใช่ error ที่ต้องโชว์
+    if (/office_layout/i.test(error.message)) return null;
+    throw new Error(sbError(error));
+  }
+  return (data as { data?: unknown } | null)?.data ?? null;
+}
+
+export async function saveLayout(officeId: string, data: unknown): Promise<void> {
+  const c = sb();
+  if (!c) return;
+  const uid = (await c.auth.getUser()).data.user?.id ?? null;
+  const { error } = await c.from('office_layout').upsert({ office_id: officeId, data, updated_by: uid, updated_at: new Date().toISOString() });
+  if (error) throw new Error(sbError(error));
+}
+
 /* ---------- บันทึกการประชุม (เลขานุการ) ---------- */
 
 /** สำเนาผู้เข้าประชุม - เก็บไว้ในบันทึกเพราะคนอาจถูกเลิกจ้างไปแล้ว */

@@ -10,3 +10,6 @@ next-env.d.ts
 
 # token ออฟฟิศสำหรับ MCP (สร้างจากปุ่มเชื่อมต่อ) - ห้าม commit
 .mcp.json
+
+# dist ของ dev server ทดสอบ (NEXT_DIST_DIR)
+.next-test/

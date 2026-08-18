@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  BookOpen, Building2, KeyRound, LogIn, Maximize2, PanelRightClose, PanelRightOpen, Pause, Play,
+  BookOpen, Building2, KeyRound, LogIn, Maximize2, PanelRightClose, PanelRightOpen, Pause, Play, Wrench,
   BellRing, LoaderCircle, MessagesSquare, Plug, UserRound, Video, ZoomIn, ZoomOut,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
@@ -27,14 +27,16 @@ import {
   accountAvatar, accountName, deleteEmployee, deleteMeeting, listMeetings, listOffices,
   listProducts, loadDeptNotes, loadEmployees, loadProfile, matchChunks, readOAuthReturn, rememberOffice,
   rememberedOfficeId, sb, saveEmployee, saveMeeting, sbError, supabaseConfigured, updateMeetingMinutes,
-  accessToken,
+  accessToken, loadLayout, saveLayout, updateEmployeeSeat,
   type MeetingRow, type OAuthReturn, type Office, type User,
 } from '@/lib/supabase';
 import { profileIsEmpty, type CompanyContext, type Product } from '@/lib/company';
 import { syncOfficeLlm } from '@/lib/office-llm-client';
 import type { EmployeeSnapshot } from '@/game/types';
-import type { World } from '@/game/world';
-import { BOSS_RECT, MAX_STAFF, MEETING_RECT, SECRETARY_NAME, SECRETARY_PAL } from '@/game/map';
+import type { EditSnapshot, World } from '@/game/world';
+import { defaultLayout, parseLayout, type OfficeLayout } from '@/game/furniture';
+import LayoutPanel, { type LayoutSaveState } from '@/components/LayoutPanel';
+import { MAX_STAFF, SECRETARY_NAME, SECRETARY_PAL } from '@/game/map';
 import { DEPARTMENTS, DEPT_BY_ID } from '@/lib/departments';
 import { deptHeadIds } from '@/lib/heads';
 import type {
@@ -42,6 +44,8 @@ import type {
 } from '@/lib/protocol';
 
 const GameCanvas = dynamic(() => import('@/components/GameCanvas'), { ssr: false });
+/** ผังเฟอร์นิเจอร์ตอนไม่มี Supabase (โหมดในเครื่อง) */
+const LAYOUT_KEY = 'visual-company.layout';
 
 /* ---- ความกว้างแผงขวา ---- */
 const SIDE_KEY = 'visual-company.side';
@@ -113,6 +117,14 @@ export default function Page() {
   const [agendaLoading, setAgendaLoading] = useState(false);
   const [agendaErr, setAgendaErr] = useState<string | null>(null);
   const [autoCam, setAutoCam] = useState(true);
+  /* ---- จัดออฟฟิศ (ผังเฟอร์นิเจอร์) ---- */
+  const [editSnap, setEditSnap] = useState<EditSnapshot>({ on: false, selected: null, placing: null, painting: null, tool: 'select', logo: null, logoFit: 'contain', message: null, itemCount: 0 });
+  const [layoutSave, setLayoutSave] = useState<LayoutSaveState>('idle');
+  const [layoutErr, setLayoutErr] = useState<string | null>(null);
+  /** rev ล่าสุดที่เครื่องนี้เป็นคนเขียน - realtime เด้งกลับมาก็ไม่ต้องเอาไปทับ (กันกระตุกระหว่างลาก) */
+  const layoutRevRef = useRef<string>('');
+  const layoutSaveTimer = useRef<number | null>(null);
+  const officeRef = useRef<Office | null>(null);
   const [llmStore, setLlmStore] = useState<LlmStore>({ active: null, items: [] });
   const [keyOpen, setKeyOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
@@ -366,31 +378,105 @@ export default function Page() {
     if (!w || !ready) return;
     // โหมดในเครื่องไม่มีออฟฟิศให้โหลด - ห้ามล้าง ไม่งั้นทับพนักงานที่จ้างไว้ตอน mount
     if (!supabaseConfigured) return;
-    if (!office) { w.restore([]); syncRoster(); return; }
-    loadEmployees(office.id)
-      .then((rows) => {
-        w.restore(rows.map((r) => ({
-          id: r.id, name: r.name, title: r.title, deptId: r.dept_id,
-          role: r.role as EmployeeSnapshot['role'], palette: r.palette, seat: r.seat,
-        })));
+    if (!office) { w.setLayout(defaultLayout(), 'sync'); w.restore([]); syncRoster(); return; }
+    // ผังก่อน แล้วค่อยพนักงาน - restore() เอาที่นั่งจากผัง (โต๊ะที่ owner เป็นเขา)
+    let cancelled = false;
+    (async () => {
+      let layout: OfficeLayout | null = null;
+      try { layout = parseLayout(await loadLayout(office.id)); } catch (e) { setLayoutErr(sbError(e)); }
+      if (cancelled) return;
+      const l = layout ?? defaultLayout();
+      layoutRevRef.current = l.rev;
+      w.setLayout(l, 'sync');
+      const rows = await loadEmployees(office.id);
+      if (cancelled) return;
+      w.restore(rows.map((r) => ({
+        id: r.id, name: r.name, title: r.title, deptId: r.dept_id,
+        role: r.role as EmployeeSnapshot['role'], palette: r.palette, seat: r.seat,
+      })));
+      syncRoster();
+    })().catch((e) => setSaveErr(sbError(e)));
+    return () => { cancelled = true; };
+  }, [office, ready, syncRoster]);
+  useEffect(() => { officeRef.current = office; }, [office]);
+
+  /** ผังเปลี่ยนโดยเครื่องนี้ (ลาก/หมุน/จ้าง/ไล่ออก) - บันทึกแบบหน่วง; โหมดในเครื่องลง localStorage */
+  const persistLayout = useCallback((l: OfficeLayout) => {
+    layoutRevRef.current = l.rev;
+    if (layoutSaveTimer.current) window.clearTimeout(layoutSaveTimer.current);
+    setLayoutSave('saving');
+    layoutSaveTimer.current = window.setTimeout(() => {
+      const office = officeRef.current;
+      if (!supabaseConfigured || !office) {
+        try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(l)); setLayoutSave('saved'); } catch { setLayoutSave('error'); }
+        return;
+      }
+      saveLayout(office.id, l)
+        .then(() => { setLayoutSave('saved'); setLayoutErr(null); })
+        .catch((e) => { setLayoutSave('error'); setLayoutErr(sbError(e)); });
+    }, 600);
+  }, []);
+
+  // แท็บ "จัดออฟฟิศ" = โหมดจัดบนแผนที่: เปิดแท็บ -> เข้าโหมด, ออกจากแท็บ/ปิดโหมด -> อีกฝั่งตามกัน
+  useEffect(() => {
+    const w = worldRef.current;
+    if (!w || !ready) return;
+    // ยังไม่ล็อกอิน (ทั้งแผงถูก inert อยู่แล้ว) ก็ไม่เข้าโหมดจัด
+    const canEdit = !supabaseConfigured || (authReady && !!user);
+    if (sideTab === 'layout') {
+      if (canEdit) w.setEditMode(true);
+      // แท็บนี้มีแคตตาล็อกรูปของ - ขยายแผงบนให้พอเห็น (ผู้ใช้ย่อกลับได้ด้วยที่จับ)
+      setHireH((h) => { const nh = Math.max(h, 560); if (nh !== h) saveSide(sideW, true, nh); return nh; });
+    } else if (w.isEditMode()) w.setEditMode(false);
+  }, [sideTab, ready, authReady, user]); // eslint-disable-line react-hooks/exhaustive-deps -- sideW/saveSide ใช้ค่าล่าสุดพอ
+  useEffect(() => {
+    if (!editSnap.on && sideTab === 'layout' && ready) setSideTab('staff');
+    if (editSnap.on && sideTab !== 'layout') setSideTab('layout');
+  }, [editSnap.on]); // eslint-disable-line react-hooks/exhaustive-deps -- ตอบสนองเฉพาะตอนโหมดเปลี่ยน
+
+  // realtime: จออื่นแก้ผัง -> เอามาใช้ (ข้าม rev ที่เราเป็นคนเขียนเอง)
+  useEffect(() => {
+    const c = sb();
+    if (!c || !officeId || !ready) return;
+    const ch = c
+      .channel(`office_layout:${officeId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'office_layout', filter: `office_id=eq.${officeId}` }, (payload) => {
+        const row = payload.new as { data?: unknown } | null;
+        const l = row?.data ? parseLayout(row.data) : null;
+        if (!l || l.rev === layoutRevRef.current) return;
+        layoutRevRef.current = l.rev;
+        worldRef.current?.setLayout(l, 'sync');
         syncRoster();
       })
-      .catch((e) => setSaveErr(sbError(e)));
-  }, [office, ready, syncRoster]);
+      .subscribe();
+    return () => { void c.removeChannel(ch); };
+  }, [officeId, ready, syncRoster]);
 
   const onReady = useCallback(
     (w: World) => {
       worldRef.current = w;
       setReady(true);
-      // โหมดในเครื่อง: จ้างทีมกฎหมายให้ 3 คนเลย จะได้ลองถามได้ทันที
+      w.onEditChange(setEditSnap);
+      w.onLayoutChange((l, cause) => { if (cause !== 'sync') persistLayout(l); });
+      // ที่นั่งเปลี่ยน (ย้ายโต๊ะ/สลับ/จัดใหม่) - เก็บสำเนาในแถวพนักงานด้วย
+      w.onSeatChange((id, seat) => {
+        if (!officeRef.current) return;
+        updateEmployeeSeat(id, seat).catch((e) => setSaveErr(sbError(e)));
+      });
+      // โหมดในเครื่อง: ผังจาก localStorage แล้วจ้างทีมกฎหมายให้ 3 คนเลย จะได้ลองถามได้ทันที
       // ถ้าต่อ Supabase อยู่ ห้ามจ้างเอง เดี๋ยวไปทับกับพนักงานที่โหลดมาจากออฟฟิศ
-      if (!supabaseConfigured && w.roster().length === 0) {
-        const legal = DEPT_BY_ID.get('legal')!;
-        for (let i = 0; i < 3; i++) w.hire(legal);
+      if (!supabaseConfigured) {
+        let l: OfficeLayout | null = null;
+        try { l = parseLayout(JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? 'null')); } catch { /* ไม่มี/พัง = ค่าเริ่มต้น */ }
+        if (l) { layoutRevRef.current = l.rev; w.setLayout(l, 'sync'); }
+        if (w.roster().length === 0) {
+          const legal = DEPT_BY_ID.get('legal')!;
+          for (let i = 0; i < 3; i++) w.hire(legal);
+        }
       }
       syncRoster();
     },
-    [syncRoster],
+    [syncRoster, persistLayout],
   );
 
   // สถานะพนักงานเปลี่ยนตลอดเวลาใน game loop - poll เบา ๆ มาแสดงผล
@@ -789,7 +875,7 @@ export default function Page() {
             await w.waitForSpeech();
             setPhase(`${init.visitor?.name ?? 'ลูกค้า'} นั่งรอ - ${ev.agentName} ไปปรึกษาทีม...`);
             await w.visitorWait(vid);
-            w.focusRect(MEETING_RECT);
+            w.focusRect(w.meetingRect());
             await w.gather(ids);
             w.setDeliberating(ids);
           })();
@@ -828,11 +914,11 @@ export default function Page() {
       }
       if (direct) {
         setPhase(`${owner.name} กำลังเดินไปหาคุณ...`);
-        w.focusRect(BOSS_RECT);
+        w.focusRect(w.bossRect());
         await w.report(owner.id);
         w.say(w.bossId, question, 3);
       } else {
-        w.focusRect(MEETING_RECT);
+        w.focusRect(w.meetingRect());
         await w.gather(ids);
         w.setDeliberating(ids);
         w.say(w.bossId, `วาระวันนี้: ${question}`, 3);
@@ -1049,7 +1135,8 @@ export default function Page() {
     <main className="flex h-screen flex-col gap-2.5 p-2.5 max-[1080px]:h-auto">
       {/* แถบบนเป็นแผ่นไม้ ให้รู้สึกเหมือนป้ายหน้าออฟฟิศ ไม่ใช่ nav ของเว็บแอป */}
       <header className="bevel flex flex-wrap items-center gap-x-3 gap-y-2 rounded-box border-2 border-wood-deep bg-wood-mid px-3 py-2">
-        <h1 className="text-[15px] text-parchment">
+        <h1 className="flex items-center gap-2 text-[15px] text-parchment">
+          {editSnap.logo && <img src={editSnap.logo} alt="" className="h-6 max-w-[96px] rounded-sm" />}
           VISUAL COMPANY
           <span className="ml-2 text-[11px] font-normal tracking-normal text-parchment-2/80">
             บริษัทที่พนักงานเป็น AI agent
@@ -1245,6 +1332,20 @@ export default function Page() {
           </Button>
 
           <Button
+            variant={editSnap.on ? 'primary' : 'outline'}
+            size="sm"
+            disabled={!ready || locked}
+            title="จัดโต๊ะ เก้าอี้ ของตกแต่ง - ลากย้าย หมุน เลือกคนนั่ง"
+            className={editSnap.on ? undefined : 'border-wood-deep text-parchment-2 hover:bg-wood-dark'}
+            onClick={() => {
+              if (editSnap.on) { worldRef.current?.setEditMode(false); return; }
+              setSideOpen(true); saveSide(sideW, true, hireH); setSideTab('layout');
+            }}
+          >
+            <Wrench /> จัดออฟฟิศ
+          </Button>
+
+          <Button
             variant={autoCam ? 'primary' : 'outline'}
             size="sm"
             disabled={!ready}
@@ -1334,6 +1435,7 @@ export default function Page() {
             <GameCanvas onReady={onReady} />
           </div>
 
+
           <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-1 pb-0.5 pt-2 text-[11px] text-dim">
             <span>
               พนักงาน <b className="text-parchment">{roster.length}</b> คน
@@ -1400,6 +1502,7 @@ export default function Page() {
               onUnlock={() => setOfficeOpen(true)}
               tab={sideTab}
               onTab={setSideTab}
+              layoutPanel={<LayoutPanel world={worldRef.current} snap={editSnap} roster={roster} save={layoutSave} saveErr={layoutErr} />}
               meetingCount={secretaryMeetings.length}
               llmOptions={llmOptions}
               llmOf={(id) => llmStore.byEmployee?.[id]}

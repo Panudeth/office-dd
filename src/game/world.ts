@@ -2,14 +2,48 @@ import { DEPT_BY_ID, ROLES, ROLE_ORDER, type Department } from '@/lib/department
 import { decalSprite, decorSprite, drawBubble, mk, objSprite, shade, tileSprite, type Surface } from './art';
 import { DIRS, GADGETS, buildAtlas, drawGadget, makePalette } from './character';
 import {
-  BENCH_SEATS, BH, BOSS_DESK, BOSS_HOME, BOSS_SEAT, BW, COOLER_STAND, DESK_SEATS,
-  FLOOR_DECALS, GROUND, IDLE_SPOTS, MEET_SEATS, MH, MW, OBJECTS, PANTRY_TABLE, POND_SPOTS,
-  PR_SEATS, REPORT_SPOTS, ROOMS, ROOM_OF_DEPT, SECRETARY_NAME, SECRETARY_PAL, SECRETARY_TITLE, SEC_HOME,
-  SOFA2_SEATS, SOFA_SEATS, TS, WALL_DECOR, findPath, roomOfSeat, tileFree,
+  BH, BOSS_HOME, BW, GROUND, MAX_STAFF, MH, MW, SECRETARY_NAME, SECRETARY_PAL, SECRETARY_TITLE, SEC_HOME,
+  TS, findPath, tileFree, type MapObject,
 } from './map';
+import {
+  FURN, MAX_LOGO_CHARS, MAX_SIGN_TEXT, VEC, cloneLayout, defaultLayout, flipDir, footprint, isIndoor, newItemId, nextDir, seatOf, tileSpec,
+  type FurnKind, type LayoutItem, type OfficeLayout,
+} from './furniture';
+import { LayoutState, key, type Rect, type Verdict } from './layout';
 import type {
   AgentState, BubbleIcon, Dir, Employee, EmployeeSnapshot, PersistedEmployee, Pose, Tile,
 } from './types';
+
+/** สาเหตุที่ผังเปลี่ยน - หน้าเว็บใช้ตัดสินว่าต้องบันทึกไหม (sync = มาจากเครื่องอื่น ไม่ต้องบันทึกซ้ำ) */
+export type LayoutCause = 'user' | 'hire' | 'restore' | 'sync';
+
+/** สิ่งที่แผงจัดออฟฟิศต้องรู้ - world ส่งให้ทุกครั้งที่เปลี่ยน */
+export interface EditSnapshot {
+  on: boolean;
+  selected: {
+    id: string; kind: FurnKind; label: string; dir: Dir | null; owner: string | null; dept: string | null;
+    /** ป้ายแผนก: ข้อความบนป้าย (ไม่ได้ตั้ง = null) + ข้อความเริ่มต้นที่จะแสดง */
+    signText: { value: string | null; fallback: string } | null;
+    rotates: boolean; canOwn: boolean; canDelete: boolean;
+    /** ขนาดปัจจุบัน + ขอบเขต (เฉพาะชิ้นที่ย่อ/ขยายได้ เช่นโลโก้) */
+    size: { w: number; h: number; minW: number; maxW: number; minH: number; maxH: number } | null;
+    /** ชั้นพื้น (พรม/ตรา/โลโก้) - จัดลำดับซ้อนได้: ตำแหน่งจากล่าง (0) และจำนวนทั้งหมด */
+    zOrder: { index: number; total: number } | null;
+    /** ของทั่วไป - ระดับซ้อนเทียบของแถวเดียวกัน (-3..3, 0 = ตามความลึกจริง) */
+    depth: number | null;
+  } | null;
+  /** กำลังถือของใหม่รอวาง */
+  placing: FurnKind | null;
+  /** กำลังทาสีพื้น (รหัส tile) */
+  painting: string | null;
+  /** เครื่องมือปัจจุบัน: เลือก/ย้าย, วางของใหม่, ระบายพื้น */
+  tool: 'select' | 'place' | 'paint';
+  logo: string | null;
+  logoFit: 'contain' | 'cover' | 'stretch';
+  /** ข้อความล่าสุด (เช่นวางไม่ได้เพราะอะไร) */
+  message: string | null;
+  itemCount: number;
+}
 
 const NAMES = [
   'ต้น', 'แนน', 'เอิร์ธ', 'ฟ้า', 'บอส', 'มิ้น', 'กาย', 'ปอ', 'แจ็ค', 'นุ่น',
@@ -26,11 +60,21 @@ const STATE_TH: Record<AgentState, string> = {
 export const stateLabel = (s: AgentState) => STATE_TH[s] ?? s;
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
-/**
- * หันหน้าไปทางไหนตอนนั่งโต๊ะตัวเอง - โต๊ะห้องแผนกอยู่เหนือที่นั่ง (หันขึ้น)
- * เคาน์เตอร์ PR อยู่ใต้ที่นั่ง (หันลงหาล็อบบี้)
- */
-const seatDir = (t: Tile): Dir => (PR_SEATS.some((p) => p.x === t.x && p.y === t.y) ? 'down' : 'up');
+const dist2 = (a: Tile, b: Tile) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
+/** ช่องบนเส้นตรงจาก a ไป b (ไม่รวม a) - Bresenham */
+function lineTiles(a: Tile, b: Tile): Tile[] {
+  const out: Tile[] = [];
+  let x = a.x, y = a.y;
+  const dx = Math.abs(b.x - a.x), dy = -Math.abs(b.y - a.y), sx = a.x < b.x ? 1 : -1, sy = a.y < b.y ? 1 : -1;
+  let err = dx + dy;
+  for (let n = 0; n < 200 && (x !== b.x || y !== b.y); n++) {
+    const e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x += sx; }
+    if (e2 <= dx) { err += dx; y += sy; }
+    out.push({ x, y });
+  }
+  return out;
+}
 /** แฮชง่าย ๆ จาก id - เอาไว้เลือกของประจำตัวให้คงที่ต่อคน */
 const hashId = (id: string) => { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); };
 const rnd = <T,>(a: T[]): T => a[(Math.random() * a.length) | 0];
@@ -71,6 +115,33 @@ export class World {
   private running = true;
   private disposed = false;
   private cleanups: (() => void)[] = [];
+
+  /* ---------- ผังเฟอร์นิเจอร์ ---------- */
+  private lay = new LayoutState(defaultLayout());
+  /** sprite ทั้งหมดที่ต้องวาด (ชุดคงที่ + เฟอร์นิเจอร์) - สร้างใหม่เมื่อผังเปลี่ยน */
+  private objs: MapObject[] = [...this.lay.objs];
+  /** โลโก้บริษัท - โหลดจาก data URL ในผัง วาดบนตรา (emblem) */
+  private logoImg: HTMLImageElement | null = null;
+  private logoSrc: string | null = null;
+  private layoutListeners = new Set<(l: OfficeLayout, cause: LayoutCause) => void>();
+  private seatListeners = new Set<(id: string, seat: Tile) => void>();
+  private editListeners = new Set<(s: EditSnapshot) => void>();
+  /** cache จำนวนที่ว่างต่อแผนก - คำนวณแพง (ลองวางโต๊ะทีละตัว) เลยจำไว้ต่อ rev */
+  private roomLeftCache: { rev: string; staff: number; by: Record<string, number> } | null = null;
+
+  /* ---------- โหมดจัดออฟฟิศ ---------- */
+  private editOn = false;
+  private editSel: string | null = null;
+  private editPlacing: { kind: FurnKind; dir: Dir; v: number; dept?: string } | null = null;
+  /** กำลังทาสีพื้น: รหัส tile - ลากบนแผนที่เพื่อระบาย */
+  private editPaint: string | null = null;
+  private paintDown = false;
+  /** ลากชิ้นอยู่: ชิ้นไหน จับที่ offset ไหนจาก anchor */
+  private editDrag: { id: string; ox: number; oy: number; moved: boolean } | null = null;
+  /** ตำแหน่ง ghost ปัจจุบัน + ผลตรวจ (วาดเขียว/แดง) */
+  private ghost: { x: number; y: number; dir: Dir; kind: FurnKind; v: number; verdict: Verdict } | null = null;
+  private hover: Tile | null = null;
+  private editMsg: string | null = null;
   /**
    * ชั้นพื้น (กระเบื้อง ลายพื้น ของติดผนัง เงาผนัง) ไม่เคยเปลี่ยน ยกเว้นน้ำที่มี 4 เฟรม
    * เดิมวาดใหม่ 648 tile ทุกเฟรม (~3 ms/เฟรม ตลอดเวลาที่เปิดหน้า) - วาดครั้งเดียวต่อเฟรมน้ำแล้ว blit ทีเดียว
@@ -110,6 +181,7 @@ export class World {
   /** ผู้บริหาร (ตัวผู้ใช้) - ปกตินั่งทำงานในห้องตัวเอง เดินมาห้องประชุมเมื่อมีวาระ */
   private spawnBoss() {
     const pal = { skin: '#e8b088', hair: '#403848', shirt: '#3a4256', pants: '#2a3040', shoes: '#403848' };
+    const home = this.lay.homeSeat('boss') ?? { x: BOSS_HOME.x, y: BOSS_HOME.y, dir: BOSS_HOME.dir as Dir };
     this.employees.push({
       id: 'boss',
       name: 'คุณ',
@@ -119,10 +191,10 @@ export class World {
       lens: '',
       pal,
       atlas: buildAtlas(pal),
-      seat: { x: BOSS_HOME.x, y: BOSS_HOME.y },
-      tx: BOSS_HOME.x, ty: BOSS_HOME.y,
-      px: BOSS_HOME.x * TS + 8, py: BOSS_HOME.y * TS + TS,
-      dir: BOSS_HOME.dir, pose: 'sit', frame: 0, animT: 0,
+      seat: { x: home.x, y: home.y },
+      tx: home.x, ty: home.y,
+      px: home.x * TS + 8, py: home.y * TS + TS,
+      dir: home.dir, pose: 'sit', frame: 0, animT: 0,
       state: 'work', timer: Number.POSITIVE_INFINITY,
       speed: 44,
       path: null, after: null,
@@ -141,6 +213,7 @@ export class World {
    */
   private spawnSecretary() {
     const pal = { ...SECRETARY_PAL };
+    const home = this.lay.homeSeat('secretary') ?? { x: SEC_HOME.x, y: SEC_HOME.y, dir: SEC_HOME.dir as Dir };
     this.employees.push({
       id: 'secretary',
       name: SECRETARY_NAME,
@@ -150,10 +223,10 @@ export class World {
       lens: '',
       pal,
       atlas: buildAtlas(pal),
-      seat: { x: SEC_HOME.x, y: SEC_HOME.y },
-      tx: SEC_HOME.x, ty: SEC_HOME.y,
-      px: SEC_HOME.x * TS + 8, py: SEC_HOME.y * TS + TS,
-      dir: SEC_HOME.dir, pose: 'sit', frame: 0, animT: 0,
+      seat: { x: home.x, y: home.y },
+      tx: home.x, ty: home.y,
+      px: home.x * TS + 8, py: home.y * TS + TS,
+      dir: home.dir, pose: 'sit', frame: 0, animT: 0,
       state: 'work', timer: 3,
       speed: 40,
       path: null, after: null,
@@ -173,16 +246,17 @@ export class World {
    * ระหว่างประชุมเธอจะยืนจดอยู่หน้าห้อง ไม่เดินไปไหน
    */
   private decideSecretary(e: Employee) {
+    const home = this.homeOf(e);
     const meeting = this.employees.some((o) => o.state === 'meet' || o.state === 'think');
     if (meeting) {
-      // ประชุมอยู่ - ยืนจดที่จุดประจำ หันหน้าเข้าห้อง
-      if (e.tx !== SEC_HOME.x || e.ty !== SEC_HOME.y) {
-        this.goTo(e, SEC_HOME.x, SEC_HOME.y, () => {
-          this.sitAt(e, SEC_HOME.x, SEC_HOME.y, SEC_HOME.dir, 'work', 4);
+      // ประชุมอยู่ - นั่งจดที่จุดประจำ
+      if (e.tx !== home.x || e.ty !== home.y) {
+        this.goTo(e, home.x, home.y, () => {
+          this.sitAt(e, home.x, home.y, home.dir, 'work', 4);
         });
         return;
       }
-      this.sitAt(e, SEC_HOME.x, SEC_HOME.y, SEC_HOME.dir, 'work', 4);
+      this.sitAt(e, home.x, home.y, home.dir, 'work', 4);
       e.gadget = 'notes';
       e.bubble = 'type'; e.bubbleT = 2.5;
       e.timer = 4 + Math.random() * 3;
@@ -193,24 +267,27 @@ export class World {
     const roll = Math.random();
     if (roll < 0.45) {
       // กลับมาประจำที่ แล้วมองซ้ายขวาเหมือนคอยรับแขก
-      this.goTo(e, SEC_HOME.x, SEC_HOME.y, () => {
-        this.sitAt(e, SEC_HOME.x, SEC_HOME.y, SEC_HOME.dir, 'work', 6 + Math.random() * 6);
+      this.goTo(e, home.x, home.y, () => {
+        this.sitAt(e, home.x, home.y, home.dir, 'work', 6 + Math.random() * 6);
         if (Math.random() < 0.5) { e.bubble = 'type'; e.bubbleT = 2; }
       });
     } else if (roll < 0.7) {
-      // เดินเช็คตามโต๊ะใกล้ ๆ ในโถงกลาง แล้วเดินกลับ
-      const spot = rnd(IDLE_SPOTS.filter((s) => Math.abs(s.x - SEC_HOME.x) <= 6 && Math.abs(s.y - SEC_HOME.y) <= 3));
+      // เดินเช็คใกล้ ๆ ที่นั่งตัวเอง แล้วเดินกลับ
+      const spot = this.pickSpot(e, this.idleSpotsNear(home, 6, 3));
       if (spot) {
         this.goTo(e, spot.x, spot.y, () => {
           e.pose = 'stand'; e.state = 'idle'; e.timer = 2 + Math.random() * 3;
         });
       } else e.timer = 3;
     } else if (roll < 0.85) {
-      // ไปกดน้ำแล้วกลับ
-      this.goTo(e, COOLER_STAND.x, COOLER_STAND.y, () => {
-        e.pose = 'stand'; e.dir = 'up'; e.state = 'coffee';
-        e.timer = 3 + Math.random() * 3; e.bubble = 'coffee'; e.bubbleT = 3;
-      });
+      // ไปกดน้ำแล้วกลับ (ถ้ามีเครื่องกดน้ำและเดินถึง)
+      const cooler = this.pickSpot(e, this.lay.spots('cooler'));
+      if (cooler) {
+        this.goTo(e, cooler.x, cooler.y, () => {
+          e.pose = 'stand'; e.dir = 'up'; e.state = 'coffee';
+          e.timer = 3 + Math.random() * 3; e.bubble = 'coffee'; e.bubbleT = 3;
+        });
+      } else e.timer = 3;
     } else {
       // ยืนจดโน้ตอยู่กับที่
       e.pose = 'stand'; e.state = 'idle';
@@ -236,41 +313,111 @@ export class World {
   private get staff() { return this.employees.filter((e) => !e.isBoss && !e.isSecretary && !e.isVisitor); }
 
   seatsLeft(): number {
-    const taken = new Set(this.staff.map((e) => `${e.seat.x},${e.seat.y}`));
-    return DESK_SEATS.filter((s) => !taken.has(`${s.x},${s.y}`)).length;
+    return Math.max(0, MAX_STAFF - this.staff.length);
   }
 
   headcount(deptId: string): number {
     return this.staff.filter((e) => e.deptId === deptId).length;
   }
 
+  /** ช่องที่มีคนอยู่ตอนนี้ (ยืน/นั่ง) - กันวางของทึบทับคน */
+  private occupiedTiles(): Set<string> {
+    const o = new Set<string>();
+    for (const e of this.employees) o.add(key(e.tx, e.ty));
+    return o;
+  }
+
+  /** ที่นั่งประจำของคนนี้จากผัง (เก้าอี้/โต๊ะที่ owner เป็นเขา) - ไม่มีก็ใช้ที่จำไว้ในตัว */
+  private homeOf(e: Employee): { x: number; y: number; dir: Dir } {
+    return this.lay.homeSeat(e.id) ?? { x: e.seat.x, y: e.seat.y, dir: e.dir };
+  }
+  /** ทิศที่คนนี้หันตอนนั่งที่ประจำ */
+  private seatDirOf(e: Employee): Dir { return this.homeOf(e).dir; }
+
+  /** จุดยึดของแผนก - ป้ายแผนก > ที่นั่งของคนแผนกนี้ > กลางแผนที่ */
+  private deptAnchor(deptId: string): Tile {
+    const sign = this.lay.deptSigns().find((d) => d.dept === deptId);
+    if (sign) return { x: sign.x, y: sign.y };
+    const mates = this.staff.filter((e) => e.deptId === deptId);
+    if (mates.length) return { x: Math.round(mates.reduce((a, e) => a + e.seat.x, 0) / mates.length), y: Math.round(mates.reduce((a, e) => a + e.seat.y, 0) / mates.length) };
+    return { x: Math.floor(MW / 2), y: Math.floor(MH / 2) };
+  }
+
+  /** ที่นั่งว่างที่แผนกนี้เอาไปใช้ได้ เรียงใกล้จุดยึดก่อน - PR ได้เก้าอี้เคาน์เตอร์ PR ก่อน */
+  private freeSeatsFor(deptId: string): LayoutItem[] {
+    const anchor = this.deptAnchor(deptId);
+    const byDist = (a: LayoutItem, b: LayoutItem) => dist2(seatOf(a)!, anchor) - dist2(seatOf(b)!, anchor);
+    const work = this.lay.freeWorkSeats().sort(byDist);
+    if (deptId !== 'pr') return work;
+    const pr = this.lay.prSeats().map((s) => s.item).filter((i) => !i.owner).sort(byDist);
+    return [...pr, ...work];
+  }
+
+  /** ตำแหน่งที่จะลองวางโต๊ะใหม่ - ในอาคาร ใกล้จุดยึดของแผนกก่อน */
+  private *deskCandidates(deptId: string): Generator<{ x: number; y: number; dir: Dir }> {
+    const anchor = this.deptAnchor(deptId);
+    const tiles: Tile[] = [];
+    for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) if (isIndoor(x, y)) tiles.push({ x, y });
+    tiles.sort((a, b) => dist2(a, anchor) - dist2(b, anchor));
+    for (const t of tiles) for (const dir of ['up', 'down', 'left', 'right'] as Dir[]) yield { x: t.x, y: t.y, dir };
+  }
+
+  /** ลองวางโต๊ะใหม่ให้แผนกนี้ - คืนชิ้นที่ผ่านกฎ (ยังไม่ใส่ในผัง) */
+  private tryNewDesk(deptId: string, items: LayoutItem[], occupied: Set<string>, limit = 600): LayoutItem | null {
+    let n = 0;
+    for (const c of this.deskCandidates(deptId)) {
+      if (n++ > limit) break;
+      const it: LayoutItem = { id: newItemId(), kind: 'desk', x: c.x, y: c.y, dir: c.dir, v: (c.x * 7 + c.y * 3) % 3 };
+      if (this.lay.validate([...items, it], occupied, it.id).ok) return it;
+    }
+    return null;
+  }
+
   /**
-   * จองที่นั่งให้แผนก - แต่ละแผนกมีห้องประจำ (ROOM_OF_DEPT) จึงนั่งในห้องตัวเองก่อน
-   * ห้องเต็มค่อยไปห้องสำรอง (ห้องที่ไม่มีแผนกไหนเป็นเจ้าของ) แล้วค่อยที่ว่างที่ไหนก็ได้
+   * จองที่นั่งให้พนักงาน - ที่นั่งว่างใกล้แผนก > วางโต๊ะใหม่ใกล้แผนก
+   * แก้ผังในที่ (owner/เพิ่มโต๊ะ) - ผู้เรียกต้อง commitLayout เอง
    */
-  /** ที่นั่งประจำของแผนก - PR นั่งเคาน์เตอร์กลางล็อบบี้ นอกนั้นนั่งในห้องของตัวเอง */
-  private seatsOf(deptId: string): Tile[] {
-    if (deptId === 'pr') return PR_SEATS;
-    return ROOMS[ROOM_OF_DEPT[deptId] ?? -1]?.seats ?? [];
+  private claimSeat(deptId: string, empId: string, prefer?: Tile): { seat: Tile; changed: boolean } | null {
+    const free = this.freeSeatsFor(deptId);
+    const pick = (prefer && free.find((i) => { const s = seatOf(i)!; return s.x === prefer.x && s.y === prefer.y; })) ?? free[0];
+    if (pick) { pick.owner = empId; const st = seatOf(pick)!; return { seat: { x: st.x, y: st.y }, changed: true }; }
+    const it = this.tryNewDesk(deptId, this.lay.items, this.occupiedTiles());
+    if (!it) return null;
+    it.owner = empId;
+    this.lay.layout.items.push(it);
+    return { seat: { x: it.x, y: it.y }, changed: true };
   }
 
-  private claimSeat(deptId: string): Tile | null {
-    const taken = new Set(this.staff.map((e) => `${e.seat.x},${e.seat.y}`));
-    // นั่งได้เฉพาะที่ของแผนกตัวเอง - เต็มคือจ้างเพิ่มไม่ได้ ไม่ไปเบียดแผนกอื่น
-    // (ป้ายห้องจะได้ตรงกับคนข้างในเสมอ และ HirePanel รู้จาก seatsLeftFor() ว่าปุ่มควรปิดเมื่อไร)
-    return this.seatsOf(deptId).find((t) => !taken.has(`${t.x},${t.y}`)) ?? null;
-  }
-
-  /** ที่นั่งว่างของแผนกนี้ - ปุ่มจ้างใช้ตัดสินว่ากดได้ไหม */
+  /** ที่ว่างของแผนกนี้ - ที่นั่งว่างทั้งหมด + โต๊ะใหม่ที่ยังวางลงได้ใกล้แผนก (ไม่เกินโควตารวม) - ปุ่มจ้างใช้ */
   seatsLeftFor(deptId: string): number {
-    const taken = new Set(this.staff.map((e) => `${e.seat.x},${e.seat.y}`));
-    const home = { seats: this.seatsOf(deptId) };
-    return home ? home.seats.filter((t) => !taken.has(`${t.x},${t.y}`)).length : 0;
+    const global = this.seatsLeft();
+    const c = this.roomLeftCache;
+    if (!c || c.rev !== this.lay.layout.rev || c.staff !== this.staff.length) {
+      this.roomLeftCache = { rev: this.lay.layout.rev, staff: this.staff.length, by: {} };
+    }
+    const cache = this.roomLeftCache!;
+    if (cache.by[deptId] === undefined) {
+      let n = this.freeSeatsFor(deptId).length;
+      // จำลองวางโต๊ะเพิ่มทีละตัวใกล้แผนก (แค่พอให้รู้ว่ายังจ้างต่อได้ - ไม่ไล่จนเต็มโควตา เพราะตรวจแพง)
+      const items = this.lay.items.map((i) => ({ ...i }));
+      const none = new Set<string>();
+      const target = Math.min(global, n + 3);
+      while (n < target) {
+        const placed = this.tryNewDesk(deptId, items, none, 120);
+        if (!placed) break;
+        items.push(placed);
+        n++;
+      }
+      cache.by[deptId] = Math.min(global, n);
+    }
+    return cache.by[deptId];
   }
 
   hire(dept: Department): Employee | null {
-    const seat = this.claimSeat(dept.id);
-    if (!seat) return null;
+    if (this.staff.length >= MAX_STAFF) return null;
+    const id = crypto.randomUUID(); // ใช้เป็น primary key ใน DB ด้วย
+    const claim = this.claimSeat(dept.id, id);
+    if (!claim) return null;
 
     const n = this.headcount(dept.id);
     const usedNames = new Set(this.staff.map((e) => e.name));
@@ -279,34 +426,43 @@ export class World {
     // คนที่ 1 = ผู้เสนอ, 2 = ผู้ค้าน, 3 = ผู้ตรวจสอบ, 4 = ผู้ดูความเป็นไปได้ แล้ววนใหม่
     const role = ROLE_ORDER[n % ROLE_ORDER.length];
 
-    return this.spawn({
-      id: crypto.randomUUID(), // ใช้เป็น primary key ใน DB ด้วย
-      name,
-      title: ROLES[role].th,
-      deptId: dept.id,
-      role,
-      palette: pal,
-      seat: { ...seat },
+    const e = this.spawn({
+      id, name, title: ROLES[role].th, deptId: dept.id, role, palette: pal, seat: { ...claim.seat },
     }, dept);
+    if (claim.changed) this.commitLayout('hire');
+    return e;
   }
 
-  /** สร้างพนักงานจากข้อมูลที่บันทึกไว้ (โหลดออฟฟิศกลับมา) */
+  /**
+   * สร้างพนักงานจากข้อมูลที่บันทึกไว้ (โหลดออฟฟิศกลับมา) - ต้อง setLayout ก่อน (ถ้ามีผังของออฟฟิศ)
+   * ที่นั่งเอาจากผัง: ที่นั่งที่ owner เป็นคนนี้ > ที่นั่งว่างตรง seat เดิม > ที่นั่งว่างใกล้แผนก > วางโต๊ะใหม่
+   */
   restore(rows: PersistedEmployee[]) {
     // บอสกับเลขาฯ ไม่ได้มาจากฐานข้อมูล จึงต้องรอดจากการล้างตอนสลับออฟฟิศ
     this.employees = this.employees.filter((e) => e.isBoss || e.isSecretary || e.isVisitor);
-    const taken = new Set<string>();
+    const ids = new Set(rows.map((r) => r.id));
+    let changed = false;
+    // เจ้าของที่นั่งที่ไม่อยู่แล้ว (โดนเลิกจ้างจากเครื่องอื่น) - ปล่อยว่าง (บอส/เลขาฯ ไม่นับ)
+    for (const it of this.lay.items) {
+      if ((it.kind === 'desk' || it.kind === 'chair') && it.owner && it.owner !== 'boss' && it.owner !== 'secretary' && !ids.has(it.owner)) { it.owner = null; changed = true; }
+    }
+    const seatChanged: [string, Tile][] = [];
     for (const r of rows) {
       const dept = DEPT_BY_ID.get(r.deptId);
       if (!dept) continue;
-      // ที่นั่งจากผังเก่าอาจไม่มีในผังนี้ (หรือซ้ำกัน) - หาที่ใหม่ให้แทนที่จะวางทับกัน
-      const known = DESK_SEATS.some((s) => s.x === r.seat.x && s.y === r.seat.y);
-      const key = `${r.seat.x},${r.seat.y}`;
-      let seat = known && !taken.has(key) ? r.seat : this.claimSeat(r.deptId);
-      if (!seat) continue;
-      seat = { ...seat };
-      taken.add(`${seat.x},${seat.y}`);
+      let seat: Tile | null = null;
+      const own = this.lay.homeSeat(r.id);
+      if (own) seat = { x: own.x, y: own.y };
+      else {
+        const c = this.claimSeat(r.deptId, r.id, r.seat);
+        if (c) { seat = c.seat; changed = changed || c.changed; }
+      }
+      if (!seat) { console.warn('[world] ไม่มีที่นั่งให้', r.name, '- ออฟฟิศเต็ม'); continue; }
       this.spawn({ ...r, seat }, dept);
+      if (seat.x !== r.seat.x || seat.y !== r.seat.y) seatChanged.push([r.id, seat]);
     }
+    if (changed) this.commitLayout('restore'); else this.refreshLayoutIndex();
+    for (const [id, seat] of seatChanged) this.seatListeners.forEach((f) => f(id, seat));
   }
 
   private spawn(rec: PersistedEmployee, dept: Department): Employee {
@@ -324,7 +480,7 @@ export class World {
       seat: { ...rec.seat },
       tx: rec.seat.x, ty: rec.seat.y,
       px: rec.seat.x * TS + 8, py: rec.seat.y * TS + TS,
-      dir: seatDir(rec.seat), pose: 'sit', frame: 0, animT: 0,
+      dir: 'up', pose: 'sit', frame: 0, animT: 0,
       state: 'work', timer: 3 + Math.random() * 6,
       speed: 40 + Math.random() * 12,
       path: null, after: null,
@@ -335,6 +491,7 @@ export class World {
       owner: 'sim',
     };
     this.employees.push(e);
+    e.dir = this.seatDirOf(e);
     return e;
   }
 
@@ -368,6 +525,9 @@ export class World {
     const [gone] = this.employees.splice(idx, 1);
     if (this.selected?.id === gone.id) this.selected = null;
     if (this.follow === gone.id) this.follow = null;
+    // ที่นั่งยังอยู่ ให้คนต่อไปนั่ง - แค่ปลดเจ้าของ
+    const d = this.lay.seatItemOf(gone.id);
+    if (d) { d.owner = null; this.commitLayout('user'); }
     return true;
   }
 
@@ -535,11 +695,13 @@ export class World {
       .filter((e): e is Employee => !!e);
     if (!team.length) return;
 
+    const seats = this.lay.meetSeats();
+    const head = this.lay.headSeat();
     const walkers = team.map((e, i) => {
       e.busy = true;
       e.path = null;
       e.after = null;
-      const s = MEET_SEATS[i % MEET_SEATS.length];
+      const s = seats[i % Math.max(1, seats.length)] ?? this.homeOf(e);
       e.bubble = 'board'; e.bubbleT = 2.5;
       // หยิบโน้ตบุ๊ก/แท็บเล็ต/สมุดติดมือไปประชุม - แต่ละคนถือประจำตัวไม่เปลี่ยน
       e.gadget = GADGETS[hashId(e.id) % GADGETS.length];
@@ -553,9 +715,11 @@ export class World {
     boss.path = null;
     boss.after = null;
     boss.state = 'walk';
+    // หัวโต๊ะ (เก้าอี้ที่ตั้งเป็นหัวโต๊ะ) - ไม่มีก็นั่งเก้าอี้ประชุมตัวที่ทีมไม่ได้ใช้ ไม่มีอีกก็อยู่บ้านตัวเอง
+    const bossSeat = head ?? seats.find((_, i) => i >= team.length) ?? this.homeOf(boss);
     walkers.push(
-      this.walk(boss, BOSS_SEAT.x, BOSS_SEAT.y).then(() => {
-        this.sitAt(boss, BOSS_SEAT.x, BOSS_SEAT.y, BOSS_SEAT.dir, 'meet', Number.POSITIVE_INFINITY);
+      this.walk(boss, bossSeat.x, bossSeat.y).then(() => {
+        this.sitAt(boss, bossSeat.x, bossSeat.y, bossSeat.dir, 'meet', Number.POSITIVE_INFINITY);
       }),
     );
 
@@ -577,11 +741,15 @@ export class World {
     e.busy = true;
     e.path = null;
     e.after = null;
-    const spot = REPORT_SPOTS.find((s) => !this.employees.some((o) => o !== e && o.tx === s.x && o.ty === s.y))
-      ?? REPORT_SPOTS[0];
+    // หน้าโต๊ะบอส (แถวใต้โต๊ะ) - ไม่มีโต๊ะ/ถึงไม่ได้ ก็ยืนข้างบอส
+    const boss = this.boss;
+    const spots = this.lay.reportSpots();
+    const spot = this.pickSpot(e, spots)
+      ?? this.pickSpot(e, [{ x: boss.tx, y: boss.ty + 1 }, { x: boss.tx - 1, y: boss.ty }, { x: boss.tx + 1, y: boss.ty }, { x: boss.tx, y: boss.ty - 1 }])
+      ?? spots[0] ?? { x: boss.tx, y: boss.ty + 1 };
     await this.walk(e, spot.x, spot.y);
     e.pose = 'stand';
-    e.dir = 'up';
+    e.dir = spot.y > boss.ty ? 'up' : spot.y < boss.ty ? 'down' : spot.x < boss.tx ? 'right' : 'left';
     e.state = 'report';
     e.timer = 9999;
     e.bubble = 'talk';
@@ -596,8 +764,9 @@ export class World {
     const boss = this.boss;
     boss.path = null;
     boss.after = null;
-    this.goTo(boss, BOSS_HOME.x, BOSS_HOME.y, () => {
-      this.sitAt(boss, BOSS_HOME.x, BOSS_HOME.y, BOSS_HOME.dir, 'work', Number.POSITIVE_INFINITY);
+    const home = this.homeOf(boss);
+    this.goTo(boss, home.x, home.y, () => {
+      this.sitAt(boss, home.x, home.y, home.dir, 'work', Number.POSITIVE_INFINITY);
     });
 
     ids.forEach((id) => {
@@ -607,7 +776,7 @@ export class World {
       e.after = null;
       // goTo เรียก callback เสมอ ไม่ว่าจะเดินถึงหรือหาเส้นทางไม่เจอ - busy จึงถูกปลดแน่นอน
       this.goTo(e, e.seat.x, e.seat.y, () => {
-        this.sitAt(e, e.seat.x, e.seat.y, seatDir(e.seat), 'work', 8 + Math.random() * 10);
+        this.sitAt(e, e.seat.x, e.seat.y, this.seatDirOf(e), 'work', 8 + Math.random() * 10);
         e.busy = false;
         e.gadget = null; // ถึงโต๊ะแล้ววางของ
       });
@@ -622,10 +791,32 @@ export class World {
 
   /** จุดที่แขกโผล่/หายไป - ขอบขวาสุดของสวน แถวประตูล็อบบี้ */
   private gateTile(): Tile {
+    const g = this.lay.entrance();
+    if (g && tileFree(g.x, g.y)) return g;
     for (const t of [{ x: MW - 1, y: 8 }, { x: MW - 1, y: 7 }, { x: MW - 2, y: 8 }, { x: MW - 2, y: 7 }, { x: MW - 1, y: 9 }]) {
       if (tileFree(t.x, t.y)) return t;
     }
-    return { x: MW - 1, y: 8 };
+    return g ?? { x: MW - 1, y: 8 };
+  }
+
+  /** ช่องว่างเดินได้ในอาคาร (ไม่ใช่ที่นั่ง/จุดยืนของใคร) - สุ่มมาเป็นที่ยืนเล่น */
+  private idleSpots(): Tile[] {
+    const out: Tile[] = [];
+    for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
+      if (!isIndoor(x, y) || !tileFree(x, y) || this.lay.at(x, y)) continue;
+      out.push({ x, y });
+    }
+    // สุ่มชุดย่อยพอ ไม่ต้องทั้งแผนที่
+    for (let i = out.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [out[i], out[j]] = [out[j], out[i]]; }
+    return out.slice(0, 12);
+  }
+  private idleSpotsNear(c: Tile, rx: number, ry: number): Tile[] {
+    const out: Tile[] = [];
+    for (let y = c.y - ry; y <= c.y + ry; y++) for (let x = c.x - rx; x <= c.x + rx; x++) {
+      if ((x === c.x && y === c.y) || !tileFree(x, y) || this.lay.at(x, y)) continue;
+      out.push({ x, y });
+    }
+    return out;
   }
 
   /**
@@ -634,18 +825,26 @@ export class World {
    *   แผนกอื่น = แขกยืนหน้าประตูห้อง (ทางเดินแถว 10) คนตอบเดินมายืนรับที่ประตูด้านใน
    */
   private visitorSpots(host: Employee): { guest: Tile; guestDir: Dir; host: Tile; hostDir: Dir; hostSit: boolean } {
-    if (host.deptId === 'pr' || PR_SEATS.some((s) => s.x === host.seat.x && s.y === host.seat.y)) {
-      return { guest: { x: host.seat.x, y: host.seat.y + 2 }, guestDir: 'up', host: host.seat, hostDir: 'down', hostSit: true };
+    // ตัดสินจาก "ที่นั่งจริง" ไม่ใช่แผนก - นั่งเคาน์เตอร์ PR = แขกยืนหน้าเคาน์เตอร์, นั่งโต๊ะ = แขกยืนหน้าโต๊ะ
+    const home = this.homeOf(host);
+    if (this.lay.isPrSeat(host.seat)) {
+      const g = this.lay.prGuestSpot(home);
+      return { guest: g, guestDir: flipDir(home.dir), host: host.seat, hostDir: home.dir, hostSit: true };
     }
-    const room = roomOfSeat(host.seat);
-    if (room) {
-      return {
-        guest: { x: room.door.x, y: room.door.y - 1 }, guestDir: 'down',
-        host: { x: room.door.x, y: room.door.y + 1 }, hostDir: 'up', hostSit: false,
-      };
-    }
-    // ไม่มีห้อง (ไม่น่าเกิด) - ยืนข้าง ๆ ที่นั่ง
-    return { guest: { x: host.seat.x, y: host.seat.y + 1 }, guestDir: 'up', host: host.seat, hostDir: 'down', hostSit: true };
+    const freeTile = (t: Tile) => tileFree(t.x, t.y) && !this.employees.some((o) => o !== host && o.tx === t.x && o.ty === t.y);
+    // คนตอบนั่งที่เดิม แขกยืนหน้าโต๊ะ (พ้นโต๊ะไป 1 ช่อง) หรือช่องว่างข้าง ๆ
+    const dir = home.dir;
+    const v = VEC[dir];
+    const flip: Record<Dir, Dir> = { up: 'down', down: 'up', left: 'right', right: 'left' };
+    const cands: Tile[] = [
+      { x: host.seat.x + v.x * 2, y: host.seat.y + v.y * 2 },
+      { x: host.seat.x - v.x, y: host.seat.y - v.y },
+      { x: host.seat.x + v.y, y: host.seat.y + v.x }, { x: host.seat.x - v.y, y: host.seat.y - v.x },
+    ];
+    const g = cands.find(freeTile) ?? cands[0];
+    const gd: Dir = g.x === host.seat.x + v.x * 2 && g.y === host.seat.y + v.y * 2 ? flip[dir]
+      : g.x < host.seat.x ? 'right' : g.x > host.seat.x ? 'left' : g.y < host.seat.y ? 'down' : 'up';
+    return { guest: g, guestDir: gd, host: host.seat, hostDir: flip[gd], hostSit: true };
   }
 
   /** สร้างแขกที่ประตูสวน - คืน id (สุ่มหน้าตาจากชื่อ จะได้คนเดิมหน้าเดิมถ้าถามซ้ำ) */
@@ -681,7 +880,7 @@ export class World {
     const g = this.employees.find((x) => x.id === visitorId);
     const h = this.employees.find((x) => x.id === hostId);
     if (!g) return;
-    if (!h) { await this.walk(g, IDLE_SPOTS[3].x, IDLE_SPOTS[3].y); return; }
+    if (!h) { const sp = this.pickSpot(g, this.idleSpots()); if (sp) await this.walk(g, sp.x, sp.y); return; }
     const spot = this.visitorSpots(h);
     h.busy = true; h.path = null; h.after = null;
     this.clearSay([h.id]);
@@ -707,12 +906,13 @@ export class World {
     const g = this.employees.find((x) => x.id === visitorId);
     if (!g) return;
     g.path = null; g.after = null;
-    const free = SOFA_SEATS.find((s) => !this.employees.some((o) => o !== g && o.tx === s.x && o.ty === s.y));
+    const free = this.pickSpot(g, this.lay.loungeSeats().filter((q) => q.item.kind === 'sofa'));
     if (free) {
+      const dir = this.lay.loungeSeats().find((q) => q.x === free.x && q.y === free.y)?.dir ?? 'down';
       await this.walk(g, free.x, free.y);
-      this.sitAt(g, free.x, free.y, 'down', 'lounge', Number.POSITIVE_INFINITY);
+      this.sitAt(g, free.x, free.y, dir, 'lounge', Number.POSITIVE_INFINITY);
     } else {
-      const spot = IDLE_SPOTS[4] ?? { x: 20, y: 10 };
+      const spot = this.pickSpot(g, this.idleSpots()) ?? { x: g.tx, y: g.ty };
       await this.walk(g, spot.x, spot.y);
       g.pose = 'stand'; g.dir = 'left'; g.state = 'idle';
     }
@@ -744,7 +944,7 @@ export class World {
         h.bubble = null; h.bubbleT = 0;
         h.path = null; h.after = null;
         this.goTo(h, h.seat.x, h.seat.y, () => {
-          this.sitAt(h, h.seat.x, h.seat.y, seatDir(h.seat), 'work', 6 + Math.random() * 6);
+          this.sitAt(h, h.seat.x, h.seat.y, this.seatDirOf(h), 'work', 6 + Math.random() * 6);
           h.busy = false;
         });
       }
@@ -768,34 +968,37 @@ export class World {
 
     if (roll < 0.36) {
       this.goTo(e, e.seat.x, e.seat.y, () => {
-        this.sitAt(e, e.seat.x, e.seat.y, seatDir(e.seat), 'work', 10 + Math.random() * 16);
+        this.sitAt(e, e.seat.x, e.seat.y, this.seatDirOf(e), 'work', 10 + Math.random() * 16);
         if (Math.random() < 0.5) { e.bubble = 'type'; e.bubbleT = 2; }
       });
     } else if (roll < 0.5) {
-      this.goTo(e, COOLER_STAND.x, COOLER_STAND.y, () => {
+      const spot = this.pickSpot(e, this.lay.spots('cooler'));
+      if (!spot) { e.timer = 2; return; }
+      this.goTo(e, spot.x, spot.y, () => {
         e.pose = 'stand'; e.dir = 'up'; e.state = 'coffee';
         e.timer = 3 + Math.random() * 4; e.bubble = 'coffee'; e.bubbleT = 3;
       });
     } else if (roll < 0.6) {
-      const spot = rnd(PANTRY_TABLE);
+      const spot = this.pickSpot(e, this.lay.spots('counter'));
+      if (!spot) { e.timer = 2; return; }
       this.goTo(e, spot.x, spot.y, () => {
         e.pose = 'stand'; e.dir = 'up'; e.state = 'eat';
         e.timer = 5 + Math.random() * 6; e.bubble = 'food'; e.bubbleT = 4;
       });
     } else if (roll < 0.72) {
-      const free = [...SOFA_SEATS, ...SOFA2_SEATS].filter((s) => !this.employees.some((o) => o !== e && o.tx === s.x && o.ty === s.y));
-      if (free.length) {
-        const s = rnd(free);
+      const seats = this.lay.loungeSeats();
+      const s = this.pickSpot(e, seats);
+      if (s) {
+        const dir = seats.find((q) => q.x === s.x && q.y === s.y)?.dir ?? 'down';
         this.goTo(e, s.x, s.y, () => {
-          this.sitAt(e, s.x, s.y, 'down', 'lounge', 6 + Math.random() * 8);
+          this.sitAt(e, s.x, s.y, dir, 'lounge', 6 + Math.random() * 8);
           e.bubble = 'music'; e.bubbleT = 3;
         });
       } else e.timer = 2;
     } else if (roll < 0.86) {
       if (Math.random() < 0.6) {
-        const free = BENCH_SEATS.filter((s) => !this.employees.some((o) => o !== e && o.tx === s.x && o.ty === s.y));
-        if (free.length) {
-          const s = rnd(free);
+        const s = this.pickSpot(e, this.lay.benchSeats());
+        if (s) {
           this.goTo(e, s.x, s.y, () => {
             this.sitAt(e, s.x, s.y, 'down', 'bench', 10 + Math.random() * 12);
             e.bubble = rnd<BubbleIcon>(['music', 'idea', 'coffee']); e.bubbleT = 3;
@@ -803,13 +1006,15 @@ export class World {
           return;
         }
       }
-      const s = rnd(POND_SPOTS);
+      const s = this.pickSpot(e, this.lay.pondSpots());
+      if (!s) { e.timer = 2; return; }
       this.goTo(e, s.x, s.y, () => {
         e.pose = 'stand'; e.dir = 'right'; e.state = 'pond';
         e.timer = 6 + Math.random() * 8; e.bubble = 'idea'; e.bubbleT = 3;
       });
     } else if (roll < 0.93) {
-      const s = rnd(IDLE_SPOTS);
+      const s = this.pickSpot(e, this.idleSpots());
+      if (!s) { e.timer = 2; return; }
       this.goTo(e, s.x, s.y, () => {
         e.pose = 'stand'; e.state = 'idle'; e.timer = 2 + Math.random() * 4;
       });
@@ -943,9 +1148,23 @@ export class World {
     for (let y = 0; y < MH; y++) {
       for (let x = 0; x < MW; x++) ctx.drawImage(tileSprite(GROUND[y][x], x, y, wf), x * TS, y * TS);
     }
-    // ลายพื้นต้องมาหลังปูกระเบื้อง แต่ก่อนเงาผนังกับของทุกชิ้น
-    FLOOR_DECALS.forEach((d) => ctx.drawImage(decalSprite(d), d.x * TS, d.y * TS));
-    WALL_DECOR.forEach((d) => ctx.drawImage(decorSprite(d.type), d.x * TS, d.y * TS));
+    // ลายพื้น (พรม/ตรา) ต้องมาหลังปูกระเบื้อง แต่ก่อนเงาผนังกับของทุกชิ้น - ตราวาดโลโก้ทับถ้ามี
+    this.lay.decals.forEach((d) => {
+      // กรอบโลโก้แสดงเฉพาะตอนยังไม่มีรูป (หรือในโหมดจัด) - มีรูปแล้ววาดรูปอย่างเดียว
+      const hasLogo = !!(this.logoImg && this.logoImg.complete && this.logoImg.naturalWidth > 0);
+      if (d.type !== 'logo' || !hasLogo || this.editOn) ctx.drawImage(decalSprite(d), d.x * TS, d.y * TS);
+      if (d.type === 'logo' && hasLogo) this.drawLogoInto(ctx, d.x * TS + 1, d.y * TS + 1, d.w * TS - 2, d.h * TS - 2);
+    });
+    this.lay.wallDecor.forEach((d) => {
+      if (d.type !== 'logo') { ctx.drawImage(decorSprite(d.type), d.x * TS, d.y * TS); return; }
+      // ป้ายโลโก้ติดผนัง: กรอบทอง พื้นครีม แล้ววาดรูปโลโก้ให้พอดี
+      const w = (d.w ?? 1) * TS, h = (d.h ?? 1) * TS, x0 = d.x * TS, y0 = d.y * TS;
+      ctx.fillStyle = '#3a2c1a'; ctx.fillRect(x0 + 1, y0 + 2, w - 2, h - 3);
+      ctx.fillStyle = '#f0e2c0'; ctx.fillRect(x0 + 2, y0 + 3, w - 4, h - 5);
+      ctx.fillStyle = '#d8b060'; ctx.fillRect(x0 + 1, y0 + 2, w - 2, 1); ctx.fillRect(x0 + 1, y0 + 2, 1, h - 3);
+      ctx.fillStyle = '#a07830'; ctx.fillRect(x0 + 1, y0 + h - 2, w - 2, 1); ctx.fillRect(x0 + w - 2, y0 + 2, 1, h - 3);
+      this.drawLogoInto(ctx, x0 + 3, y0 + 4, w - 6, h - 7);
+    });
 
     ctx.fillStyle = 'rgba(20,10,0,.13)';
     for (let y = 1; y < MH; y++) {
@@ -964,12 +1183,13 @@ export class World {
     ctx.drawImage(this.floor(wf), 0, 0);
 
     type Item =
-      | { sort: number; kind: 'obj'; o: (typeof OBJECTS)[number] }
+      | { sort: number; kind: 'obj'; o: MapObject }
       | { sort: number; kind: 'emp'; e: Employee };
     const list: Item[] = [];
-    OBJECTS.forEach((o) => {
+    this.objs.forEach((o) => {
       const seat = o.type === 'chair' || o.type === 'sofa' || o.type === 'bench';
-      list.push({ sort: o.y * TS + TS - (seat ? 0.5 : 0), kind: 'obj', o });
+      // ระดับซ้อนที่ผู้ใช้ตั้ง (zb) เลื่อนความลึกทีละแถว - ค่าเริ่มต้นเรียงตามแถวจริง
+      list.push({ sort: (o.y + (o.zb ?? 0)) * TS + TS - (seat ? 0.5 : 0), kind: 'obj', o });
       // เก้าอี้ที่คนหันหลัง/หันข้าง: พนักพิงส่วนที่อยู่ "หน้า" คนต้องวาดทับตัวคน ไม่งั้นดูเหมือนยืนหน้าเก้าอี้
       if (o.type === 'chair' && o.dir && o.dir !== 'down') {
         list.push({ sort: o.y * TS + TS + 0.5, kind: 'obj', o: { ...o, type: 'chairfront' } });
@@ -982,6 +1202,8 @@ export class World {
       if (it.kind === 'obj') {
         const s = objSprite(it.o);
         ctx.drawImage(s.c, it.o.x * TS - (s.ox ?? 0), it.o.y * TS - s.oy);
+        // ป้ายตั้งพื้น: วาดโลโก้ลงแผ่นป้าย (กินสองช่อง) - ต้องวาดหลังสไปรต์ช่องขวา (part 1) ไม่งั้นแผ่นป้ายช่องขวาทับโลโก้ครึ่งหนึ่ง
+        if (it.o.type === 'logostand' && (it.o.part ?? 0) === 1) this.drawLogoInto(ctx, (it.o.x - 1) * TS + 3, it.o.y * TS - 7, 2 * TS - 6, 10);
       } else {
         const e = it.e;
         ctx.fillStyle = 'rgba(0,0,0,.20)';
@@ -1009,6 +1231,8 @@ export class World {
       if (e.bubble) drawBubble(ctx, (e.px - 2) | 0, (e.py - 38) | 0, e.bubble);
     });
 
+    if (this.editOn) this.renderEdit(ctx);
+
     /* ---- ส่งลงจอจริงผ่านกล้อง ---- */
     const s = this.sctx;
     s.setTransform(1, 0, 0, 1, 0, 0);
@@ -1026,19 +1250,15 @@ export class World {
     const plateSize = clamp(Math.round(3.4 * z), 9, 30);
     s.textAlign = 'center';
     s.font = `700 ${plateSize}px "Segoe UI","Noto Sans Thai",sans-serif`;
-    // ป้ายทุกแผนก: ห้องแถวล่างติดเหนือประตู, PR ติดเหนือเคาน์เตอร์กลางล็อบบี้
-    // แสดงแม้ยังไม่ได้จ้างใคร - บอกได้ว่าห้องนี้ของใคร
-    const plates = Object.entries(ROOM_OF_DEPT).map(([deptId, ri]) => {
-      const room = ROOMS[ri];
-      return { deptId, bx: (room.rect.x + room.rect.w / 2) * TS, by: room.rect.y * TS - 6 };
-    });
-    plates.push({ deptId: 'pr', bx: (PR_SEATS[0].x + 1) * TS, by: (PR_SEATS[0].y - 1) * TS - 2 });
-    plates.forEach(({ deptId, bx, by }) => {
+    // ป้ายแผนก = ชิ้น deptsign ในผัง (ผู้ใช้ย้ายได้) - วาดกลางช่องของป้าย
+    const plates = this.lay.deptSigns().map((d) => ({ deptId: d.dept, text: d.text, bx: (d.x + 0.5) * TS, by: (d.y + 0.5) * TS + 4 }));
+    plates.forEach(({ deptId, text, bx, by }) => {
       const d = DEPT_BY_ID.get(deptId);
       if (!d) return;
       const cx = bx * z + ox;
       const cy = by * z + oy;
-      const label = d.shortTh;
+      // ข้อความที่ผู้ใช้ตั้งเองมาก่อน ไม่ตั้ง = ชื่อย่อแผนก
+      const label = text || d.shortTh;
       const w = s.measureText(label).width + plateSize;
       s.fillStyle = 'rgba(10,14,20,.72)';
       s.fillRect(cx - w / 2, cy - plateSize, w, plateSize * 1.5);
@@ -1330,6 +1550,526 @@ export class World {
     this.raf = requestAnimationFrame(this.frame);
   };
 
+
+  /* ============================================================
+     ผังเฟอร์นิเจอร์ - API ให้หน้าเว็บ + สิ่งที่พฤติกรรมพนักงานต้องถาม
+     ============================================================ */
+
+  /** จุดในรายการที่ (1) ว่าง (2) ไม่มีคนอื่นยืน/นั่ง (3) เดินไปถึงได้ - สุ่มมาหนึ่งจุด, null ถ้าไม่มี */
+  private pickSpot<T extends Tile>(e: Employee, spots: T[]): T | null {
+    const ok = spots.filter((t) =>
+      tileFree(t.x, t.y)
+      && !this.employees.some((o) => o !== e && o.tx === t.x && o.ty === t.y)
+      && findPath(e.tx, e.ty, t.x, t.y) !== null);
+    return ok.length ? rnd(ok) : null;
+  }
+
+  private refreshLayoutIndex() {
+    this.lay.index();
+    this.objs = [...this.lay.objs];
+    this.roomLeftCache = null;
+    this.floorLayer = [null, null, null, null]; // พื้น/พรม/ของบนผนัง อยู่ในชั้นพื้นที่ cache ไว้
+    this.syncLogo();
+    this.repathWalkers();
+  }
+
+  /** วาดโลโก้ให้พอดีกรอบ (contain, กึ่งกลาง) - ไม่มีรูปก็ไม่วาด */
+  private drawLogoInto(ctx: CanvasRenderingContext2D, x: number, y: number, W: number, H: number) {
+    const img = this.logoImg;
+    if (!img || !img.complete || img.naturalWidth <= 0 || W <= 0 || H <= 0) return;
+    const fit = this.lay.layout.logoFit ?? 'contain';
+    ctx.imageSmoothingEnabled = true;
+    if (fit === 'stretch') {
+      ctx.drawImage(img, x, y, W, H);
+    } else if (fit === 'cover') {
+      // เต็มกรอบ ตัดส่วนเกินตรงกลาง
+      const k = Math.max(W / img.naturalWidth, H / img.naturalHeight);
+      const sw = W / k, sh = H / k;
+      ctx.drawImage(img, (img.naturalWidth - sw) / 2, (img.naturalHeight - sh) / 2, sw, sh, x, y, W, H);
+    } else {
+      const k = Math.min(W / img.naturalWidth, H / img.naturalHeight);
+      const w = Math.max(1, Math.round(img.naturalWidth * k)), h = Math.max(1, Math.round(img.naturalHeight * k));
+      ctx.drawImage(img, x + Math.round((W - w) / 2), y + Math.round((H - h) / 2), w, h);
+    }
+    ctx.imageSmoothingEnabled = false;
+  }
+  /** วิธีใส่โลโก้ในกรอบ (ทุกป้าย) */
+  setLogoFit(fit: 'contain' | 'cover' | 'stretch') {
+    if ((this.lay.layout.logoFit ?? 'contain') === fit) return;
+    this.lay.layout.logoFit = fit;
+    this.commitLayout('user');
+  }
+  getLogoFit(): 'contain' | 'cover' | 'stretch' { return this.lay.layout.logoFit ?? 'contain'; }
+
+  /** โหลดรูปโลโก้จากผัง (ครั้งเดียวต่อค่า) - โหลดเสร็จค่อยวาดชั้นพื้นใหม่ */
+  private syncLogo() {
+    const src = this.lay.layout.logo ?? null;
+    if (src === this.logoSrc) return;
+    this.logoSrc = src;
+    if (!src) { this.logoImg = null; return; }
+    const img = new Image();
+    img.onload = () => { if (this.logoSrc === src) this.floorLayer = [null, null, null, null]; };
+    img.src = src;
+    this.logoImg = img;
+  }
+
+  /** ผังเปลี่ยนโดยเครื่องนี้ - ออก rev ใหม่ สร้างดัชนี แล้วบอกหน้าเว็บให้บันทึก */
+  private commitLayout(cause: LayoutCause) {
+    this.lay.layout.rev = newItemId();
+    this.refreshLayoutIndex();
+    const snap = cloneLayout(this.lay.layout);
+    this.layoutListeners.forEach((f) => f(snap, cause));
+    this.emitEdit();
+  }
+
+  /** ของเพิ่งถูกวาง/ย้าย - คนที่กำลังเดินให้คิดเส้นทางใหม่ (ทางเก่าอาจถูกขวาง) */
+  private repathWalkers() {
+    for (const e of this.employees) {
+      if (!e.path?.length) continue;
+      const goal = e.path[e.path.length - 1];
+      const np = findPath(e.tx, e.ty, goal.x, goal.y);
+      if (np && np.length) e.path = np;
+      // หาทางไม่เจอ = ปล่อยเดินทางเดิม (กฎวางกันไม่ให้จุดสำคัญถูกตัดขาดอยู่แล้ว - เกิดได้เฉพาะจุดสุ่ม)
+    }
+  }
+
+  /** ผังปัจจุบัน (สำเนา) */
+  getLayout(): OfficeLayout { return cloneLayout(this.lay.layout); }
+  /** ตรวจผังปัจจุบันตามกฎทั้งหมด (ใช้ในเทสต์/ดีบัก) */
+  validateLayout(): Verdict { return this.lay.validate(this.lay.items, new Set(), null); }
+
+  /**
+   * ใช้ผังชุดใหม่ (โหลดจาก DB / realtime จากเครื่องอื่น / รีเซ็ต) แล้วจัดคนให้ตรงกับผัง
+   * เจ้าของโต๊ะเปลี่ยนที่ -> ย้ายที่นั่ง, พนักงานที่ไม่มีโต๊ะในผังนี้ -> หาโต๊ะให้ (แก้ผังต่อ = commit ออกไปให้บันทึก)
+   */
+  setLayout(next: OfficeLayout, cause: LayoutCause = 'sync') {
+    this.lay.set(cloneLayout(next));
+    this.editSel = this.lay.item(this.editSel ?? '') ? this.editSel : null;
+    this.editDrag = null; this.ghost = null;
+    let changed = false;
+    const ids = new Set(this.staff.map((e) => e.id));
+    for (const it of this.lay.items) {
+      if ((it.kind === 'desk' || it.kind === 'chair') && it.owner && it.owner !== 'boss' && it.owner !== 'secretary' && !ids.has(it.owner)) { it.owner = null; changed = true; }
+    }
+    // บอส/เลขาฯ: ผังนี้ไม่มีที่นั่งให้ (ผังเก่า/พัง) - ตั้งเก้าอี้ให้ที่ตำแหน่งที่จำไว้ หรือวางเก้าอี้ใหม่
+    for (const who of ['boss', 'secretary'] as const) {
+      const e = this.employees.find((x) => x.id === who);
+      if (!e || this.lay.seatItemOf(who)) continue;
+      const at = this.lay.items.find((i) => i.kind === 'chair' && !i.owner && !this.lay.isRoleChair(i) && i.x === e.seat.x && i.y === e.seat.y);
+      if (at) { at.owner = who; changed = true; continue; }
+      const it: LayoutItem = { id: newItemId(), kind: 'chair', x: e.seat.x, y: e.seat.y, dir: e.dir, v: who === 'boss' ? 1 : 2, owner: who };
+      this.lay.layout.items.push(it); changed = true;
+    }
+    for (const e of this.employees) {
+      if (e.isVisitor) continue;
+      let it = this.lay.seatItemOf(e.id);
+      if (!it) {
+        const c = this.claimSeat(e.deptId, e.id, e.seat);
+        if (c) { changed = changed || c.changed; it = this.lay.seatItemOf(e.id); if (!it) { this.moveSeat(e, c.seat); continue; } }
+      }
+      if (it) { const st = seatOf(it)!; this.moveSeat(e, { x: st.x, y: st.y }); }
+    }
+    if (changed) this.commitLayout(cause === 'sync' ? 'user' : cause);
+    else { this.refreshLayoutIndex(); if (cause !== 'sync') { const snap = cloneLayout(this.lay.layout); this.layoutListeners.forEach((f) => f(snap, cause)); } }
+    this.emitEdit();
+  }
+
+  /** ย้ายที่นั่งประจำของคน - นั่งอยู่ที่เดิมก็เดินไปที่ใหม่, ติดงานอยู่ก็แค่จำไว้ (กลับมาแล้วไปเอง) */
+  private moveSeat(e: Employee, seat: Tile) {
+    const same = e.seat.x === seat.x && e.seat.y === seat.y;
+    e.seat = { ...seat };
+    const dir = this.seatDirOf(e);
+    if (same) {
+      // แค่หมุน - หันตามโต๊ะถ้านั่งอยู่
+      if (e.pose === 'sit' && e.tx === seat.x && e.ty === seat.y) e.dir = dir;
+      return;
+    }
+    if (!e.isBoss && !e.isSecretary) this.seatListeners.forEach((f) => f(e.id, { ...seat }));
+    // บอส busy ตลอด (ไม่ใช่ AI สุ่ม) - ย้ายบ้านตอนไม่ได้ประชุมให้เดินไปนั่งที่ใหม่
+    if (e.isBoss) {
+      if (e.state === 'work') { e.path = null; e.after = null; this.goTo(e, seat.x, seat.y, () => this.sitAt(e, seat.x, seat.y, this.seatDirOf(e), 'work', Number.POSITIVE_INFINITY)); }
+      return;
+    }
+    if (e.busy) return;
+    if (e.state === 'work' || e.state === 'walk' || e.isSecretary) {
+      e.path = null; e.after = null;
+      this.goTo(e, seat.x, seat.y, () => this.sitAt(e, seat.x, seat.y, this.seatDirOf(e), 'work', 8 + Math.random() * 8));
+    }
+  }
+
+  onLayoutChange(f: (l: OfficeLayout, cause: LayoutCause) => void): () => void {
+    this.layoutListeners.add(f);
+    return () => { this.layoutListeners.delete(f); };
+  }
+  onSeatChange(f: (id: string, seat: Tile) => void): () => void {
+    this.seatListeners.add(f);
+    return () => { this.seatListeners.delete(f); };
+  }
+  onEditChange(f: (s: EditSnapshot) => void): () => void {
+    this.editListeners.add(f);
+    f(this.editSnapshot());
+    return () => { this.editListeners.delete(f); };
+  }
+
+  /* ---------- โหมดจัดออฟฟิศ ---------- */
+
+  editSnapshot(): EditSnapshot {
+    const it = this.editSel ? this.lay.item(this.editSel) : null;
+    const spec = it ? FURN[it.kind] : null;
+    return {
+      on: this.editOn,
+      selected: it && spec ? {
+        id: it.id, kind: it.kind, label: spec.label + (it.kind === 'deptsign' && it.dept ? ` · ${DEPT_BY_ID.get(it.dept)?.shortTh ?? it.dept}` : ''),
+        dir: it.dir ?? null, owner: it.owner ?? null, dept: it.dept ?? null,
+        signText: it.kind === 'deptsign' ? { value: it.text ?? null, fallback: (it.dept && DEPT_BY_ID.get(it.dept)?.shortTh) || '' } : null,
+        rotates: !!spec.rotates,
+        // ที่นั่งประจำตั้งได้กับโต๊ะทำงาน และเก้าอี้ที่ไม่ใช่เก้าอี้ประชุม/หัวโต๊ะ (เก้าอี้ PR ตั้งได้ - คนนั่งเคาน์เตอร์)
+        canOwn: it.kind === 'desk' || (it.kind === 'chair' && it.tag !== 'meethead' && !this.lay.meetSeats().some((m) => m.item.id === it.id)),
+        canDelete: !spec.unique && !it.owner,
+        size: spec.resizable ? { w: it.w ?? spec.resizable.defW, h: it.h ?? spec.resizable.defH, minW: spec.resizable.minW, maxW: spec.resizable.maxW, minH: spec.resizable.minH, maxH: spec.resizable.maxH } : null,
+        zOrder: spec.decal ? (() => { const all = this.lay.decalItems(); return { index: all.findIndex((d) => d.id === it.id), total: all.length }; })() : null,
+        depth: !spec.decal && !spec.ghost && !spec.wallOnly ? (it.z ?? 0) : null,
+      } : null,
+      placing: this.editPlacing?.kind ?? null,
+      painting: this.editPaint,
+      tool: this.editPlacing ? 'place' : this.editPaint ? 'paint' : 'select',
+      logo: this.lay.layout.logo ?? null,
+      logoFit: this.lay.layout.logoFit ?? 'contain',
+      message: this.editMsg,
+      itemCount: this.lay.items.length,
+    };
+  }
+  private emitEdit() { const snap = this.editSnapshot(); this.editListeners.forEach((f) => f(snap)); }
+  private say_(msg: string | null) { this.editMsg = msg; this.emitEdit(); }
+
+  isEditMode() { return this.editOn; }
+  setEditMode(on: boolean) {
+    if (this.editOn === on) return;
+    this.editOn = on;
+    this.editSel = null; this.editPlacing = null; this.editPaint = null; this.paintDown = false; this.editDrag = null; this.ghost = null; this.hover = null; this.editMsg = null;
+    this.canvas.classList.toggle('editing', on);
+    this.canvas.classList.remove('painting');
+    this.canvas.style.cursor = '';
+    this.emitEdit();
+  }
+  editSelect(id: string | null) {
+    this.editSel = id && this.lay.item(id) ? id : null;
+    this.editPlacing = null; this.editPaint = null; this.ghost = null;
+    this.say_(null);
+  }
+  /** เริ่มถือของใหม่ - คลิกบนแผนที่เพื่อวาง (Esc ยกเลิก) - ป้ายแผนกต้องระบุ dept */
+  editStartPlace(kind: FurnKind, extra: { dept?: string } = {}) {
+    if (!this.editOn) return;
+    const spec = FURN[kind];
+    if (this.lay.items.length >= 400) { this.say_('ของเยอะเกินไปแล้ว (400 ชิ้น) - ลบบางชิ้นก่อน'); return; }
+    if ((spec.unique || spec.single) && this.lay.items.some((i) => i.kind === kind)) {
+      const ex = this.lay.items.find((i) => i.kind === kind)!;
+      this.editSel = ex.id; this.editPlacing = null; this.editPaint = null;
+      this.say_(`${spec.label} มีได้ชิ้นเดียว - เลือกชิ้นเดิมให้แล้ว ลากไปที่ใหม่ได้เลย`);
+      return;
+    }
+    this.editSel = null; this.editPaint = null;
+    this.editPlacing = { kind, dir: kind === 'chair' ? 'down' : 'up', v: spec.variants ? Math.floor(Math.random() * spec.variants) : 0, ...(extra.dept ? { dept: extra.dept } : {}) };
+    this.ghost = null;
+    this.say_(`คลิกบนแผนที่เพื่อวาง${spec.label}${spec.rotates ? ' (R หมุน)' : ''}${spec.wallOnly ? ' - วางบนช่องผนัง' : ''} - Esc ยกเลิก`);
+  }
+  /** เริ่มทาสีพื้น/ผนัง - ลากบนแผนที่ (Esc เลิก) */
+  editStartPaint(code: string) {
+    if (!this.editOn || !tileSpec(code)) return;
+    this.editSel = null; this.editPlacing = null; this.ghost = null;
+    this.editPaint = code;
+    this.canvas.classList.add('painting');
+    this.say_(`ลากบนแผนที่เพื่อระบาย "${tileSpec(code)!.label}" - Esc/คลิกขวา กลับโหมดเลือก`);
+  }
+  /** กลับโหมด "เลือก/ย้าย" - วางของ/ระบายอยู่ก็เลิก (คงชิ้นที่เลือกไว้) */
+  editSelectTool() {
+    this.editPlacing = null; this.editPaint = null; this.paintDown = false; this.ghost = null;
+    this.canvas.classList.remove('painting');
+    this.say_(null);
+  }
+  editCancel() {
+    if (this.editPlacing) { this.editPlacing = null; this.ghost = null; this.say_(null); return; }
+    if (this.editPaint) { this.editPaint = null; this.paintDown = false; this.canvas.classList.remove('painting'); this.say_(null); return; }
+    if (this.editSel) { this.editSel = null; this.say_(null); }
+  }
+  /** ระบายช่องเดียว - ผ่านกฎค่อยลง (ของบนช่องต้องยังถูกชนิด ทุกอย่างยังเดินถึง) */
+  private paintAt(x: number, y: number) {
+    const code = this.editPaint;
+    if (!code || x < 0 || y < 0 || x >= MW || y >= MH) return;
+    if (this.lay.ground[y][x] === code) return;
+    const v = this.lay.validatePaint(x, y, code, this.occupiedTiles());
+    if (!v.ok) { this.editMsg = `ระบายไม่ได้: ${v.reason}`; this.emitEdit(); return; }
+    this.lay.layout.ground = this.lay.withPaint(x, y, code);
+    this.editMsg = null;
+    this.commitLayout('user');
+  }
+  /** ตั้ง/ลบโลโก้บริษัท (data URL) */
+  setLogo(dataUrl: string | null) {
+    if (dataUrl && (!dataUrl.startsWith('data:image/') || dataUrl.length > MAX_LOGO_CHARS)) { this.say_('โลโก้ใหญ่เกินไป - ย่อรูปแล้วลองใหม่'); return; }
+    this.lay.layout.logo = dataUrl;
+    // ยังไม่มีชิ้น "โลโก้" บนพื้น - วางให้ทับตรา (หรือกลางล็อบบี้) แล้วเลือกไว้ให้ลาก/ย่อขยายต่อ
+    if (dataUrl && !this.lay.items.some((i) => i.kind === 'logo')) {
+      const rs = FURN.logo.resizable!;
+      const emblem = this.lay.items.find((i) => i.kind === 'emblem');
+      const cands: Tile[] = [emblem ? { x: emblem.x, y: emblem.y } : { x: 9, y: 9 }, { x: 9, y: 9 }, { x: 14, y: 9 }, { x: 4, y: 12 }];
+      for (const c of cands) {
+        const it: LayoutItem = { id: newItemId(), kind: 'logo', x: c.x, y: c.y, w: rs.defW, h: rs.defH };
+        if (this.lay.validate(this.lay.withAdded(it), new Set(), it.id).ok) { this.lay.layout.items.push(it); if (this.editOn) this.editSel = it.id; break; }
+      }
+    }
+    this.commitLayout('user');
+  }
+  /**
+   * เลื่อนลำดับซ้อนของชิ้นชั้นพื้นที่เลือก (พรม/ตรา/โลโก้): +1 ขึ้นหน้า, -1 ลงหลัง, 'top'/'bottom' สุดขั้ว
+   * ทำโดยตั้ง z ใหม่ให้ทุกชิ้นชั้นพื้นตามลำดับปัจจุบันแล้วสลับ - เข้าใจง่าย บันทึกได้
+   */
+  editZ(dir: 1 | -1 | 'top' | 'bottom') {
+    const it = this.editSel ? this.lay.item(this.editSel) : null;
+    if (!it) return;
+    const spec = FURN[it.kind];
+    if (!spec.decal) {
+      // ของทั่วไป: ระดับซ้อนเป็นตัวเลื่อนความลึก -3..3 (ไม่ต้องเรียงกับชิ้นอื่น)
+      if (spec.ghost || spec.wallOnly) return;
+      const cur = it.z ?? 0;
+      const next = dir === 'top' ? 3 : dir === 'bottom' ? -3 : Math.max(-3, Math.min(3, cur + dir));
+      if (next === cur) return;
+      it.z = next === 0 ? undefined : next;
+      this.say_(null);
+      this.commitLayout('user');
+      return;
+    }
+    const all = this.lay.decalItems();
+    const i = all.findIndex((d) => d.id === it.id);
+    if (i < 0) return;
+    const j = dir === 'top' ? all.length - 1 : dir === 'bottom' ? 0 : Math.max(0, Math.min(all.length - 1, i + dir));
+    if (j === i) return;
+    all.splice(i, 1); all.splice(j, 0, it);
+    all.forEach((d, n) => { d.z = n; });
+    this.say_(null);
+    this.commitLayout('user');
+  }
+  /** ระดับซ้อนของของทั่วไปกลับเป็นอัตโนมัติ */
+  editZReset() {
+    const it = this.editSel ? this.lay.item(this.editSel) : null;
+    if (!it || FURN[it.kind].decal || it.z === undefined) return;
+    it.z = undefined;
+    this.commitLayout('user');
+  }
+  /** ตั้งข้อความบนป้ายแผนกที่เลือก - ว่าง = กลับไปใช้ชื่อย่อแผนก */
+  editSetSignText(text: string) {
+    const it = this.editSel ? this.lay.item(this.editSel) : null;
+    if (!it || it.kind !== 'deptsign') return;
+    const t = text.trim().slice(0, MAX_SIGN_TEXT);
+    if ((it.text ?? '') === t) return;
+    if (t) it.text = t; else delete it.text;
+    this.commitLayout('user');
+  }
+  /** ย่อ/ขยายชิ้นที่เลือก (โลโก้) ทีละช่อง - ผ่านกฎค่อยลง */
+  editResize(dw: number, dh: number) {
+    const it = this.editSel ? this.lay.item(this.editSel) : null;
+    const rs = it ? FURN[it.kind].resizable : null;
+    if (!it || !rs) return;
+    const w = Math.min(rs.maxW, Math.max(rs.minW, (it.w ?? rs.defW) + dw));
+    const h = Math.min(rs.maxH, Math.max(rs.minH, (it.h ?? rs.defH) + dh));
+    if (w === (it.w ?? rs.defW) && h === (it.h ?? rs.defH)) return;
+    const trial = this.lay.items.map((i) => (i.id === it.id ? { ...i, w, h } : i));
+    const v = this.lay.validate(trial, this.occupiedTiles(), it.id);
+    if (!v.ok) { this.say_(`ขยายไม่ได้: ${v.reason}`); return; }
+    it.w = w; it.h = h;
+    this.say_(null);
+    this.commitLayout('user');
+  }
+  getLogo(): string | null { return this.lay.layout.logo ?? null; }
+  /** กรอบห้องประชุม/โต๊ะบอส (px) - กล้องอัตโนมัติใช้ */
+  meetingRect(): Rect { return this.lay.meetRect() ?? { x: 9 * TS, y: 0, w: 17 * TS, h: 8 * TS }; }
+  bossRect(): Rect { return this.lay.bossRect() ?? { x: 0, y: 0, w: 10 * TS, h: 7 * TS }; }
+  editRotate() {
+    if (this.editPlacing) {
+      if (FURN[this.editPlacing.kind].rotates) { this.editPlacing.dir = nextDir(this.editPlacing.dir); this.updateGhost(); }
+      return;
+    }
+    const it = this.editSel ? this.lay.item(this.editSel) : null;
+    if (!it || !FURN[it.kind].rotates) return;
+    const dir = nextDir(it.dir ?? 'up');
+    const v = this.lay.validate(this.lay.withMoved(it.id, it.x, it.y, dir), this.occupiedTiles(), it.id, it.owner ? this.tileOf(it.owner) : null);
+    if (!v.ok) { this.say_(`หมุนไม่ได้: ${v.reason}`); return; }
+    it.dir = dir;
+    this.afterItemChanged(it);
+    this.commitLayout('user');
+  }
+  editDelete() {
+    const it = this.editSel ? this.lay.item(this.editSel) : null;
+    if (!it) return;
+    if (it.owner) {
+      const who = this.employees.find((e) => e.id === it.owner);
+      this.say_(`ที่นั่งนี้เป็นของ${who ? who.name : 'คน'} - เปลี่ยน "คนนั่ง" เป็นว่าง (ย้ายเขาไปที่อื่นก่อน) แล้วค่อยลบ`);
+      return;
+    }
+    if (FURN[it.kind].unique) { this.say_(`${FURN[it.kind].label} ลบไม่ได้ - ลากไปที่ใหม่แทน`); return; }
+    // ลบแล้วผังต้องยังผ่านกฎ (เช่นเก้าอี้ประชุมต้องเหลือ ≥ 2, โต๊ะประชุมต้องมี)
+    const v = this.lay.validate(this.lay.withRemoved(it.id), new Set(), null);
+    if (!v.ok) { this.say_(`ลบไม่ได้: ${v.reason}`); return; }
+    this.lay.layout.items = this.lay.layout.items.filter((i) => i.id !== it.id);
+    this.editSel = null;
+    this.say_(null);
+    this.commitLayout('user');
+  }
+  /** ให้คนนี้นั่งที่นั่งนี้ประจำ (สลับกับคนเดิมถ้ามี) - null = ปล่อยว่าง (ต้องไม่ทำให้ใครไร้ที่นั่ง) */
+  editAssignSeat(itemId: string, employeeId: string | null): boolean {
+    const it = this.lay.item(itemId);
+    if (!it || (it.kind !== 'desk' && it.kind !== 'chair')) return false;
+    if (it.kind === 'chair' && (it.tag === 'meethead' || this.lay.meetSeats().some((m) => m.item.id === it.id))) {
+      this.say_('เก้าอี้ประชุม/หัวโต๊ะใช้เป็นที่นั่งประจำไม่ได้ - ย้ายออกจากโต๊ะประชุมก่อน'); return false;
+    }
+    const prevOwner = it.owner ? this.employees.find((e) => e.id === it.owner) ?? null : null;
+    if (!employeeId) {
+      if (prevOwner) { this.say_(`${prevOwner.name} ต้องมีที่นั่ง - เลือกคนอื่นมานั่งแทน หรือย้ายเขาไปที่ว่างก่อน`); return false; }
+      return true;
+    }
+    const e = this.employees.find((x) => x.id === employeeId && !x.isVisitor);
+    if (!e) return false;
+    if (it.owner === e.id) return true;
+    const mine = this.lay.seatItemOf(e.id);
+    // สลับ: คนเดิมของที่นั่งนี้ไปนั่งที่เก่าของเรา (ถ้ามี) - ห้ามมีใครไร้ที่นั่ง
+    if (prevOwner && !mine) { this.say_(`${prevOwner.name} จะไม่มีที่นั่ง - ย้าย${prevOwner.name}ไปที่ว่างก่อน`); return false; }
+    if (mine) mine.owner = prevOwner ? prevOwner.id : null;
+    it.owner = e.id;
+    if (prevOwner && mine) { const st = seatOf(mine)!; this.moveSeat(prevOwner, { x: st.x, y: st.y }); }
+    const st = seatOf(it)!;
+    this.moveSeat(e, { x: st.x, y: st.y });
+    this.say_(null);
+    this.commitLayout('user');
+    return true;
+  }
+  /** คืนผังเริ่มต้น - พนักงานที่มีจะถูกจัดที่นั่งใหม่ในห้องแผนกตัวเอง */
+  editReset() {
+    const fresh = defaultLayout();
+    fresh.logo = this.lay.layout.logo ?? null; // โลโก้ไม่ใช่ "ผัง" - คงไว้
+    this.editSel = null; this.editPlacing = null; this.ghost = null;
+    this.setLayout(fresh, 'user');
+    this.say_('คืนผังเริ่มต้นแล้ว');
+  }
+  /** ชิ้นที่พนักงานคนนี้ยืน/นั่งอยู่ - ใช้ยกเว้นตอนตรวจ "ทับคน" ให้เจ้าของโต๊ะที่กำลังย้าย */
+  private tileOf(empId: string): string | null {
+    const e = this.employees.find((x) => x.id === empId);
+    return e ? key(e.tx, e.ty) : null;
+  }
+  /** ที่นั่งย้าย/หมุนแล้ว - เจ้าของตามไป */
+  private afterItemChanged(it: LayoutItem) {
+    if (!it.owner) return;
+    const st = seatOf(it);
+    const e = this.employees.find((x) => x.id === it.owner);
+    if (e && st) this.moveSeat(e, { x: st.x, y: st.y });
+  }
+
+  private tileAtClient(clientX: number, clientY: number): Tile {
+    const d = this.toDev(clientX, clientY);
+    const wx = this.cam.x + d.x / this.cam.z;
+    const wy = this.cam.y + d.y / this.cam.z;
+    return { x: Math.floor(wx / TS), y: Math.floor(wy / TS) };
+  }
+
+  /** คำนวณ ghost ใหม่จาก hover ปัจจุบัน (ตอนลาก/ถือของ) */
+  private updateGhost() {
+    const h = this.hover;
+    if (!h) { this.ghost = null; return; }
+    if (this.editPlacing) {
+      const it: LayoutItem = { id: '__ghost__', kind: this.editPlacing.kind, x: h.x, y: h.y, dir: this.editPlacing.dir, v: this.editPlacing.v, ...(this.editPlacing.dept ? { dept: this.editPlacing.dept } : {}) };
+      const verdict = this.lay.validate(this.lay.withAdded(it), this.occupiedTiles(), it.id);
+      this.ghost = { x: h.x, y: h.y, dir: it.dir!, kind: it.kind, v: it.v ?? 0, verdict };
+      return;
+    }
+    if (this.editDrag) {
+      const it = this.lay.item(this.editDrag.id);
+      if (!it) { this.ghost = null; return; }
+      const x = h.x - this.editDrag.ox, y = h.y - this.editDrag.oy;
+      if (x !== it.x || y !== it.y) this.editDrag.moved = true;
+      const verdict = this.lay.validate(this.lay.withMoved(it.id, x, y), this.occupiedTiles(), it.id, it.owner ? this.tileOf(it.owner) : null);
+      this.ghost = { x, y, dir: it.dir ?? 'up', kind: it.kind, v: it.v ?? 0, verdict };
+    }
+  }
+
+  /** ปล่อยเมาส์ตอนลาก/วาง - ลงมือจริงถ้าผ่านกฎ */
+  private editDrop() {
+    const g = this.ghost;
+    if (this.editPlacing) {
+      if (!g) return;
+      if (!g.verdict.ok) { this.say_(`วางไม่ได้: ${g.verdict.reason}`); return; }
+      const rs = FURN[g.kind].resizable;
+      const it: LayoutItem = { id: newItemId(), kind: g.kind, x: g.x, y: g.y, ...(FURN[g.kind].rotates ? { dir: g.dir } : {}), v: g.v, ...(this.editPlacing.dept ? { dept: this.editPlacing.dept } : {}), ...(rs ? { w: rs.defW, h: rs.defH } : {}) };
+      this.lay.layout.items.push(it);
+      this.editPlacing = null; this.ghost = null;
+      this.editSel = it.id;
+      this.say_(null);
+      this.commitLayout('user');
+      return;
+    }
+    if (this.editDrag) {
+      const it = this.lay.item(this.editDrag.id);
+      const moved = this.editDrag.moved;
+      this.editDrag = null;
+      if (!it) { this.ghost = null; return; }
+      if (moved && g) {
+        if (!g.verdict.ok) { this.ghost = null; this.say_(`วางไม่ได้: ${g.verdict.reason}`); return; }
+        it.x = g.x; it.y = g.y;
+        this.afterItemChanged(it);
+        this.ghost = null;
+        this.say_(null);
+        this.commitLayout('user');
+      } else {
+        this.ghost = null;
+        this.emitEdit();
+      }
+    }
+  }
+
+  /** วาดชั้นจัดออฟฟิศ: ตาราง, กรอบชิ้นที่เลือก, ghost เขียว/แดง, ช่องที่มีปัญหา */
+  private renderEdit(ctx: CanvasRenderingContext2D) {
+    ctx.save();
+    // ตารางบาง ๆ บนพื้นเท่านั้น
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
+      const c = GROUND[y][x];
+      if (c === '#' || c === 'G' || c === '~') continue;
+      ctx.fillRect(x * TS, y * TS, TS, 1); ctx.fillRect(x * TS, y * TS, 1, TS);
+    }
+    const outline = (tiles: Tile[], color: string) => {
+      ctx.strokeStyle = color; ctx.lineWidth = 1;
+      for (const t of tiles) ctx.strokeRect(t.x * TS + 0.5, t.y * TS + 0.5, TS - 1, TS - 1);
+    };
+    const sel = this.editSel ? this.lay.item(this.editSel) : null;
+    if (sel && !this.editDrag) outline(footprint(sel).map((f) => ({ x: f.x, y: f.y })), '#ffd166');
+    if (this.hover && !this.ghost) {
+      if (this.editPaint) {
+        // ตัวอย่างสีที่กำลังจะระบาย
+        ctx.globalAlpha = 0.8;
+        ctx.drawImage(tileSprite(this.editPaint, this.hover.x, this.hover.y, 0), this.hover.x * TS, this.hover.y * TS);
+        ctx.globalAlpha = 1;
+        outline([this.hover], '#8fe0a0');
+      } else outline([this.hover], 'rgba(255,255,255,0.45)');
+    }
+    const g = this.ghost;
+    if (g) {
+      const it: LayoutItem = { id: '__ghost__', kind: g.kind, x: g.x, y: g.y, dir: g.dir, v: g.v };
+      const fp = footprint(it);
+      ctx.fillStyle = g.verdict.ok ? 'rgba(80,220,120,0.35)' : 'rgba(230,70,70,0.40)';
+      for (const f of fp) ctx.fillRect(f.x * TS, f.y * TS, TS, TS);
+      ctx.globalAlpha = 0.75;
+      for (const f of fp) {
+        if (f.layer === 'obj' && f.obj) { const s = objSprite(f.obj); ctx.drawImage(s.c, f.x * TS - (s.ox ?? 0), f.y * TS - s.oy); }
+        else if (f.layer === 'decal' && f.decal) ctx.drawImage(decalSprite(f.decal), f.x * TS, f.y * TS);
+        else if (f.layer === 'wall' && f.wall) ctx.drawImage(decorSprite(f.wall), f.x * TS, f.y * TS);
+      }
+      ctx.globalAlpha = 1;
+      if (!g.verdict.ok && g.verdict.bad.size) {
+        ctx.fillStyle = 'rgba(230,70,70,0.45)';
+        for (const k of g.verdict.bad) { const [x, y] = k.split(',').map(Number); ctx.fillRect(x * TS, y * TS, TS, TS); }
+      }
+      outline(fp.map((f) => ({ x: f.x, y: f.y })), g.verdict.ok ? '#8fe0a0' : '#ff7a7a');
+    }
+    ctx.restore();
+  }
+
   /* ============================================================
      กล้อง / อินพุต
      ============================================================ */
@@ -1476,6 +2216,27 @@ export class World {
     const onDown = (ev: PointerEvent) => {
       cv.setPointerCapture(ev.pointerId);
       ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+      // โหมดจัดออฟฟิศ: กดบนของ = เริ่มลากชิ้นนั้น (ไม่เลื่อนกล้อง) / ถือของอยู่ = รอปล่อยเพื่อวาง
+      if (this.editOn && ev.button === 2) return; // คลิกขวาจัดการที่ contextmenu
+      if (this.editOn && ptrs.size === 1 && ev.button === 0) {
+        const t = this.tileAtClient(ev.clientX, ev.clientY);
+        this.hover = t;
+        if (this.editPaint) { this.paintDown = true; this.paintAt(t.x, t.y); moved = 0; drag = null; return; }
+        if (this.editPlacing) { this.updateGhost(); moved = 0; drag = null; return; }
+        // ของซ้อนกัน (เช่นโต๊ะบนพรม): คลิกครั้งแรกได้ชิ้นบน คลิกซ้ำที่เดิมวนไปชิ้นถัดไปข้างล่าง
+        const stack = this.lay.allAt(t.x, t.y);
+        const curIdx = this.editSel ? stack.findIndex((i) => i.id === this.editSel) : -1;
+        const hit = stack.length ? stack[curIdx >= 0 ? (curIdx + 1) % stack.length : 0] : null;
+        if (hit) {
+          this.editSel = hit.id;
+          this.editDrag = { id: hit.id, ox: t.x - hit.x, oy: t.y - hit.y, moved: false };
+          this.ghost = null;
+          this.say_(null);
+          moved = 0; drag = null;
+          cv.classList.add('grabbing');
+          return;
+        }
+      }
       if (ptrs.size === 1) { moved = 0; drag = { sx: ev.clientX, sy: ev.clientY, cx: this.cam.x, cy: this.cam.y }; }
       else if (ptrs.size === 2) {
         drag = null;
@@ -1485,6 +2246,22 @@ export class World {
       cv.classList.add('grabbing');
     };
     const onMove = (ev: PointerEvent) => {
+      if (this.editOn) {
+        const t = this.tileAtClient(ev.clientX, ev.clientY);
+        if (!this.hover || this.hover.x !== t.x || this.hover.y !== t.y) {
+          const prev = this.hover;
+          this.hover = t;
+          // โหมดเลือก: ชี้โดนของ = มือจับ (บอกว่าลาก/คลิกได้)
+          if (!this.editPlacing && !this.editPaint && !this.editDrag) cv.style.cursor = this.lay.at(t.x, t.y) ? 'grab' : '';
+          if (this.editPlacing || this.editDrag) this.updateGhost();
+          // ลากเร็ว pointer กระโดดข้ามช่อง - ระบายทุกช่องบนเส้นระหว่างจุดก่อนกับจุดนี้ (เส้นผนังจะได้ไม่มีรู)
+          if (this.editPaint && this.paintDown) {
+            if (prev) for (const q of lineTiles(prev, t)) this.paintAt(q.x, q.y);
+            else this.paintAt(t.x, t.y);
+          }
+        }
+        if (this.editDrag || (this.editPaint && this.paintDown)) return; // ลากของ/ระบายอยู่ ไม่เลื่อนกล้อง
+      }
       if (!ptrs.has(ev.pointerId)) return;
       ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
       if (pinch && ptrs.size >= 2) {
@@ -1510,8 +2287,20 @@ export class World {
     const onUp = (ev: PointerEvent) => {
       ptrs.delete(ev.pointerId);
       if (ptrs.size < 2) pinch = null;
+      if (this.editOn && ptrs.size === 0 && this.editPaint) { this.paintDown = false; drag = null; cv.classList.remove('grabbing'); return; }
+      if (this.editOn && ptrs.size === 0 && (this.editDrag || this.editPlacing)) {
+        this.hover = this.tileAtClient(ev.clientX, ev.clientY);
+        this.updateGhost();
+        this.editDrop();
+        drag = null;
+        cv.classList.remove('grabbing');
+        return;
+      }
       if (ptrs.size === 0) {
-        if (drag && moved <= 3) {
+        if (this.editOn && drag && moved <= 3) {
+          // คลิกที่ว่างในโหมดจัด = ยกเลิกการเลือก
+          this.editSel = null; this.say_(null);
+        } else if (drag && moved <= 3) {
           const d = this.toDev(ev.clientX, ev.clientY);
           const wx = this.cam.x + d.x / this.cam.z;
           const wy = this.cam.y + d.y / this.cam.z;
@@ -1525,8 +2314,35 @@ export class World {
       }
     };
     const onResize = () => this.resize();
+    const onLeave = () => { if (this.editOn && !this.editDrag && !this.editPlacing) this.hover = null; };
+    // คลิกขวา = กลับโหมดเลือก (เลิกถือของ/ระบาย) ไม่เปิดเมนูเบราว์เซอร์
+    const onContext = (ev: MouseEvent) => { if (!this.editOn) return; ev.preventDefault(); this.editSelectTool(); };
+    // ดับเบิลคลิกของที่หมุนได้ = หมุน (ไม่ต้องหาปุ่ม R)
+    const onDbl = (ev: MouseEvent) => {
+      if (!this.editOn || this.editPlacing || this.editPaint) return;
+      const t = this.tileAtClient(ev.clientX, ev.clientY);
+      const hit = this.lay.at(t.x, t.y);
+      if (hit && FURN[hit.kind].rotates) { this.editSel = hit.id; this.editRotate(); }
+    };
+    // คีย์ลัดโหมดจัด: R หมุน, Delete ลบ, Esc ยกเลิก - ไม่ทำงานตอนพิมพ์ในช่องข้อความ
+    const onKey = (ev: KeyboardEvent) => {
+      if (!this.editOn) return;
+      const tag = (document.activeElement?.tagName ?? '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || (document.activeElement as HTMLElement | null)?.isContentEditable) return;
+      if (ev.key === 'r' || ev.key === 'R') { this.editRotate(); ev.preventDefault(); }
+      else if (ev.key === ']') { this.editResize(1, 0); ev.preventDefault(); }
+      else if (ev.key === '[') { this.editResize(-1, 0); ev.preventDefault(); }
+      else if (ev.key === '=' || ev.key === '+') { this.editResize(0, 1); ev.preventDefault(); }
+      else if (ev.key === '-' || ev.key === '_') { this.editResize(0, -1); ev.preventDefault(); }
+      else if (ev.key === 'Delete' || ev.key === 'Backspace') { this.editDelete(); ev.preventDefault(); }
+      else if (ev.key === 'Escape') { this.editCancel(); ev.preventDefault(); }
+    };
 
     cv.addEventListener('wheel', onWheel, { passive: false });
+    cv.addEventListener('pointerleave', onLeave);
+    cv.addEventListener('contextmenu', onContext);
+    cv.addEventListener('dblclick', onDbl);
+    window.addEventListener('keydown', onKey);
     cv.addEventListener('pointerdown', onDown);
     cv.addEventListener('pointermove', onMove);
     cv.addEventListener('pointerup', onUp);
@@ -1535,6 +2351,10 @@ export class World {
 
     this.cleanups.push(() => {
       cv.removeEventListener('wheel', onWheel);
+      cv.removeEventListener('pointerleave', onLeave);
+      cv.removeEventListener('contextmenu', onContext);
+      cv.removeEventListener('dblclick', onDbl);
+      window.removeEventListener('keydown', onKey);
       cv.removeEventListener('pointerdown', onDown);
       cv.removeEventListener('pointermove', onMove);
       cv.removeEventListener('pointerup', onUp);
@@ -1544,4 +2364,4 @@ export class World {
   }
 }
 
-export { BOSS_DESK };
+

@@ -160,6 +160,16 @@ canvas.screen {
 canvas.grabbing {
   cursor: grabbing;
 }
+/* โหมดจัดออฟฟิศ - เคอร์เซอร์เป็นลูกศรเลือกของ */
+canvas.screen.editing {
+  cursor: crosshair;
+}
+canvas.screen.editing.grabbing {
+  cursor: grabbing;
+}
+canvas.screen.editing.painting {
+  cursor: cell;
+}
 
 @keyframes caret {
   50% {

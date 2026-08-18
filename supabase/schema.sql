@@ -197,6 +197,18 @@ create index if not exists meeting_event_office_idx on public.meeting_event (off
 create index if not exists office_token_office_idx on public.office_token (office_id);
 
 -- ============================================================
+-- ผังเฟอร์นิเจอร์ของออฟฟิศ (จัดโต๊ะ/เก้าอี้/ของตกแต่งเองแบบ Stardew) - หนึ่งแถวต่อออฟฟิศ
+-- data = { v, rev, items: [{ id, kind, x, y, dir?, v?, owner? }] } - owner = employee.id ที่นั่งโต๊ะนั้น
+-- ทุกจอที่เปิดออฟฟิศเดียวกันเห็นตรงกันผ่าน Realtime
+-- ============================================================
+create table if not exists public.office_layout (
+  office_id   uuid primary key references public.office(id) on delete cascade,
+  data        jsonb not null default '{}',
+  updated_by  uuid references auth.users(id) on delete set null,
+  updated_at  timestamptz not null default now()
+);
+
+-- ============================================================
 -- ชุดคีย์/โมเดลของออฟฟิศ - สำเนาของ "คีย์ของฉัน" ในเบราว์เซอร์ (ชุดคีย์, ใครใช้ชุดไหน)
 -- เอาไว้ให้ MCP / LINE / API ใช้โมเดลรายคนเหมือนหน้าเว็บ (เดิมเส้นพวกนั้นเห็นแต่ .env)
 -- คีย์ถูกเข้ารหัส (AES-256-GCM) ด้วย secret ของเซิร์ฟเวอร์ก่อนลง - อ่าน/เขียนผ่านเซิร์ฟเวอร์เท่านั้น
@@ -262,6 +274,7 @@ alter table public.meeting_event enable row level security;
 alter table public.office_token  enable row level security;
 -- office_llm: เปิด RLS แต่ไม่มี policy = เบราว์เซอร์อ่าน/เขียนตรงไม่ได้เลย (มีแต่ secret key ฝั่งเซิร์ฟเวอร์ที่ผ่าน)
 alter table public.office_llm    enable row level security;
+alter table public.office_layout enable row level security;
 alter table public.office_profile   enable row level security;
 alter table public.office_dept_note enable row level security;
 alter table public.office_product   enable row level security;
@@ -308,6 +321,16 @@ create policy employee_select on public.employee
 
 drop policy if exists employee_write on public.employee;
 create policy employee_write on public.employee
+  for all
+  using (public.is_office_member(office_id))
+  with check (public.is_office_member(office_id));
+
+-- office_layout: กฎเดียวกับ employee - สมาชิกจ้างคนได้ (= เพิ่มโต๊ะ) จึงต้องแก้ผังได้ด้วย
+drop policy if exists office_layout_select on public.office_layout;
+create policy office_layout_select on public.office_layout
+  for select using (public.is_office_member(office_id));
+drop policy if exists office_layout_write on public.office_layout;
+create policy office_layout_write on public.office_layout
   for all
   using (public.is_office_member(office_id))
   with check (public.is_office_member(office_id));
@@ -456,5 +479,11 @@ begin
     where pubname = 'supabase_realtime' and tablename = 'meeting'
   ) then
     alter publication supabase_realtime add table public.meeting;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'office_layout'
+  ) then
+    alter publication supabase_realtime add table public.office_layout;
   end if;
 end $$;

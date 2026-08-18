@@ -746,6 +746,24 @@ function drawSign(): Sprite {
   P(g, 4, 20, 8, 1, '#3c8438');
   return { c: o.c, oy: 6 };
 }
+/**
+ * ป้ายตั้งพื้นสำหรับโลโก้ - 2 ช่อง (part 0 ซ้าย, 1 ขวา): แผ่นป้ายกรอบทองบนเสาคู่ พื้นป้ายสีเข้ม
+ * ตัวรูปโลโก้ world วาดทับตรงกลางแผ่นตอน render (ต่อออฟฟิศ ไม่ cache รวมกับ sprite)
+ */
+function drawLogoStand(part: number): Sprite {
+  const o = mk(16, 26), g = o.g;
+  const L = part === 0;
+  // เสา
+  P(g, L ? 3 : 11, 14, 2, 10, '#5a3a20'); P(g, L ? 3 : 11, 14, 1, 10, '#7a5030');
+  // แผ่นป้าย - ต่อกัน 2 ช่อง (ซ้ายมีขอบซ้าย ขวามีขอบขวา)
+  P(g, L ? 1 : 0, 2, L ? 15 : 15, 12, '#3a2c1a');
+  P(g, L ? 2 : 0, 3, L ? 14 : 14, 10, '#f0e2c0');
+  P(g, L ? 1 : 0, 2, L ? 15 : 15, 1, '#d8b060'); P(g, L ? 1 : 0, 13, L ? 15 : 15, 1, '#a07830');
+  if (L) { P(g, 1, 2, 1, 12, '#d8b060'); } else { P(g, 15, 2, 1, 12, '#a07830'); }
+  // เงาใต้ป้าย
+  P(g, L ? 2 : 0, 24, L ? 14 : 14, 1, 'rgba(0,0,0,0.25)');
+  return { c: o.c, oy: 10 };
+}
 function drawLamp(): Sprite {
   const o = mk(16, 30), g = o.g;
   P(g, 7, 8, 2, 19, '#4a5058'); P(g, 7, 8, 1, 19, '#68707a'); P(g, 5, 26, 6, 2, '#3a4048');
@@ -796,6 +814,7 @@ export function objSprite(o: MapObject): Sprite {
     case 'flower': s = drawFlower(o.v ?? 0); break;
     case 'bench': s = drawBench(); break;
     case 'sign': s = drawSign(); break;
+    case 'logostand': s = drawLogoStand(o.part ?? 0); break;
     case 'lamp': s = drawLamp(); break;
     default: s = { c: mk(16, 16).c, oy: 0 };
   }
@@ -884,7 +903,7 @@ export function decorSprite(type: string): HTMLCanvasElement {
 const decalCache = new Map<string, HTMLCanvasElement>();
 
 export interface FloorDecal {
-  type: 'rug' | 'emblem' | 'mat';
+  type: 'rug' | 'emblem' | 'mat' | 'logo';
   x: number; y: number; w: number; h: number;
   color?: string;
 }
@@ -959,6 +978,10 @@ export function decalSprite(d: FloorDecal): HTMLCanvasElement {
     paintRug(g, w, h, d.color ?? '#7fb4d8');
   } else if (d.type === 'emblem') {
     paintEmblem(g, w, h);
+  } else if (d.type === 'logo') {
+    // กรอบจาง ๆ ให้เห็นว่าโลโก้อยู่ตรงนี้ - รูปจริง world วาดทับ (มีรูปแล้วกรอบนี้จมหายไปเอง)
+    P(g, 0, 0, w, 1, 'rgba(255,255,255,0.18)'); P(g, 0, h - 1, w, 1, 'rgba(0,0,0,0.18)');
+    P(g, 0, 0, 1, h, 'rgba(255,255,255,0.18)'); P(g, w - 1, 0, 1, h, 'rgba(0,0,0,0.18)');
   } else {
     // พรมเช็ดเท้าหน้าประตู
     P(g, 0, 0, w, h, '#8f3f3c'); P(g, 1, 1, w - 2, h - 2, '#c2564f');

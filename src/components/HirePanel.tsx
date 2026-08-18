@@ -1,8 +1,7 @@
 'use client';
 
 import {
-  AlertTriangle, Cpu, Crown, LayoutGrid, List, Lock, Minus, NotebookPen, UserPlus, Users,
-} from 'lucide-react';
+  AlertTriangle, Cpu, Crown, LayoutGrid, List, Lock, Minus, NotebookPen, UserPlus, Users, Wrench } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { DEPARTMENTS } from '@/lib/departments';
 import { SECRETARY_NAME, SECRETARY_PAL } from '@/game/map';
@@ -46,7 +45,7 @@ const BUSY_STATES: AgentState[] = ['meet', 'think', 'report'];
 interface Props {
   roster: EmployeeSnapshot[];
   seatsLeft: number;
-  /** ที่ว่างในห้องของแต่ละแผนก (deptId -> จำนวน) */
+  /** ที่นั่งที่แผนกนี้จะได้ (ว่างอยู่ + วางโต๊ะเพิ่มได้ใกล้ป้ายแผนก) (deptId -> จำนวน) */
   roomLeft: Record<string, number>;
   onHire: (deptId: string, count: number) => void;
   onFire: (deptId: string) => void;
@@ -58,6 +57,8 @@ interface Props {
   /** แท็บที่เปิดอยู่ - คุมจากข้างนอก เพราะปุ่มเลขาฯ บนแถบบนต้องสั่งเปิดแท็บสมุดได้ */
   tab: string;
   onTab: (t: string) => void;
+  /** เนื้อหาแท็บ "จัดออฟฟิศ" (LayoutPanel) - หน้าเว็บเป็นคนประกอบให้ เพราะต้องคุยกับ world */
+  layoutPanel?: ReactNode;
   /** เนื้อหาแท็บสมุดเลขาฯ - ประกอบจากข้างนอก (page มีข้อมูล meetings อยู่แล้ว) */
   secretary: ReactNode;
   meetingCount: number;
@@ -84,7 +85,7 @@ type StaffView = 'card' | 'list';
 
 export default function HirePanel({
   roster, seatsLeft, roomLeft, onHire, onFire, onFocus, disabled, lock, onUnlock,
-  tab, onTab: setTab, secretary, meetingCount,
+  tab, onTab: setTab, secretary, meetingCount, layoutPanel,
   llmOptions = [], llmOf, llmDefaultLabel = 'ค่าเริ่มต้น', onLlm,
   roleLlm, onRoleLlm, llmActiveLabel = 'คีย์ของเซิร์ฟเวอร์', llmHeadLabel = llmDefaultLabel,
 }: Props) {
@@ -137,6 +138,9 @@ export default function HirePanel({
           </TabsTrigger>
           <TabsTrigger value="notes">
             <NotebookPen /> สมุดเลขาฯ{meetingCount > 0 ? ` ${meetingCount}` : ''}
+          </TabsTrigger>
+          <TabsTrigger value="layout" title="จัดโต๊ะ เก้าอี้ ของตกแต่ง">
+            <Wrench /> จัดออฟฟิศ
           </TabsTrigger>
           <Badge
             variant={seatsLeft > 0 ? 'default' : 'bad'}
@@ -405,7 +409,7 @@ export default function HirePanel({
                         size="sm"
                         onClick={() => onHire(d.id, 1)}
                         disabled={off || (roomLeft[d.id] ?? 0) < 1}
-                        title={lock?.text ?? ((roomLeft[d.id] ?? 0) < 1 ? 'ห้องแผนกนี้เต็มแล้ว' : undefined)}
+                        title={lock?.text ?? ((roomLeft[d.id] ?? 0) < 1 ? 'ไม่มีที่ว่างให้วางโต๊ะเพิ่ม - ไปแท็บจัดออฟฟิศ ลบ/ย้ายของหรือขยายพื้นที่ก่อน' : undefined)}
                                               >
                         <UserPlus /> จ้าง
                       </Button>
@@ -413,7 +417,7 @@ export default function HirePanel({
                         size="sm"
                         onClick={() => onHire(d.id, 3)}
                         disabled={off || (roomLeft[d.id] ?? 0) < 3}
-                        title={lock?.text ?? ((roomLeft[d.id] ?? 0) < 3 ? `ห้องเหลือที่ ${roomLeft[d.id] ?? 0} ที่` : undefined)}
+                        title={lock?.text ?? ((roomLeft[d.id] ?? 0) < 3 ? `เหลือที่ว่าง ${roomLeft[d.id] ?? 0} ที่` : undefined)}
                                               >
                         <Users /> ทีม 3 คน
                       </Button>
@@ -453,6 +457,11 @@ export default function HirePanel({
         </TabsContent>
 
         {/* ---------- แท็บสมุดบันทึกของเลขาฯ ---------- */}
+        {/* ---------- แท็บจัดออฟฟิศ (เนื้อหามาจากหน้าเว็บ) ---------- */}
+        <TabsContent value="layout" className="min-h-0">
+          {layoutPanel}
+        </TabsContent>
+
         <TabsContent value="notes" className="min-h-0">
           {secretary}
         </TabsContent>
