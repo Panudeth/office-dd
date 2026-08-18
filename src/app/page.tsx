@@ -31,6 +31,7 @@ import {
   type MeetingRow, type OAuthReturn, type Office, type User,
 } from '@/lib/supabase';
 import { profileIsEmpty, type CompanyContext, type Product } from '@/lib/company';
+import { syncOfficeLlm } from '@/lib/office-llm-client';
 import type { EmployeeSnapshot } from '@/game/types';
 import type { World } from '@/game/world';
 import { BOSS_RECT, MAX_STAFF, MEETING_RECT, SECRETARY_NAME, SECRETARY_PAL } from '@/game/map';
@@ -195,6 +196,17 @@ export default function Page() {
       return next;
     });
   }, []);
+  /**
+   * sync ชุดคีย์/โมเดลขึ้นเซิร์ฟเวอร์ต่อออฟฟิศ (เข้ารหัสฝั่งเซิร์ฟเวอร์) - MCP/LINE/API จะได้ใช้โมเดลรายคนเหมือนหน้าเว็บ
+   * หน่วงไว้หน่อยเพราะการตั้งค่าเปลี่ยนถี่ (เลือกโมเดลรายคนทีละคน) ไม่ต้องยิงทุกคลิก
+   * เฉพาะเจ้าของ/exec ที่เซิร์ฟเวอร์รับ - คนอื่นถูกปฏิเสธเงียบ ๆ (ไม่ใช่ error ที่เขาต้องเห็น)
+   */
+  useEffect(() => {
+    if (!office?.id || !llmStore.items.length) return;
+    const officeId = office.id;
+    const t = window.setTimeout(() => { void syncOfficeLlm(officeId, llmStore).catch(() => undefined); }, 800);
+    return () => window.clearTimeout(t);
+  }, [office?.id, llmStore]);
   /** ป้ายสำหรับแผงพนักงาน - บอกว่า "ค่าเริ่มต้น" ของลูกทีมตอนนี้คือชุดไหน */
   const memberDefault = llmStore.items.find((c) => c.id === llmStore.roles?.member) ?? llm;
   const llmDefaultLabel = memberDefault ? memberDefault.label : 'คีย์ของเซิร์ฟเวอร์';
@@ -326,12 +338,26 @@ export default function Page() {
         ? 'เลือกออฟฟิศก่อน บันทึกการประชุมผูกอยู่กับออฟฟิศ'
         : null;
 
+  /**
+   * ลายเซ็นของสถานะล่าสุดที่ส่งเข้า React - poll ทุก 400 ms แต่ setState เฉพาะตอนมีอะไรเปลี่ยนจริง
+   * เดิมสร้าง array/object ใหม่ทุกครั้ง = ทั้งหน้า (และลูกทุกตัว: แชท สมุด แผงจ้าง) re-render 2.5 ครั้ง/วิ ตลอดกาล
+   * แม้ทุกคนนั่งทำงานเฉย ๆ และยิ่งแชทสะสมมากยิ่งแพงขึ้นเรื่อย ๆ
+   */
+  const rosterSigRef = useRef('');
   const syncRoster = useCallback(() => {
     const w = worldRef.current;
     if (!w) return;
-    setRoster(w.roster());
-    setSeatsLeft(w.seatsLeft());
-    setRoomLeft(Object.fromEntries(DEPARTMENTS.map((d) => [d.id, w.seatsLeftFor(d.id)])));
+    const roster = w.roster();
+    const seats = w.seatsLeft();
+    const rooms = Object.fromEntries(DEPARTMENTS.map((d) => [d.id, w.seatsLeftFor(d.id)]));
+    // ฟิลด์ที่ UI ใช้จริง - palette เป็น object เดิมตลอดชีวิตพนักงาน ไม่ต้องเทียบ
+    const sig = `${seats}|${DEPARTMENTS.map((d) => rooms[d.id]).join(',')}|` +
+      roster.map((r) => `${r.id}:${r.state}:${r.name}:${r.title}:${r.deptId}:${r.role}:${r.color}`).join(';');
+    if (sig === rosterSigRef.current) return;
+    rosterSigRef.current = sig;
+    setRoster(roster);
+    setSeatsLeft(seats);
+    setRoomLeft(rooms);
   }, []);
 
   // เปลี่ยนออฟฟิศ = โหลดพนักงานของออฟฟิศนั้นมาแทนที่ทั้งชุด
@@ -973,7 +999,10 @@ export default function Page() {
       // คำถามตรงจากคนนอก = แขกเดินเข้ามา ไม่ใช่ประชุม (ประชุมข้ามแผนกยังเข้าห้องประชุมตามเดิม)
       // ลูกค้า (audience customer) = "ลูกค้า (ช่องทาง)"  agent ภายในที่ถามผ่าน MCP/API = "Agent (ช่องทาง)"
       const via = ev.source === 'line' ? 'LINE' : ev.source === 'mcp' ? 'MCP' : ev.source === 'api' ? 'API' : null;
-      const visitorName = !via ? null : ev.audience === 'customer' ? `ลูกค้า (${via})` : `Agent (${via})`;
+      // มีชื่อจริงจากช่องทาง (เช่นชื่อโปรไฟล์ LINE) ให้ตัวละครใช้ชื่อนั้น - ไม่มีค่อยเป็น "ลูกค้า (LINE)"
+      const visitorName = !via ? null
+        : ev.askedBy?.trim() ? ev.askedBy.trim()
+        : ev.audience === 'customer' ? `ลูกค้า (${via})` : `Agent (${via})`;
       s = openSessionRef.current({
         question: ev.question, mode: ev.mode, team, owner,
         attendees: ev.attendees, source: 'remote', serverMeetingId: meetingId,

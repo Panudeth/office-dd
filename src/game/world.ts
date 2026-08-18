@@ -71,6 +71,19 @@ export class World {
   private running = true;
   private disposed = false;
   private cleanups: (() => void)[] = [];
+  /**
+   * ชั้นพื้น (กระเบื้อง ลายพื้น ของติดผนัง เงาผนัง) ไม่เคยเปลี่ยน ยกเว้นน้ำที่มี 4 เฟรม
+   * เดิมวาดใหม่ 648 tile ทุกเฟรม (~3 ms/เฟรม ตลอดเวลาที่เปิดหน้า) - วาดครั้งเดียวต่อเฟรมน้ำแล้ว blit ทีเดียว
+   */
+  private floorLayer: (HTMLCanvasElement | null)[] = [null, null, null, null];
+  /** เฟรมล่าสุดที่วาดจริง - ใช้จำกัดเฟรมตอนออฟฟิศนิ่ง */
+  private lastRender = 0;
+  /**
+   * cache ผลตัดบรรทัดของฟองคำพูด - paginate เรียก measureText ทีละตัวอักษร (ไทยไม่มีช่องว่าง)
+   * ทั้งหน้าเปลี่ยนเฉพาะตอนพลิกหน้า/ซูม ส่วนที่พิมพ์แล้วเปลี่ยน ~42 ครั้ง/วิ ไม่ใช่ทุกเฟรม
+   */
+  private pageCache = new Map<string, { key: string; lines: string[]; used: number; wTxt: number }>();
+  private shownCache = new Map<string, { key: string; lines: string[] }>();
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -84,6 +97,14 @@ export class World {
     this.resize();
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.frame);
+    // แท็บถูกซ่อน = หยุดลูปทั้งหมด (เบราว์เซอร์หน่วง rAF ให้อยู่แล้ว แต่ตอนกลับมา dt จะกระโดด) - กลับมาค่อยเริ่มนับใหม่
+    const onVis = () => {
+      if (this.disposed) return;
+      cancelAnimationFrame(this.raf);
+      if (!document.hidden) { this.last = performance.now(); this.raf = requestAnimationFrame(this.frame); }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    this.cleanups.push(() => document.removeEventListener('visibilitychange', onVis));
   }
 
   /** ผู้บริหาร (ตัวผู้ใช้) - ปกตินั่งทำงานในห้องตัวเอง เดินมาห้องประชุมเมื่อมีวาระ */
@@ -855,6 +876,8 @@ export class World {
             } else {
               e.sayFull = ''; e.sayChars = 0; e.sayPage = 0; e.sayT = 0;
               this.pageLen.delete(e.id);
+              this.pageCache.delete(e.id);
+              this.shownCache.delete(e.id);
               this.speechGap = 0.5; // เว้นจังหวะก่อนคนถัดไปพูด
             }
           }
@@ -912,10 +935,11 @@ export class World {
     this.pumpSpeech(dt);
   }
 
-  private render() {
-    const ctx = this.ctx;
-    const wf = Math.floor(performance.now() / 200) % 4;
-
+  /** ชั้นพื้นของเฟรมน้ำ wf - วาดครั้งแรกที่ขอ แล้วใช้ซ้ำตลอด */
+  private floor(wf: number): HTMLCanvasElement {
+    const hit = this.floorLayer[wf];
+    if (hit) return hit;
+    const { c, g: ctx } = mk(BW, BH);
     for (let y = 0; y < MH; y++) {
       for (let x = 0; x < MW; x++) ctx.drawImage(tileSprite(GROUND[y][x], x, y, wf), x * TS, y * TS);
     }
@@ -930,6 +954,14 @@ export class World {
         if (GROUND[y][x] !== '#' && x > 0 && GROUND[y][x - 1] === '#') ctx.fillRect(x * TS, y * TS, 2, TS);
       }
     }
+    this.floorLayer[wf] = c;
+    return c;
+  }
+
+  private render() {
+    const ctx = this.ctx;
+    const wf = Math.floor(performance.now() / 200) % 4;
+    ctx.drawImage(this.floor(wf), 0, 0);
 
     type Item =
       | { sort: number; kind: 'obj'; o: (typeof OBJECTS)[number] }
@@ -1102,14 +1134,29 @@ export class World {
       // หน้าปัจจุบันจุได้กี่ตัวอักษร - คำนวณจากข้อความทั้งหน้า (ไม่ใช่แค่ที่พิมพ์แล้ว)
       // จะได้ไม่มีตัวอักษรกระโดดบรรทัดตอนกำลังพิมพ์ แล้วส่งให้ update ใช้ตัดสินว่าจบหน้าหรือยัง
       const rest = e.sayFull.slice(e.sayPage);
-      const full = this.paginate(s, rest, maxW - pad * 2, maxLines);
+      // ทั้งหน้า: เปลี่ยนเฉพาะตอนพลิกหน้า/ซูม/ข้อความใหม่ - cache ไว้ ไม่งั้น measureText นับร้อยครั้งทุกเฟรม
+      const fullKey = `${e.sayPage}|${fs}|${maxW}|${e.sayFull.length}`;
+      let full = this.pageCache.get(e.id);
+      if (!full || full.key !== fullKey) {
+        const pg = this.paginate(s, rest, maxW - pad * 2, maxLines);
+        full = { key: fullKey, lines: pg.lines, used: pg.used, wTxt: Math.max(0, ...pg.lines.map((l) => s.measureText(l).width)) };
+        this.pageCache.set(e.id, full);
+      }
       this.pageLen.set(e.id, full.used);
       const morePages = e.sayPage + full.used < e.sayFull.length;
       const pageDone = e.sayChars >= full.used;
 
-      const shown = rest.slice(0, Math.floor(e.sayChars));
+      const nChars = Math.floor(e.sayChars);
+      const shown = rest.slice(0, nChars);
       if (!shown) continue;
-      const { lines } = this.paginate(s, shown, maxW - pad * 2, maxLines);
+      // ส่วนที่พิมพ์แล้ว: เปลี่ยน ~42 ครั้ง/วิ (ตามความเร็วพิมพ์) ไม่ใช่ทุกเฟรม
+      const shownKey = `${fullKey}|${nChars}`;
+      let sh = this.shownCache.get(e.id);
+      if (!sh || sh.key !== shownKey) {
+        sh = { key: shownKey, lines: this.paginate(s, shown, maxW - pad * 2, maxLines).lines };
+        this.shownCache.set(e.id, sh);
+      }
+      const { lines } = sh;
       if (!lines.length) continue;
 
       // แถบชื่อในฟอง - ตอนซ้อนกันหลายฟองจะได้รู้ว่าใครพูด
@@ -1122,7 +1169,7 @@ export class World {
 
       // ขนาดฟองคิดจากข้อความทั้งหน้า ไม่ใช่แค่ที่พิมพ์แล้ว - ฟองจะได้ไม่ค่อย ๆ บวมตอนพิมพ์
       // เผื่อที่ให้ลูกศรพลิกหน้าที่มุมขวาล่างด้วย
-      const wTxt = Math.max(wName, ...full.lines.map((l) => s.measureText(l).width));
+      const wTxt = Math.max(wName, full.wTxt);
       const w = Math.ceil(wTxt + pad * 2 + (morePages ? fs * 0.9 : 0));
       const h = nameH + Math.max(1, full.lines.length) * lh + pad * 2;
       const H = this.canvas.height;
@@ -1236,12 +1283,27 @@ export class World {
     return n;
   }
 
+  /** มีอะไรขยับให้ต้องวาดเต็มสปีดไหม - ไม่มี = ออฟฟิศนิ่ง วาด 30 fps พอ (จอ 144Hz ไม่ต้องวาด 144 ครั้ง/วิ ให้คนนั่งพิมพ์งาน) */
+  private isActive(): boolean {
+    if (this.camTarget || this.follow) return true;
+    for (const e of this.employees) {
+      if (e.path?.length || e.sayT > 0 || e.owner === 'remote') return true;
+    }
+    return false;
+  }
+
   private frame = (now: number) => {
     if (this.disposed) return;
+    if (document.hidden) return; // visibilitychange จะปลุกให้เอง
     const dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
     this.blinkT += dt; // ลูกศรพลิกหน้ากะพริบแม้ตอนหยุดเกม
     if (this.running) this.update(dt);
+    if (!this.isActive() && now - this.lastRender < 33) {
+      this.raf = requestAnimationFrame(this.frame);
+      return;
+    }
+    this.lastRender = now;
 
     if (this.camTarget) {
       const k = Math.min(1, dt * 3.2);

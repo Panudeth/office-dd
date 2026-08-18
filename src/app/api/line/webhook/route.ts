@@ -43,6 +43,33 @@ async function lineApi(path: string, body: unknown, token: string) {
   if (!res.ok) console.error('[line]', path, res.status, await res.text().catch(() => ''));
 }
 
+/**
+ * ชื่อโปรไฟล์ของคนทัก - เอาไปตั้งชื่อตัวละครแขกในออฟฟิศและลงสมุด (PR จะได้เรียกชื่อลูกค้าถูกด้วย)
+ * แชท 1:1 ใช้ /profile, ในกลุ่ม/ห้องต้องผ่าน member endpoint - ดึงไม่ได้ (บล็อก OA / ไม่อนุญาต) ก็ไม่เป็นไร ใช้ชื่อกลาง
+ * จำไว้ 10 นาทีต่อ userId - คนเดียวกันทักติด ๆ กันไม่ต้องถาม LINE ซ้ำ
+ */
+const nameCache = new Map<string, { name: string; at: number }>();
+async function displayName(src: LineEvent['source'], token: string): Promise<string | null> {
+  const uid = src?.userId;
+  if (!uid) return null;
+  const hit = nameCache.get(uid);
+  if (hit && Date.now() - hit.at < 600_000) return hit.name;
+  const path = src?.type === 'group' && src.groupId ? `group/${src.groupId}/member/${uid}`
+    : src?.type === 'room' && src.roomId ? `room/${src.roomId}/member/${uid}`
+    : `profile/${uid}`;
+  try {
+    const res = await fetch(`https://api.line.me/v2/bot/${path}`, {
+      headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) return null;
+    const name = ((await res.json()) as { displayName?: string }).displayName?.trim() || null;
+    if (name) nameCache.set(uid, { name, at: Date.now() });
+    return name;
+  } catch {
+    return null;
+  }
+}
+
 /** LINE ตัดข้อความที่ 5000 ตัวอักษร - แบ่งเป็นหลายฟองถ้ายาว (สูงสุด 5 ฟองต่อครั้ง) */
 const chunks = (s: string, n = 4500) => {
   const out: string[] = [];
@@ -101,10 +128,11 @@ export async function POST(req: NextRequest) {
     // ไม่ await - ตอบ LINE ให้เร็ว แล้วค่อยทำงานต่อ (บนเซิร์ฟเวอร์ Node ธรรมดา promise นี้รันต่อจนจบ)
     void (async () => {
       try {
+        const name = await displayName(ev.source, c.token);
         // ลูกค้าได้เฉพาะ customerReply (PR ตอบเอง หรือกรองจากผลปรึกษาทีม) - บทถกภายในไม่ออกทาง LINE
         const r = await runHeadless({
           officeId: c.officeId, question, deptIds: [c.dept], audience: 'customer',
-          source: 'line', askedByLabel: `ลูกค้าทาง LINE (${ev.source?.type ?? 'user'})`,
+          source: 'line', askedByLabel: name ? `${name} (LINE)` : `ลูกค้า (LINE)`,
         });
         const answer = r.customerReply || 'ขออภัยค่ะ ตอนนี้ยังตอบไม่ได้ เดี๋ยวทีมงานติดต่อกลับนะคะ';
         await lineApi('push', { to, messages: chunks(answer).map((t) => ({ type: 'text', text: t })) }, c.token);

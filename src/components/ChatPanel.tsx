@@ -63,7 +63,15 @@ function Disclosure({
   );
 }
 
-export default function ChatPanel({ messages, busy, phase, onSend, hiredDeptIds = [] }: Props) {
+/**
+ * แชทเก็บทุกข้อความของเซสชันไว้ใน state (ไม่หาย) แต่ render เฉพาะท้ายสุด - บทประชุมยาว ๆ หลายสิบรอบ
+ * ทำให้ DOM โตจนหน้าหนืด ทั้งที่ของเก่าเปิดดูได้ในสมุดเลขาฯ อยู่แล้ว
+ */
+const MAX_RENDERED = 80;
+
+export default function ChatPanel({ messages: allMessages, busy, phase, onSend, hiredDeptIds = [] }: Props) {
+  const hidden = Math.max(0, allMessages.length - MAX_RENDERED);
+  const messages = hidden ? allMessages.slice(hidden) : allMessages;
   const [draft, setDraft] = useState('');
   /** '' = ให้เลขาฯ จัดวาระ (ประชุม), id แผนก = ถามหัวหน้าแผนกนั้นตรง ๆ */
   const [directDept, setDirectDept] = useState('');
@@ -72,7 +80,7 @@ export default function ChatPanel({ messages, busy, phase, onSend, hiredDeptIds 
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, phase]);
+  }, [allMessages, phase]); // อิง array ต้นทาง - messages ที่ slice ใหม่ทุก render จะทำให้เลื่อนจอทุกครั้ง
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -92,6 +100,9 @@ export default function ChatPanel({ messages, busy, phase, onSend, hiredDeptIds 
 
       <PanelBody>
         <div className="flex flex-1 flex-col gap-2 overflow-y-auto pr-1">
+          {hidden > 0 && (
+            <div className="text-center text-[10px] text-dim">ซ่อนข้อความเก่า {hidden} รายการ - ดูย้อนหลังได้ในสมุดเลขาฯ</div>
+          )}
           {messages.map((m) => {
             const dept = m.departmentId ? DEPT_BY_ID.get(m.departmentId) : undefined;
             const objections = m.transcript ? countObjections(m.transcript) : 0;

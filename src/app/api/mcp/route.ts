@@ -2,7 +2,7 @@ import { createMcpHandler, withMcpAuth } from 'mcp-handler';
 import { z } from 'zod';
 import { DEPARTMENTS } from '@/lib/departments';
 import { listOfficeDepartments, runHeadless } from '@/lib/headless';
-import { officeFromToken, sbAdmin } from '@/lib/supabase-admin';
+import { adminConfigured, officeFromToken, sbAdmin } from '@/lib/supabase-admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -103,7 +103,15 @@ const publicHandler = createMcpHandler(
             structuredContent: { status: 'running', meetingId: id },
           };
         }
-        if (r.error && !r.customerReply) return { ...text('ขออภัยค่ะ ตอนนี้ยังตอบไม่ได้ ทีมงานจะติดต่อกลับ'), isError: true };
+        if (r.error && !r.customerReply) {
+          // ข้อความหน้าบ้านต้องสุภาพ แต่คนดูแลระบบต้องรู้ว่าพังเพราะอะไร - ใส่ไว้ใน structuredContent + log
+          console.warn('[mcp] ask_customer_service ล้มเหลว:', r.error);
+          return {
+            ...text('ขออภัยค่ะ ตอนนี้ยังตอบไม่ได้ ทีมงานจะติดต่อกลับ'),
+            structuredContent: { status: 'error', error: r.error, meetingId: r.meetingId },
+            isError: true,
+          };
+        }
         return { ...text(r.customerReply), structuredContent: { status: 'done', answer: r.customerReply, meetingId: r.meetingId, escalated: r.escalated } };
       },
     );
@@ -270,11 +278,32 @@ const verify = async (_req: Request, bearer?: string) => {
 const authedInternal = withMcpAuth(handler, verify, { required: true });
 const authedPublic = withMcpAuth(publicHandler, verify, { required: true });
 
+/** 401/503 ที่บอกเหตุผล - withMcpAuth ตอบ "No authorization provided" เหมือนกันหมดไม่ว่าจะพลาดตรงไหน แยกสาเหตุไม่ได้ */
+const deny = (status: number, why: string) => {
+  console.warn(`[mcp] ${status}: ${why}`);
+  return Response.json({ error: status === 401 ? 'invalid_token' : 'server_error', error_description: why }, {
+    status,
+    // header ต้องเป็น ASCII - เหตุผลภาษาไทยอยู่ใน body
+    headers: status === 401 ? { 'WWW-Authenticate': 'Bearer error="invalid_token", error_description="see response body"' } : {},
+  });
+};
+
 /** เลือกชุด tool ตาม scope ของ token - token สาธารณะไม่มีทางเห็น tool ภายในเลย */
 async function route(req: Request): Promise<Response> {
-  const bearer = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
+  const rawHeader = req.headers.get('authorization')?.trim() ?? '';
+  const bearer = rawHeader.replace(/^Bearer\s+/i, '').trim();
+  if (!adminConfigured) return deny(503, 'เซิร์ฟเวอร์ยังไม่ได้ตั้ง NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SECRET_KEY - MCP ต้องใช้ Supabase');
+  if (!bearer) return deny(401, 'ไม่มี header Authorization - ต้องส่ง "Authorization: Bearer vc_..." (token จากหน้าออฟฟิศ ส่วนการเชื่อมต่อภายนอก)');
   const t = await officeFromToken(bearer);
-  return t?.scope === 'public' ? authedPublic(req) : authedInternal(req);
+  if (!t) {
+    const hint = bearer.startsWith('vc_')
+      ? 'token นี้ไม่มีในระบบ - อาจถูกเพิกถอน หรือเป็นของ Supabase โปรเจกต์อื่น (เช็ค NEXT_PUBLIC_SUPABASE_URL ของเซิร์ฟเวอร์นี้) สร้างใหม่จากหน้าออฟฟิศแล้วลองอีกครั้ง'
+      : `token ต้องขึ้นต้นด้วย vc_ (ได้รับ "${bearer.slice(0, 6)}..." ยาว ${bearer.length}) - ไม่ใช่ office id หรือคีย์ Supabase สร้างจากหน้าออฟฟิศ ส่วนการเชื่อมต่อภายนอก`;
+    return deny(401, hint);
+  }
+  // withMcpAuth ดึง token จาก "Bearer x" เท่านั้น - client ที่ส่งมาแต่ค่าดิบ ๆ ก็ให้ผ่าน (route นี้ตรวจให้แล้ว)
+  const fixed = /^Bearer\s/i.test(rawHeader) ? req : new Request(req, { headers: new Headers([...req.headers, ['authorization', `Bearer ${bearer}`]]) });
+  return t.scope === 'public' ? authedPublic(fixed) : authedInternal(fixed);
 }
 
 export { route as GET, route as POST, route as DELETE };

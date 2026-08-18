@@ -25,6 +25,8 @@ export interface PersistInput {
   chairId?: string;
   agents: AskAgent[];
   attendees: MeetingAttendeeLite[];
+  /** ป้ายชื่อผู้ถามจากช่องทางภายนอก (LINE/MCP/API) - โชว์ในสมุดและตั้งชื่อตัวละครแขก */
+  askedByLabel?: string;
 }
 
 export interface MeetingStore {
@@ -52,9 +54,10 @@ export async function persistMeeting(input: PersistInput): Promise<MeetingStore 
   }
 
   const deptIds = [...new Set(input.agents.map((a) => a.deptId))];
-  const row = {
+  const row: Record<string, unknown> = {
     office_id: input.officeId,
     asked_by: askedBy,
+    ...(input.askedByLabel ? { asked_by_label: input.askedByLabel } : {}),
     question: input.question,
     mode: input.mode,
     owner_dept: deptIds.includes(input.ownerDeptId) ? input.ownerDeptId : deptIds[0] ?? '',
@@ -66,11 +69,12 @@ export async function persistMeeting(input: PersistInput): Promise<MeetingStore 
     status: 'running',
   };
   let { data, error } = await c.from('meeting').insert(row).select('id').single();
-  // ฐานที่ยังไม่ได้รัน schema รอบล่าสุด (ไม่มี audience) - ลองแบบเก่าก่อนจะยอมแพ้ ผู้ใช้จะได้ยังเห็นการประชุมสด
-  if (error && /audience/i.test(error.message)) {
-    const { audience: _a, ...legacy } = row;
-    void _a;
-    ({ data, error } = await c.from('meeting').insert(legacy).select('id').single());
+  // ฐานที่ยังไม่ได้รัน schema รอบล่าสุด (ไม่มี asked_by_label / audience) - ตัดคอลัมน์ที่มันบ่นแล้วลองใหม่ ผู้ใช้จะได้ยังเห็นการประชุมสด
+  for (const col of ['asked_by_label', 'audience']) {
+    if (error && new RegExp(col, 'i').test(error.message) && col in row) {
+      delete row[col];
+      ({ data, error } = await c.from('meeting').insert(row).select('id').single());
+    }
   }
   if (error || !data) {
     console.error('[meeting-store] open failed:', error?.message);
@@ -135,6 +139,7 @@ export async function persistMeeting(input: PersistInput): Promise<MeetingStore 
       agents: input.agents,
       attendees: input.attendees,
       audience: input.audience ?? 'internal',
+      ...(input.askedByLabel ? { askedBy: input.askedByLabel } : {}),
     }),
     push,
     flush: async () => {

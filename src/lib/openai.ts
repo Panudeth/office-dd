@@ -65,15 +65,22 @@ function extractMessage(data: unknown): string {
  * ปลายทางในเครื่องจึงใช้ dispatcher ที่ไม่มีเพดานเวลา (เครื่องตัวเองไม่มีทางถูกยิงค้างจากคนอื่น)
  * ปลายทางบนเน็ตยังใช้ค่าปกติ เพราะรอเกิน 5 นาทีแปลว่ามีอะไรผิดจริง
  */
+type Undici = typeof import('undici');
+let undiciMod: Undici | null = null;
 let localAgent: import('undici').Agent | null = null;
-async function localDispatcher() {
-  if (!localAgent) {
+/**
+ * ต้องใช้ fetch "ของแพ็กเกจ undici" คู่กับ Agent ของมันเอง - fetch ที่ฝังใน Node ก็คือ undici
+ * แต่คนละเวอร์ชันกับที่ลงจาก npm (Node 24 = v7, แพ็กเกจ = v8) เอา Agent ข้ามเวอร์ชันไปยัดใส่
+ * global fetch จะได้ "fetch failed / invalid onRequestStart method" ทั้งที่ Ollama ตอบปกติ
+ */
+async function localFetch(): Promise<{ fetch: Undici['fetch']; dispatcher: import('undici').Agent }> {
+  if (!undiciMod) {
     // ไฟล์นี้ถูก import จากฝั่งเบราว์เซอร์ด้วย (defaultModelForBase) - ห้ามให้ bundler ลากเอา undici
     // (ซึ่งใช้ node: builtins) เข้า client bundle: บอกให้ข้าม แล้วให้ Node import จริงตอนรันฝั่งเซิร์ฟเวอร์เท่านั้น
-    const mod = await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ 'undici');
-    localAgent = new mod.Agent({ headersTimeout: 0, bodyTimeout: 0 });
+    undiciMod = (await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ 'undici')) as Undici;
   }
-  return localAgent;
+  if (!localAgent) localAgent = new undiciMod.Agent({ headersTimeout: 0, bodyTimeout: 0 });
+  return { fetch: undiciMod.fetch, dispatcher: localAgent };
 }
 
 async function callJson(
@@ -84,18 +91,24 @@ async function callJson(
 ): Promise<unknown> {
   let res: Response;
   try {
-    // dispatcher ไม่อยู่ใน RequestInit มาตรฐาน แต่ Node fetch (undici) รับ
-    const extra = isLocalBase(base) ? { dispatcher: await localDispatcher() } : {};
-    res = await fetch(`${trimBase(base)}${path}`, {
-      ...init,
-      ...(extra as RequestInit),
-      headers: {
-        'Content-Type': 'application/json',
-        // ปลายทางที่รันในเครื่องอย่าง Ollama ไม่มีคีย์ให้ใส่ - ส่ง Bearer เปล่าไปบางตัวจะ 401
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-        ...init?.headers,
-      },
-    });
+    const url = `${trimBase(base)}${path}`;
+    const headers = {
+      'Content-Type': 'application/json',
+      // ปลายทางที่รันในเครื่องอย่าง Ollama ไม่มีคีย์ให้ใส่ - ส่ง Bearer เปล่าไปบางตัวจะ 401
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      ...init?.headers,
+    };
+    if (selfHosted(base)) {
+      const { fetch: ufetch, dispatcher } = await localFetch();
+      // Response ของ undici กับของ Node หน้าตาเดียวกันในส่วนที่ใช้ (ok/status/text) - cast ให้ TS ยอม
+      res = (await ufetch(url, {
+        ...(init as Parameters<Undici['fetch']>[1]),
+        headers,
+        dispatcher,
+      })) as unknown as Response;
+    } else {
+      res = await fetch(url, { ...init, headers });
+    }
   } catch (err) {
     // ต่อไม่ติดเลย = base URL พิมพ์ผิด หรือเน็ตมีปัญหา แยกจากกรณีเซิร์ฟเวอร์ตอบ error
     throw new HttpError(0, err instanceof Error ? err.message : String(err));
@@ -170,24 +183,54 @@ export async function listOpenAiModels(creds: Creds): Promise<{ id: string; labe
  * ถ้าไม่ได้ระบุโมเดลมา ให้ถาม /models แล้วใช้ตัวแรกที่มีอยู่จริงแทน
  * cache ต่อ base URL ไว้ 60 วิ - การประชุมหนึ่งรอบยิงหลายสิบคอล ไม่ควรถามซ้ำทุกคอล
  */
-const localModelCache = new Map<string, { id: string; at: number }>();
-export const isLocalBase = (b: string) => /localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0/.test(b.toLowerCase());
+const localModelCache = new Map<string, { ids: string[]; at: number }>();
+/**
+ * ปลายทางที่ "เราดูแลเอง" - เครื่องเดียวกัน หรือเครื่องในวง LAN (Ollama เปิด "Expose to the network")
+ * ใช้ตัดสิน: ไม่บังคับคีย์, ไม่มีเพดานเวลา, ถามรายชื่อโมเดลก่อนใช้, embed ด้วย nomic
+ * IP ส่วนตัว: 10.x, 172.16-31.x, 192.168.x และชื่อ .local/.lan/.internal
+ */
+export const isLocalBase = (b: string) =>
+  /^(https?:\/\/)?(localhost|127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|[a-z0-9-]+\.(local|lan|internal))([:/]|$)/i
+    .test(b.trim());
 
-export async function resolveLocalModel(base: string, apiKey: string): Promise<string | null> {
+/** รายชื่อโมเดลที่ปลายทางในเครื่องมีจริง (cache 60 วิ) - null ถ้าถามไม่ได้ */
+async function listLocalModelIds(base: string, apiKey: string): Promise<string[] | null> {
   const hit = localModelCache.get(base);
-  if (hit && Date.now() - hit.at < 60_000) return hit.id;
+  if (hit && Date.now() - hit.at < 60_000) return hit.ids;
   try {
     const data = await callJson(base, '/models', apiKey);
     const rows = (data as { data?: unknown })?.data;
-    const first = Array.isArray(rows)
-      ? (rows.map((r) => (r as Record<string, unknown>).id).find((id) => typeof id === 'string') as string | undefined)
-      : undefined;
-    if (!first) return null;
-    localModelCache.set(base, { id: first, at: Date.now() });
-    return first;
+    const ids = Array.isArray(rows)
+      ? rows.map((r) => (r as Record<string, unknown>).id).filter((id): id is string => typeof id === 'string')
+      : [];
+    if (!ids.length) return null;
+    localModelCache.set(base, { ids, at: Date.now() });
+    return ids;
   } catch {
     return null;
   }
+}
+
+export async function resolveLocalModel(base: string, apiKey: string): Promise<string | null> {
+  return (await listLocalModelIds(base, apiKey))?.[0] ?? null;
+}
+
+/**
+ * โมเดลที่ตั้งไว้ (OPENAI_MODEL / ช่องในหน้าเว็บ) ต้องมีอยู่จริงในเครื่อง - ถ้าไม่มี (พิมพ์ผิด, ยังไม่ pull, เปลี่ยนเครื่อง)
+ * อย่าให้ทั้ง MCP/LINE/API พังเงียบเพราะ 404 ตัวเดียว: ถอยไปใช้ตัวแรกที่มีแล้วเตือนใน log แทน
+ * ชื่อไม่มี tag ให้ถือว่า :latest ตามธรรมเนียม Ollama
+ */
+const warnedFallback = new Set<string>();
+export async function ensureLocalModel(base: string, model: string, apiKey: string): Promise<string> {
+  const ids = await listLocalModelIds(base, apiKey);
+  if (!ids) return model; // ถามรายชื่อไม่ได้ - ปล่อยให้เส้นหลักรายงาน error เอง
+  if (ids.includes(model) || ids.includes(`${model}:latest`)) return model;
+  const key = `${base}|${model}`;
+  if (!warnedFallback.has(key)) {
+    warnedFallback.add(key);
+    console.warn(`[llm] ไม่พบโมเดล "${model}" ที่ ${base} (มี: ${ids.join(', ')}) - ใช้ "${ids[0]}" แทน ตั้ง OPENAI_MODEL ให้ตรงหรือ ollama pull ${model}`);
+  }
+  return ids[0];
 }
 
 /**
@@ -195,17 +238,44 @@ export async function resolveLocalModel(base: string, apiKey: string): Promise<s
  * ถามครั้งเดียวต่อ base แล้วจำไว้ - ใช้เลือกว่าจะยิง native API ได้ไหม
  */
 const ollamaCheck = new Map<string, Promise<boolean>>();
+/** root ที่พิสูจน์แล้วว่าเป็น Ollama - ให้ callJson (sync) รู้ว่าควรใช้ dispatcher ไม่มีเพดานเวลา แม้ host ไม่ใช่ LAN (เช่นผ่าน tunnel) */
+const ollamaRoots = new Set<string>();
+/** เจ้าบนคลาวด์ที่รู้จัก - ไม่ต้องเสียเวลาไปถาม /api/version */
+const KNOWN_CLOUD = /groq\.com|cerebras\.ai|openrouter\.ai|github\.ai|openai\.com|together\.xyz|fireworks\.ai|deepseek\.com|mistral\.ai|x\.ai/i;
 function isOllama(base: string): Promise<boolean> {
   const root = trimBase(base).replace(/\/v1$/i, '');
+  if (KNOWN_CLOUD.test(root)) return Promise.resolve(false);
   let p = ollamaCheck.get(root);
   if (!p) {
     p = fetch(`${root}/api/version`, { signal: AbortSignal.timeout(2500) })
       .then((r) => r.ok)
-      .catch(() => false);
+      .catch(() => false)
+      .then((ok) => { if (ok) ollamaRoots.add(root); return ok; });
     ollamaCheck.set(root, p);
   }
   return p;
 }
+/** ปลายทางที่ไม่ควรมีเพดานเวลา - LAN/เครื่องเดียวกัน หรือ Ollama ที่ตรวจเจอแล้วไม่ว่าอยู่ที่ไหน */
+const selfHosted = (base: string) => isLocalBase(base) || ollamaRoots.has(trimBase(base).replace(/\/v1$/i, ''));
+
+/**
+ * ตัด "ความคิด" ของโมเดลสาย reasoning ออกจากคำตอบ
+ * - โมเดล thinking-only (qwen3 รุ่น 2507, deepseek-r1) template บังคับเปิด <think> เสมอ สั่ง think:false ก็ไม่หยุด
+ *   แถมพอบอกว่าไม่ think Ollama ก็ไม่แยกส่วนคิดให้ - ทั้งความคิด + </think> + คำตอบเลยมาใน content ก้อนเดียว
+ * - เส้น /v1 ของบางเจ้าก็ส่ง <think>...</think> ปนมาใน content เหมือนกัน
+ * ถ้ามี </think> ให้เอาเฉพาะข้อความหลังตัวสุดท้าย (แท็กเปิดอาจไม่มี เพราะอยู่ใน prompt ฝั่ง template)
+ * ถ้าตัดแล้วว่าง = โมเดลคิดจน token หมดก่อนได้ตอบ - บอกผู้ใช้ตรง ๆ ดีกว่าโชว์ความคิดครึ่ง ๆ กลาง ๆ
+ */
+export function stripThinking(text: string): string {
+  const t = text.trim();
+  const close = t.lastIndexOf('</think>');
+  // เปิด <think> แล้วไม่ปิดเลย = ยังคิดไม่จบตอนถูกตัด ไม่มีคำตอบให้เอา
+  if (close === -1) return /^<think>/i.test(t) ? '' : t;
+  return t.slice(close + '</think>'.length).trim();
+}
+
+const THOUGHT_ONLY_MSG =
+  '(โมเดลใช้ token ไปกับการคิดจนหมดก่อนได้ตอบ - เลือกโมเดลที่ไม่ใช่สาย thinking เช่น qwen2.5, llama3.x, gemma หรือเพิ่ม max tokens)';
 
 /**
  * ยิง Ollama ผ่าน native /api/chat แทน /v1/chat/completions เพื่อสั่ง think:false ได้
@@ -238,10 +308,12 @@ async function askOllamaNative(base: string, model: string, opts: AskOptions, ap
     }
   }
   const msg = (data as { message?: { content?: string; thinking?: string } })?.message;
-  const content = typeof msg?.content === 'string' ? msg.content.trim() : '';
+  const raw = typeof msg?.content === 'string' ? msg.content.trim() : '';
+  const content = stripThinking(raw);
   if (content) return content;
-  const thinking = typeof msg?.thinking === 'string' ? msg.thinking.trim() : '';
-  return thinking || `(ไม่มีคำตอบกลับมา - done_reason: ${(data as { done_reason?: string })?.done_reason ?? 'unknown'})`;
+  // มีแต่ความคิด ไม่มีคำตอบ (คิดจน num_predict หมด) - อย่าโชว์ความคิดให้ผู้ใช้เข้าใจผิดว่าคือคำตอบ
+  if (raw || (typeof msg?.thinking === 'string' && msg.thinking.trim())) return THOUGHT_ONLY_MSG;
+  return `(ไม่มีคำตอบกลับมา - done_reason: ${(data as { done_reason?: string })?.done_reason ?? 'unknown'})`;
 }
 
 export async function askOpenAi(opts: AskOptions, creds: Creds): Promise<string> {
@@ -257,9 +329,12 @@ export async function askOpenAi(opts: AskOptions, creds: Creds): Promise<string>
     model = found;
   }
   if (!model) model = defaultModelForBase(base);
+  // Ollama ตรวจจาก /api/version ไม่ใช่จาก host - อยู่คนละเครื่อง (LAN / tunnel) ก็ได้สิทธิ์เดียวกับ localhost
+  const ollama = await isOllama(base);
+  if (isLocalBase(base) || ollama) model = await ensureLocalModel(base, model, creds.apiKey);
 
-  // Ollama ในเครื่อง: ใช้ native API เพื่อปิด thinking (เร็วกว่ามาก คำตอบไม่มีความคิดปน)
-  if (isLocalBase(base) && (await isOllama(base))) {
+  // Ollama: ใช้ native API เพื่อปิด thinking (เร็วกว่ามาก คำตอบไม่มีความคิดปน)
+  if (ollama) {
     try {
       return await askOllamaNative(base, model, opts, creds.apiKey);
     } catch (err) {
@@ -289,11 +364,13 @@ export async function askOpenAi(opts: AskOptions, creds: Creds): Promise<string>
   const choice = (data as { choices?: unknown })?.choices;
   const first = Array.isArray(choice) ? (choice[0] as Record<string, unknown>) : null;
   const message = first?.message as Record<string, unknown> | undefined;
-  const content = typeof message?.content === 'string' ? message.content.trim() : '';
+  const rawContent = typeof message?.content === 'string' ? message.content.trim() : '';
+  const content = stripThinking(rawContent);
 
   if (!content) {
     // โมเดลสาย reasoning บางตัวใส่คำตอบไว้ที่ reasoning แล้วปล่อย content ว่าง
     const reasoning = typeof message?.reasoning === 'string' ? message.reasoning.trim() : '';
+    if (rawContent) return THOUGHT_ONLY_MSG; // content มีแต่ความคิดที่ยังไม่ปิด = คิดจน token หมด
     if (reasoning) return reasoning;
     const finish = typeof first?.finish_reason === 'string' ? first.finish_reason : 'unknown';
     return `(ไม่มีคำตอบกลับมา - finish_reason: ${finish})`;

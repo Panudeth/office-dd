@@ -291,7 +291,7 @@ export default function SecretaryTab({
                     {m.audience === 'customer' && (
                       <div className="mt-1.5 rounded-box border border-brass/50 bg-wood-deep/40 px-2 py-1.5">
                         <div className="mb-0.5 text-[10px] font-semibold text-brass">
-                          ลูกค้าถาม{m.source ? ` (${m.source.toUpperCase()})` : ''} - ตอบลูกค้าว่า (สิ่งที่ลูกค้าเห็น)
+                          {m.asked_by_label ? `${m.asked_by_label} ถาม` : `ลูกค้าถาม${m.source ? ` (${m.source.toUpperCase()})` : ''}`} - ตอบลูกค้าว่า (สิ่งที่ลูกค้าเห็น)
                         </div>
                         <div className="text-[12px] leading-relaxed text-parchment-2">
                           {m.customer_reply ? fmt(m.customer_reply) : <Hint>ยังไม่ได้ตอบ</Hint>}

@@ -105,6 +105,8 @@ create table if not exists public.office_token (
 );
 -- scope: internal = agent ของเรา (ถามทุกแผนก ประชุม อ่านสมุดได้)  public = ช่องทางลูกค้า (ถาม PR ได้อย่างเดียว ไม่เห็นสมุด)
 alter table public.office_token add column if not exists scope text not null default 'internal';
+-- ป้ายชื่อผู้ถามจากช่องทางภายนอก เช่น "สมชาย (LINE)" (asked_by เป็น uuid ผู้ใช้ในระบบ ใช้กับคนนอกไม่ได้)
+alter table public.meeting add column if not exists asked_by_label text;
 alter table public.office_token drop constraint if exists office_token_scope_check;
 alter table public.office_token add constraint office_token_scope_check check (scope in ('internal', 'public'));
 
@@ -195,6 +197,18 @@ create index if not exists meeting_event_office_idx on public.meeting_event (off
 create index if not exists office_token_office_idx on public.office_token (office_id);
 
 -- ============================================================
+-- ชุดคีย์/โมเดลของออฟฟิศ - สำเนาของ "คีย์ของฉัน" ในเบราว์เซอร์ (ชุดคีย์, ใครใช้ชุดไหน)
+-- เอาไว้ให้ MCP / LINE / API ใช้โมเดลรายคนเหมือนหน้าเว็บ (เดิมเส้นพวกนั้นเห็นแต่ .env)
+-- คีย์ถูกเข้ารหัส (AES-256-GCM) ด้วย secret ของเซิร์ฟเวอร์ก่อนลง - อ่าน/เขียนผ่านเซิร์ฟเวอร์เท่านั้น
+-- ============================================================
+create table if not exists public.office_llm (
+  office_id   uuid primary key references public.office(id) on delete cascade,
+  data        jsonb not null default '{}',
+  updated_by  uuid references auth.users(id) on delete set null,
+  updated_at  timestamptz not null default now()
+);
+
+-- ============================================================
 -- ฟังก์ชันช่วย RLS
 -- ต้องเป็น security definer เพื่อ "มองข้าม" RLS ตอนเช็คสมาชิก
 -- ไม่งั้น policy ของ office_member จะเรียกตัวเองวนไม่จบ
@@ -246,6 +260,8 @@ alter table public.employee      enable row level security;
 alter table public.meeting       enable row level security;
 alter table public.meeting_event enable row level security;
 alter table public.office_token  enable row level security;
+-- office_llm: เปิด RLS แต่ไม่มี policy = เบราว์เซอร์อ่าน/เขียนตรงไม่ได้เลย (มีแต่ secret key ฝั่งเซิร์ฟเวอร์ที่ผ่าน)
+alter table public.office_llm    enable row level security;
 alter table public.office_profile   enable row level security;
 alter table public.office_dept_note enable row level security;
 alter table public.office_product   enable row level security;

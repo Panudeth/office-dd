@@ -5,6 +5,7 @@ import { embedTexts } from '@/lib/embed';
 import { DEPARTMENTS, DEPT_BY_ID, ROLE_ORDER, type AgentRole } from '@/lib/departments';
 import { deptHeadIds } from '@/lib/heads';
 import { resolveCreds, type Creds } from '@/lib/llm';
+import { loadOfficeLlm } from '@/lib/office-llm';
 import { persistMeeting } from '@/lib/meeting-store';
 import { sbAdmin } from '@/lib/supabase-admin';
 import { publicProducts, publicProfile, type CompanyContext, type Product } from '@/lib/company';
@@ -169,7 +170,10 @@ export async function runHeadless(input: HeadlessInput): Promise<HeadlessResult>
   const customer = audience === 'customer';
   // ลูกค้าถามได้ทางเดียว: ตอบตรงกับแผนกที่รับลูกค้า (PR) - escalate เป็นประชุมภายในเกิดข้างในเอง
   const mode = customer ? 'direct' : normalizeMode(input.mode ?? 'roundtable');
-  const creds = input.creds === undefined ? resolveCreds({}) : input.creds;
+  // คีย์/โมเดล: ผู้เรียกส่งมา > ชุดที่ออฟฟิศบันทึกไว้ (office_llm - เหมือนหน้าเว็บ) > .env
+  const office = input.creds === undefined ? await loadOfficeLlm(input.officeId) : { creds: null, assign: undefined };
+  const creds = input.creds === undefined ? office.creds ?? resolveCreds({}) : input.creds;
+  const assign = office.assign;
   const empty = (error: string): HeadlessResult => ({
     meetingId: null, answer: '', customerReply: '', minutes: '', transcript: [], chair: null, deptIds: [], mode,
     model: null, error, escalated: false,
@@ -206,6 +210,7 @@ export async function runHeadless(input: HeadlessInput): Promise<HeadlessResult>
   const store = await persistMeeting({
     officeId: input.officeId, trusted: true, source: input.source, audience,
     question, mode, ownerDeptId, chairId: front.id, agents: team.agents, attendees: team.attendees,
+    askedByLabel: input.askedByLabel,
   });
 
   const transcript: Opinion[] = [];
@@ -240,7 +245,7 @@ export async function runHeadless(input: HeadlessInput): Promise<HeadlessResult>
   try {
     if (!customer) {
       await runMeetingEngine({
-        question: askText, mode, ownerDeptId, chairId: front.id, agents: team.agents, company, creds, assign: undefined,
+        question: askText, mode, ownerDeptId, chairId: front.id, agents: team.agents, company, creds, assign,
       }, send);
       await finish();
       return {
@@ -252,7 +257,7 @@ export async function runHeadless(input: HeadlessInput): Promise<HeadlessResult>
     /* ---------- ลูกค้า: PR ตอบเอง หรือ escalate ไปปรึกษาทีม ---------- */
     let firstFinal = '';
     await runMeetingEngine({
-      question: askText, mode: 'direct', ownerDeptId, chairId: front.id, agents: team.agents, company, creds, customer: true,
+      question: askText, mode: 'direct', ownerDeptId, chairId: front.id, agents: team.agents, company, creds, assign, customer: true,
     }, (ev) => {
       // final ของรอบแรกอาจเป็น ESCALATE - ห้ามลง DB เป็น summary/เล่นบนจอ ตัดสินก่อน
       if (ev.type === 'final') { firstFinal = ev.text; model = ev.model ?? null; return; }
@@ -307,7 +312,7 @@ export async function runHeadless(input: HeadlessInput): Promise<HeadlessResult>
     const internalCompany = await loadCompany(input.officeId, internalQuestion, finalDeptIds, creds, false);
     await runMeetingEngine({
       question: `${internalQuestion}\n\n(บริบท: ลูกค้าถามเข้ามาว่า "${question}" - ${front.name} จาก${front.deptName}รับเรื่องมาปรึกษา)`,
-      mode: 'relay', ownerDeptId, chairId: front.id, agents: meetTeam.agents, company: internalCompany, creds,
+      mode: 'relay', ownerDeptId, chairId: front.id, agents: meetTeam.agents, company: internalCompany, creds, assign,
     }, send);
 
     // PR กรองผลประชุมเป็นคำตอบสำหรับลูกค้า

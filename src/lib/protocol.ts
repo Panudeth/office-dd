@@ -171,6 +171,8 @@ export type AskEvent =
       agents: AskAgent[];
       attendees: MeetingAttendeeLite[];
       audience?: MeetingAudience;
+      /** ป้ายชื่อผู้ถามจากช่องทางภายนอก เช่น "สมชาย (LINE)" - จอใช้ตั้งชื่อตัวละครแขก */
+      askedBy?: string;
     }
   /**
    * PR ตอบลูกค้าเองไม่ได้ ต้องปรึกษาทีมภายใน - บอกลูกค้าให้รอ แล้วเปิดประชุม (agents/chair คือทีมที่จะเข้าห้อง)

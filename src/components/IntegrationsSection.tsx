@@ -1,12 +1,13 @@
 'use client';
 
-import { Check, Copy, KeyRound, LoaderCircle, Plug, Plus, Trash2 } from 'lucide-react';
+import { Check, Copy, Cpu, KeyRound, LoaderCircle, Plug, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { accessToken, type Office } from '@/lib/supabase';
+import { clearOfficeLlm, fetchOfficeLlmStatus, type OfficeLlmStatus } from '@/lib/office-llm-client';
 import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/input';
 import { Hint } from '@/components/ui/panel';
@@ -34,6 +35,16 @@ export default function IntegrationsSection({ office }: { office: Office }) {
   /** token ที่เพิ่งสร้าง - โชว์ครั้งเดียว */
   const [fresh, setFresh] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  /** ชุดคีย์/โมเดลที่บันทึกบนเซิร์ฟเวอร์ให้ MCP/LINE/API - undefined = ยังไม่โหลด, null = ดูไม่ได้ */
+  const [llmStatus, setLlmStatus] = useState<OfficeLlmStatus | null | undefined>(undefined);
+  const loadLlm = async () => {
+    try { setLlmStatus(await fetchOfficeLlmStatus(office.id)); } catch { setLlmStatus(null); }
+  };
+  useEffect(() => { void loadLlm(); }, [office.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const clearLlm = async () => {
+    setBusy(true); setErr(null);
+    try { await clearOfficeLlm(office.id); await loadLlm(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  };
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const mcpUrl = `${origin}/api/mcp`;
@@ -173,9 +184,42 @@ export default function IntegrationsSection({ office }: { office: Office }) {
           <div className="mt-1.5 flex flex-col gap-1 text-dim">
             <div>API: <code>POST {origin}/api/office/ask</code> header <code>Authorization: Bearer &lt;token&gt;</code> body <code>{'{ "question": "...", "deptIds": ["legal"], "mode": "direct" }'}</code></div>
             <div>LINE: ตั้งใน <code>.env</code> ของเซิร์ฟเวอร์ <code>LINE_CHANNEL_SECRET</code>, <code>LINE_CHANNEL_ACCESS_TOKEN</code>, <code>LINE_OFFICE_ID={office.id}</code> แล้วชี้ Webhook URL ไปที่ <code>{origin}/api/line/webhook</code> - แผนกประชาสัมพันธ์จะตอบจากข้อมูลที่เปิดเผยได้ (โปรไฟล์ สินค้า โน้ต/เอกสารของ PR)</div>
-            <div className="text-brass-lite">ทั้ง MCP/API/LINE ใช้คีย์ LLM ของเซิร์ฟเวอร์ (.env: LLM_PROVIDER, OPENAI_BASE_URL ฯลฯ) ไม่ใช่คีย์ในเบราว์เซอร์ - และต้องตั้ง SUPABASE_SECRET_KEY ที่เซิร์ฟเวอร์</div>
           </div>
         </details>
+
+        <div className="rounded-box border border-ink-600 bg-ink-700 p-2 text-[11px]">
+          <div className="flex items-center gap-1.5">
+            <Cpu className="size-3.5 shrink-0 text-dim" />
+            <span className="text-parchment">โมเดลที่ MCP / API / LINE ใช้</span>
+            <span className="flex-1" />
+            <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px]" disabled={busy} onClick={() => void loadLlm()}>รีเฟรช</Button>
+          </div>
+          {llmStatus === undefined ? (
+            <Hint className="mt-1">กำลังโหลด</Hint>
+          ) : llmStatus?.configured ? (
+            <div className="mt-1 flex flex-col gap-1 text-dim">
+              <div>
+                ใช้ชุดคีย์/โมเดลรายคนตามที่ตั้งใน &quot;คีย์ของฉัน&quot; และแผงพนักงาน (sync อัตโนมัติ เข้ารหัสก่อนลงฐาน)
+                {llmStatus.updatedAt && <> · อัปเดต {new Date(llmStatus.updatedAt).toLocaleString('th-TH')}</>}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {llmStatus.connections.map((c) => (
+                  <Badge key={c.id} variant="good">{c.label || c.provider}{c.model ? ` · ${c.model}` : ''}{!c.hasKey && c.provider !== 'openai' ? ' (ไม่มีคีย์)' : ''}</Badge>
+                ))}
+              </div>
+              <div>
+                <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-brass-lite" disabled={busy} onClick={() => void clearLlm()}>
+                  <Trash2 className="size-3" /> ลบออกจากเซิร์ฟเวอร์ (กลับไปใช้ .env)
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Hint className="mt-1">
+              ยังไม่มีชุดคีย์บนเซิร์ฟเวอร์ - ตอนนี้ MCP/API/LINE ใช้ค่าจาก <code>.env</code> (LLM_PROVIDER, OPENAI_BASE_URL, OPENAI_MODEL)
+              เพิ่มชุดคีย์ใน &quot;คีย์ของฉัน&quot; แล้วระบบจะ sync ให้เอง (เฉพาะเจ้าของ/exec)
+            </Hint>
+          )}
+        </div>
 
         {err && <p className="rounded-box border border-wood-dark bg-wood-deep/60 px-2 py-1 text-[11px] text-brass-lite">{err}</p>}
       </div>

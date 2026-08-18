@@ -111,9 +111,13 @@ const isProvider = (v: unknown): v is ProviderId =>
 export const isLocalBase = (u: string) =>
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)([:/]|$)/i.test(u.trim());
 
-/** เจ้าที่รันในเครื่องไม่มีคีย์ให้กรอก บังคับไปก็ได้แค่ค่าขยะ */
+/** ปลายทางในวง LAN (Ollama เปิด "Expose to the network" ที่เครื่องอื่น) - ไม่มีคีย์เหมือนกัน */
+const isLanBase = (u: string) =>
+  /^https?:\/\/(10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|[a-z0-9-]+\.(local|lan|internal))([:/]|$)/i.test(u.trim());
+
+/** เจ้าที่รันในเครื่อง/ใน LAN ไม่มีคีย์ให้กรอก บังคับไปก็ได้แค่ค่าขยะ */
 export const keyIsOptional = (provider: ProviderId, baseUrl: string) =>
-  provider === 'openai' && isLocalBase(baseUrl);
+  provider === 'openai' && (isLocalBase(baseUrl) || isLanBase(baseUrl));
 
 /**
  * ตรวจก่อนบันทึก คืน null ถ้าผ่าน
@@ -633,9 +637,11 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [] }
             )}
 
             <Hint>
-              คีย์เก็บไว้ใน <code>localStorage</code> ของเบราว์เซอร์คุณเท่านั้น ไม่ได้ขึ้นฐานข้อมูล
-              ส่งไปที่เซิร์ฟเวอร์ของแอปนี้เฉพาะตอนถามคำถาม แล้วใช้ยิงต่อไปที่ผู้ให้บริการ
-              ไม่ถูกบันทึกลงดิสก์และไม่ถูก log
+              คีย์เก็บไว้ใน <code>localStorage</code> ของเบราว์เซอร์คุณ ส่งไปที่เซิร์ฟเวอร์ของแอปนี้ตอนถามคำถาม
+              แล้วใช้ยิงต่อไปที่ผู้ให้บริการ - ไม่ถูก log
+              <br />
+              ถ้าคุณเป็นเจ้าของ/exec ของออฟฟิศที่เปิดอยู่ ชุดนี้จะถูก sync ขึ้นเซิร์ฟเวอร์ (คีย์เข้ารหัสก่อนลงฐาน)
+              เพื่อให้ MCP / API / LINE ใช้โมเดลรายคนแบบเดียวกับหน้าเว็บ - ลบได้ที่ &quot;การเชื่อมต่อภายนอก&quot;
               <br />
               ถ้าเครื่องนี้มีคนอื่นใช้ด้วย หรือจะเอาแอปนี้ไป deploy บนเน็ต ให้กดลบเมื่อเลิกใช้
             </Hint>

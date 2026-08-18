@@ -213,6 +213,28 @@ classifier ปฏิเสธคำถามจะได้มีโมเดล
 | **API** | `POST /api/office/ask` `{ question, deptIds?, mode?, publicOnly? }` | token public ได้เฉพาะ `answer` ที่กรองแล้ว |
 | **LINE** | ตั้ง `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_OFFICE_ID` แล้วชี้ Webhook ไป `/api/line/webhook` | ลูกค้าเสมอ - ตอบทันที "รับเรื่องแล้ว" แล้ว push คำตอบตาม |
 
+โมเดลที่ช่องทางเหล่านี้ใช้: **ตามที่ตั้งในหน้าเว็บ** ("คีย์ของฉัน" + โมเดลรายคนในแผงพนักงาน) - เจ้าของ/exec บันทึกในเบราว์เซอร์แล้วระบบ sync ขึ้นตาราง `office_llm` (คีย์เข้ารหัส AES-256-GCM ด้วย secret ของเซิร์ฟเวอร์) ให้ `runHeadless` โหลดไปใช้ ออฟฟิศที่ยังไม่เคย sync จะถอยไปใช้ `.env` (`LLM_PROVIDER`, `OPENAI_BASE_URL`, `OPENAI_MODEL`) ดูสถานะ/ลบได้ในหน้าออฟฟิศ ส่วน "การเชื่อมต่อภายนอก"
+
+
+### ตั้งค่า LINE Official Account (ลูกค้าทัก LINE -> PR ตอบ)
+
+1. **สร้าง channel** ที่ [developers.line.biz/console](https://developers.line.biz/console/) -> Create a new provider (ชื่อบริษัท) -> Create a Messaging API channel (ต้องผูกกับ LINE Official Account - คอนโซลจะพาไปสร้างให้ที่ manager.line.biz ถ้ายังไม่มี)
+2. **เอาค่า 2 ตัว**: แท็บ *Basic settings* -> **Channel secret** และแท็บ *Messaging API* -> **Channel access token (long-lived)** กด Issue
+3. **ปิด auto-reply ของ LINE OA**: LINE Official Account Manager -> Response settings -> ปิด "Auto-response" (ไม่งั้นลูกค้าได้ข้อความอัตโนมัติของ LINE ทับคำตอบเรา) และเปิด **Webhook** ในแท็บ Messaging API
+4. **ใส่ `.env`** แล้ว restart dev server:
+   ```
+   LINE_CHANNEL_SECRET=...
+   LINE_CHANNEL_ACCESS_TOKEN=...
+   LINE_OFFICE_ID=<uuid ออฟฟิศ - ดูในหน้าออฟฟิศ ส่วน "การเชื่อมต่อภายนอก" หัวข้อ LINE>
+   LINE_DEPT=pr
+   ```
+   ออฟฟิศนั้นต้องมีพนักงานแผนก **ประชาสัมพันธ์** อย่างน้อย 1 คน (คนที่ตอบ) และควรกรอกโปรไฟล์/สินค้าไว้ ไม่งั้น PR ไม่มีอะไรจะตอบ
+5. **URL สาธารณะ** - LINE ยิงได้เฉพาะ https บนเน็ต ตอน dev ใช้ tunnel ชี้เข้า `localhost:3210` เช่น
+   `winget install Cloudflare.cloudflared` แล้ว `cloudflared tunnel --url http://localhost:3210` (ได้ `https://xxx.trycloudflare.com` ฟรี ไม่ต้องสมัคร)
+6. **Webhook URL** ในแท็บ Messaging API = `https://<โดเมน>/api/line/webhook` -> กด **Verify** (ต้องขึ้น Success) -> เปิด *Use webhook*
+7. ทดสอบฝั่งเราโดยไม่ต้องรอ LINE: `node scripts/line-webhook-test.mjs "ร้านเปิดกี่โมง"` (เซ็นลายเซ็นด้วย secret ใน .env แล้วยิงเข้า localhost) หรือทักหา OA จากมือถือ - จะได้ "รับเรื่องแล้วค่ะ" ทันที แล้วคำตอบจริงตามมาเมื่อ PR ตอบเสร็จ (โมเดลในเครื่องอาจใช้เวลาเป็นนาที)
+   ดูสถานะ env ได้ที่ `GET /api/line/webhook` -> `{ configured, missing }`
+
 **ลูกค้าถาม = ไม่ใช่การประชุม** ([headless.ts](src/lib/headless.ts)): ลูกค้าเดินเข้าออฟฟิศมาหน้าเคาน์เตอร์ PR → PR ตอบจากข้อมูลสาธารณะ (โปรไฟล์ สินค้า โน้ต/เอกสารของ PR) →
 ถ้าเป็นเรื่องที่ต้องตัดสินใจภายใน (ส่วนลด/ข้อยกเว้น) PR บอกให้รอ ลูกค้าไปนั่งโซฟา PR พาแผนกที่เกี่ยวเข้าห้องประชุม (สายพาน) →
 PR เอาผลมา **เขียนใหม่ให้ลูกค้า** (ไม่มีตัวเลขภายใน/ข้อค้าน/ชื่อคน) → เดินกลับมาบอก → ลูกค้าเดินออก

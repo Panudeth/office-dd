@@ -303,6 +303,8 @@ export interface MeetingRow {
   id: string;
   office_id: string;
   asked_by: string | null;
+  /** ชื่อผู้ถามจากช่องทางภายนอก เช่น "สมชาย (LINE)" */
+  asked_by_label?: string | null;
   question: string;
   mode: 'roundtable' | 'relay' | 'direct';
   owner_dept: string;

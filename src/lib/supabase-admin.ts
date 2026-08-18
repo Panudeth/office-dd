@@ -68,7 +68,7 @@ export async function officeFromToken(
   const c = sbAdmin();
   if (!c || !token) return null;
   const hash = await sha256(token.trim());
-  let { data } = await c
+  let { data, error } = await c
     .from('office_token')
     .select('id, office_id, scope')
     .eq('token_hash', hash)
@@ -77,7 +77,10 @@ export async function officeFromToken(
   if (!data) {
     const legacy = await c.from('office_token').select('id, office_id').eq('token_hash', hash).maybeSingle();
     data = legacy.data as typeof data;
+    error = legacy.error ?? error;
   }
+  // ตารางไม่มี / secret key ผิด / โปรเจกต์ผิด - จะได้ไม่เงียบเป็น 401 เฉย ๆ จนหาไม่เจอว่าเพราะอะไร
+  if (!data && error) console.warn('[office_token] Supabase error:', error.message, '- รัน supabase/schema.sql แล้วหรือยัง / SUPABASE_SECRET_KEY ตรงโปรเจกต์ไหม');
   if (!data) return null;
   // จดว่าใช้ล่าสุดเมื่อไร - ไม่รอผล พังก็ไม่เป็นไร
   void c.from('office_token').update({ last_used_at: new Date().toISOString() }).eq('id', data.id);

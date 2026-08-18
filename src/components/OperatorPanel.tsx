@@ -111,6 +111,7 @@ export default function OperatorPanel({ open, onClose, meetings, loading, onRefr
                     <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[10px]">
                       <span className="tabular-nums text-dim">{timeLabel(m.created_at)}</span>
                       <Badge variant="brass">{SOURCE_TH[m.source ?? ''] ?? m.source ?? '?'}</Badge>
+                      {m.asked_by_label && <span className="text-parchment">{m.asked_by_label}</span>}
                       {m.status === 'running' && <Badge>กำลังตอบ</Badge>}
                       {m.status === 'error' && <Badge variant="bad">ล้มเหลว</Badge>}
                       {escalated && (
