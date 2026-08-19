@@ -16,3 +16,9 @@ next-env.d.ts
 
 # log ของ task รายวันบิล GCP
 .gcp-billing.log
+
+# ไฟล์ของ Claude Code (ตั้งค่าส่วนตัว/เครื่องใคร เครื่องมัน) - ไม่เอาขึ้น repo
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.claude*
