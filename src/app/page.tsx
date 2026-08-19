@@ -43,7 +43,7 @@ import {
   DEPARTMENTS, DEPT_BY_ID, PRESET_BY_ID, customDefs, sanitizeDeptDefs, setActiveDepartments, type DepartmentDef,
 } from '@/lib/departments';
 import { deptHeadIds } from '@/lib/heads';
-import { t, useLang } from '@/lib/i18n';
+import { getLang, t, useLang } from '@/lib/i18n';
 import type {
   Agenda, AskAgent, AskEvent, ChatMessage, Consult, MeetingAttendeeLite, MeetingMode, Opinion,
 } from '@/lib/protocol';
@@ -76,7 +76,7 @@ function excerpt(text: string, round: 1 | 2): string {
   let s = text.trim().replace(/\*\*/g, '');
   if (round === 2) {
     const m = /(?:^|\n)\s*ค้าน\s*[:：]\s*(.+)/.exec(s);
-    s = m ? `ค้าน: ${m[1].trim()}` : (s.split('\n').find((l) => l.trim()) ?? s);
+    s = m ? `${t('ค้าน')}: ${m[1].trim()}` : (s.split('\n').find((l) => l.trim()) ?? s);
   } else {
     s = s.split('\n').find((l) => l.trim()) ?? s;
   }
@@ -97,14 +97,14 @@ function summaryLine(text: string): string {
   return s.length > 320 ? `${s.slice(0, 320)}...` : s;
 }
 
-const WELCOME: ChatMessage = {
+const welcome = (): ChatMessage => ({
   id: 'welcome',
   role: 'system',
   text:
-    'ยินดีต้อนรับสู่บริษัทของคุณ\n' +
-    'จ้างพนักงานจากแผงด้านบน (แนะนำแผนกละ 3 คน) แล้วพิมพ์คำถามได้เลย\n' +
-    'ทีมที่เกี่ยวข้องจะเดินเข้าห้องประชุม ถกกัน 2 รอบ แล้วเดินมารายงานที่โต๊ะคุณ',
-};
+    t('ยินดีต้อนรับสู่บริษัทของคุณ') + '\n' +
+    t('จ้างพนักงานจากแผงด้านบน (แนะนำแผนกละ 3 คน) แล้วพิมพ์คำถามได้เลย') + '\n' +
+    t('ทีมที่เกี่ยวข้องจะเดินเข้าห้องประชุม ถกกัน 2 รอบ แล้วเดินมารายงานที่โต๊ะคุณ'),
+});
 
 export default function Page() {
   // ภาษา UI - subscribe ไว้ที่นี่ พอสลับแล้วทั้งหน้า re-render (ทุกอย่างเรียก t() ตอน render)
@@ -115,7 +115,7 @@ export default function Page() {
   const [seatsLeft, setSeatsLeft] = useState(MAX_STAFF);
   /** ที่ว่างในห้องของแต่ละแผนก - แต่ละแผนกมีห้องตัวเอง จ้างเกินห้องไม่ได้ */
   const [roomLeft, setRoomLeft] = useState<Record<string, number>>({});
-  const [messages, setMessages] = useState<ChatMessage[]>([WELCOME]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => [welcome()]);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
@@ -219,10 +219,10 @@ export default function Page() {
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
-        reason = res.status === 400 ? 'ยังไม่ได้ตั้งค่า AI (ไม่มีคีย์)' : (data.error ?? `AI ตอบ HTTP ${res.status}`);
+        reason = res.status === 400 ? t('ยังไม่ได้ตั้งค่า AI (ไม่มีคีย์)') : (data.error ?? t('AI ตอบ HTTP {status}', { status: res.status }));
       }
     } catch (err) {
-      reason = err instanceof Error && err.name === 'TimeoutError' ? 'AI ไม่ตอบสนอง (หมดเวลารอ)' : `ต่อ AI ไม่ได้: ${err instanceof Error ? err.message : String(err)}`;
+      reason = err instanceof Error && err.name === 'TimeoutError' ? t('AI ไม่ตอบสนอง (หมดเวลารอ)') : t('ต่อ AI ไม่ได้: {error}', { error: err instanceof Error ? err.message : String(err) });
     }
     if (seq !== aiCheckSeq.current) return; // มีรอบใหม่ยิงทับแล้ว
     setAiDown(reason);
@@ -266,9 +266,9 @@ export default function Page() {
   }, [office?.id, llmStore]);
   /** ป้ายสำหรับแผงพนักงาน - บอกว่า "ค่าเริ่มต้น" ของลูกทีมตอนนี้คือชุดไหน */
   const memberDefault = llmStore.items.find((c) => c.id === llmStore.roles?.member) ?? llm;
-  const llmDefaultLabel = memberDefault ? memberDefault.label : 'คีย์ของเซิร์ฟเวอร์';
+  const llmDefaultLabel = memberDefault ? memberDefault.label : t('คีย์ของเซิร์ฟเวอร์');
   const headDefault = llmStore.items.find((c) => c.id === llmStore.roles?.chair) ?? memberDefault;
-  const llmHeadLabel = headDefault ? headDefault.label : 'คีย์ของเซิร์ฟเวอร์';
+  const llmHeadLabel = headDefault ? headDefault.label : t('คีย์ของเซิร์ฟเวอร์');
   const llmOptions = llmStore.items.map((c) => ({ id: c.id, label: `${c.label} · ${connSubtitle(c)}` }));
 
   /**
@@ -392,11 +392,11 @@ export default function Page() {
   }, [officeId, profile, products, deptNotes, deptPublicNotes, llm]);
 
   const secBlocked = !supabaseConfigured
-    ? 'โหมดในเครื่องยังไม่มีที่เก็บบันทึก - ตั้งค่า Supabase ก่อนถึงจะจดประวัติได้'
+    ? t('โหมดในเครื่องยังไม่มีที่เก็บบันทึก - ตั้งค่า Supabase ก่อนถึงจะจดประวัติได้')
     : !user
-      ? 'เข้าสู่ระบบก่อน แล้วเลขาฯ จะเปิดสมุดบันทึกของออฟฟิศให้'
+      ? t('เข้าสู่ระบบก่อน แล้วเลขาฯ จะเปิดสมุดบันทึกของออฟฟิศให้')
       : !office
-        ? 'เลือกออฟฟิศก่อน บันทึกการประชุมผูกอยู่กับออฟฟิศ'
+        ? t('เลือกออฟฟิศก่อน บันทึกการประชุมผูกอยู่กับออฟฟิศ')
         : null;
 
   /**
@@ -437,7 +437,7 @@ export default function Page() {
     applyDepts(next);
   }, [customDepts, office, user, applyDepts]);
   const deleteDept = useCallback(async (id: string) => {
-    if (!PRESET_BY_ID.has(id) && roster.some((r) => r.deptId === id)) throw new Error('ยังมีพนักงานในแผนกนี้ - เลิกจ้างก่อน');
+    if (!PRESET_BY_ID.has(id) && roster.some((r) => r.deptId === id)) throw new Error(t('ยังมีพนักงานในแผนกนี้ - เลิกจ้างก่อน'));
     const next = customDepts.filter((d) => d.id !== id);
     if (supabaseConfigured && office) await deleteDepartment(office.id, id);
     else { try { localStorage.setItem(DEPTS_KEY, JSON.stringify(next)); } catch { /* โหมดส่วนตัว */ } }
@@ -592,10 +592,8 @@ export default function Page() {
     !supabaseConfigured || !authReady || user || !oauth.returning
       ? null
       : oauth.error
-        ? `Google หรือ Supabase ปฏิเสธคำขอ: ${oauth.error}`
-        : `กลับมาจาก Google แล้วแต่ไม่ได้ session - เอา ${oauth.origin} ไปใส่ใน Supabase ` +
-          'ที่ Authentication แล้วดู URL Configuration ช่อง Redirect URLs ' +
-          '(ใส่เป็น http://localhost:*/** ครอบทุกพอร์ตได้เลย) แล้วลองใหม่';
+        ? t('Google หรือ Supabase ปฏิเสธคำขอ: {error}', { error: oauth.error })
+        : t('กลับมาจาก Google แล้วแต่ไม่ได้ session - เอา {origin} ไปใส่ใน Supabase ที่ Authentication แล้วดู URL Configuration ช่อง Redirect URLs (ใส่เป็น http://localhost:*/** ครอบทุกพอร์ตได้เลย) แล้วลองใหม่', { origin: oauth.origin });
 
   /**
    * เงื่อนไขที่ต้องครบก่อนถึงจะแตะทะเบียนพนักงานได้
@@ -606,11 +604,11 @@ export default function Page() {
   const lock = !supabaseConfigured
     ? null
     : !authReady
-      ? { text: 'กำลังตรวจสอบสถานะการเข้าสู่ระบบ', action: null }
+      ? { text: t('กำลังตรวจสอบสถานะการเข้าสู่ระบบ'), action: null }
       : !user
-        ? { text: 'เข้าสู่ระบบก่อน พนักงานที่จ้างถึงจะถูกบันทึกไว้', action: 'เข้าสู่ระบบ' }
+        ? { text: t('เข้าสู่ระบบก่อน พนักงานที่จ้างถึงจะถูกบันทึกไว้'), action: t('เข้าสู่ระบบ') }
         : !office
-          ? { text: 'เลือกออฟฟิศก่อน พนักงานจะได้ถูกบันทึกลงออฟฟิศนั้น', action: 'เลือกออฟฟิศ' }
+          ? { text: t('เลือกออฟฟิศก่อน พนักงานจะได้ถูกบันทึกลงออฟฟิศนั้น'), action: t('เลือกออฟฟิศ') }
           : null;
 
   /**
@@ -679,7 +677,7 @@ export default function Page() {
     if (!hiredDeptIds.length) {
       setMessages((ms) => [
         ...ms,
-        { id: newId(), role: 'system', text: 'ยังไม่มีพนักงานในบริษัท - จ้างอย่างน้อย 1 แผนกก่อนถามครับ' },
+        { id: newId(), role: 'system', text: t('ยังไม่มีพนักงานในบริษัท - จ้างอย่างน้อย 1 แผนกก่อนถามครับ') },
       ]);
       return;
     }
@@ -693,7 +691,7 @@ export default function Page() {
       const res = await fetch('/api/agenda', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders(llm) },
-        body: JSON.stringify({ question, hiredDeptIds, profile, departments: customDefs(), officeId: officeId ?? undefined }),
+        body: JSON.stringify({ question, hiredDeptIds, profile, departments: customDefs(), officeId: officeId ?? undefined, lang: getLang() }),
       });
       const data = (await res.json()) as Agenda & { error?: string };
       if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
@@ -769,7 +767,7 @@ export default function Page() {
       ...ms,
       // remote: โชว์คำถามด้วย เพราะจอนี้ไม่ได้พิมพ์เอง จะได้รู้ว่าประชุมเรื่องอะไร
       ...(init.source === 'remote'
-        ? [{ id: newId(), role: 'user' as const, text: `[ถามผ่านระบบภายนอก] ${question}` }]
+        ? [{ id: newId(), role: 'user' as const, text: t('[ถามผ่านระบบภายนอก] {question}', { question }) }]
         : []),
       {
         id: pendingId, role: 'agent', text: '', pending: true,
@@ -780,7 +778,7 @@ export default function Page() {
 
     setBusy(true);
     busyRef.current = true;
-    setPhase('เรียกทีมเข้าห้องประชุม...');
+    setPhase(t('เรียกทีมเข้าห้องประชุม...'));
     setMeetingStart(Date.now());
     setActivities([]);
 
@@ -825,7 +823,7 @@ export default function Page() {
       finishP = (async () => {
         if (visitorId) {
           // ตอบแขก - เฉพาะข้อความที่กรองแล้ว (customerReply) ไม่ใช่สรุปภายใน
-          setPhase(`${owner.name} กำลังตอบ${init.visitor?.name ?? 'ลูกค้า'}...`);
+          setPhase(t('{name} กำลังตอบ{visitor}...', { name: owner.name, visitor: init.visitor?.name ?? t('ลูกค้า') }));
           await w.waitForSpeech();
           if (escalated) {
             // เลิกประชุม ทีมกลับที่ แล้ว PR เดินไปหาแขกที่นั่งรออยู่
@@ -835,16 +833,16 @@ export default function Page() {
           }
           w.bubble(owner.id, 'talk', 1);
           const spoken = (customerReply || finalText).replace(/\*\*/g, '').trim();
-          w.say(owner.id, spoken.length > 700 ? `${spoken.slice(0, 700)}...` : spoken || 'ขออภัยค่ะ ตอนนี้ยังตอบไม่ได้', 4, () => {
+          w.say(owner.id, spoken.length > 700 ? `${spoken.slice(0, 700)}...` : spoken || t('ขออภัยค่ะ ตอนนี้ยังตอบไม่ได้'), 4, () => {
             w.faceToward(owner.id, visitorId!);
           });
-          w.say(visitorId, 'ขอบคุณมากค่ะ', 2, () => { w.react(owner.id, 'idea', 2); });
+          w.say(visitorId, t('ขอบคุณมากค่ะ'), 2, () => { w.react(owner.id, 'idea', 2); });
           await w.waitForSpeech();
         } else {
-          setPhase('รอทีมถกให้จบ...');
+          setPhase(t('รอทีมถกให้จบ...'));
           await w.waitForSpeech();
 
-          setPhase('สรุปให้ผู้บริหาร...');
+          setPhase(t('สรุปให้ผู้บริหาร...'));
           w.faceToward(leadId, w.bossId);
           if (finalText) w.sayNow(leadId, summaryLine(finalText), 5);
           await new Promise((r) => setTimeout(r, 1800));
@@ -854,7 +852,7 @@ export default function Page() {
 
         patch(pendingId, {
           pending: false,
-          text: finalText || '(ไม่ได้รับคำตอบ)',
+          text: finalText || t('(ไม่ได้รับคำตอบ)'),
           authorName: leadName,
           model: finalModel,
           transcript: [...transcript],
@@ -918,7 +916,7 @@ export default function Page() {
         };
         consults.push(c);
         patch(pendingId, { consults: [...consults] });
-        w.say(ev.fromAgentId, `ถาม${ev.toName}: ${excerpt(ev.text, 1)}`, undefined, () => {
+        w.say(ev.fromAgentId, t('ถาม{name}: {text}', { name: ev.toName, text: excerpt(ev.text, 1) }), undefined, () => {
           w.faceToward(ev.fromAgentId, ev.toAgentId);
           w.react(ev.toAgentId, 'question', 2.6);
         });
@@ -964,13 +962,13 @@ export default function Page() {
         names = team.map((t) => t.name);
         deptIds = [...new Set(team.map((t) => t.deptId))];
         patch(pendingId, { mode: 'relay', deptIds });
-        setMessages((ms) => [...ms, { id: newId(), role: 'system', text: `${ev.agentName} ขอปรึกษาทีมก่อนตอบลูกค้า: "${ev.internalQuestion}"` }]);
+        setMessages((ms) => [...ms, { id: newId(), role: 'system', text: t('{name} ขอปรึกษาทีมก่อนตอบลูกค้า: "{question}"', { name: ev.agentName, question: ev.internalQuestion }) }]);
         if (visitorId) {
           const vid = visitorId;
           w.say(ev.agentId, ev.text, 3, () => w.faceToward(ev.agentId, vid));
           void (async () => {
             await w.waitForSpeech();
-            setPhase(`${init.visitor?.name ?? 'ลูกค้า'} นั่งรอ - ${ev.agentName} ไปปรึกษาทีม...`);
+            setPhase(t('{visitor} นั่งรอ - {name} ไปปรึกษาทีม...', { visitor: init.visitor?.name ?? t('ลูกค้า'), name: ev.agentName }));
             await w.visitorWait(vid);
             w.focusRect(w.meetingRect());
             await w.gather(ids);
@@ -984,10 +982,10 @@ export default function Page() {
       } else if (ev.type === 'minutes') {
         doneWork('secretary', !!ev.error);
         if (ev.error) {
-          setMessages((ms) => [...ms, { id: newId(), role: 'system', text: `เลขาฯ จดรายงานการประชุมไม่สำเร็จ: ${ev.error}` }]);
+          setMessages((ms) => [...ms, { id: newId(), role: 'system', text: t('เลขาฯ จดรายงานการประชุมไม่สำเร็จ: {error}', { error: ev.error ?? '' }) }]);
         } else if (ev.text) {
           minutesText = ev.text;
-          w.say(w.secretaryId, 'จดรายงานการประชุมเรียบร้อยค่ะ', 3);
+          w.say(w.secretaryId, t('จดรายงานการประชุมเรียบร้อยค่ะ'), 3);
           attachMinutes(ev.text);
           patch(pendingId, { minutes: ev.text });
         }
@@ -999,40 +997,40 @@ export default function Page() {
       w.saveView();
       if (init.visitor?.courier && direct) {
         // แมสเซนเจอร์ขี่มอไซค์มาจอดหน้าประตู เดินเข้ามายื่นซองให้หัวหน้าแผนก แล้วขี่ออกไป - แผนกเอาเอกสารไปรายงานบอสต่อ
-        setPhase(`${init.visitor.name} ขี่มอไซค์มาส่งเอกสาร...`);
+        setPhase(t('{name} ขี่มอไซค์มาส่งเอกสาร...', { name: init.visitor.name }));
         w.focusRect(w.bossRect());
         const courierId = await w.spawnCourierRideIn(init.visitor.name);
-        if (w.lastParking) setPhase(`${init.visitor.name} จอดที่ (${w.lastParking.x},${w.lastParking.y})${w.lastParking.marked ? ' - ที่จอดมอไซค์' : ' - ไม่มีที่จอดที่ใช้ได้ จอดข้างประตู'}`);
+        if (w.lastParking) setPhase(t('{name} จอดที่ ({x},{y}) - {spot}', { name: init.visitor.name, x: w.lastParking.x, y: w.lastParking.y, spot: w.lastParking.marked ? t('ที่จอดมอไซค์') : t('ไม่มีที่จอดที่ใช้ได้ จอดข้างประตู') }));
         w.focus(courierId);
         await w.visitorApproach(courierId, owner.id);
-        w.say(courierId, `เอกสารจาก${init.visitor.source ? ` ${init.visitor.source}` : 'ข้างนอก'}มาส่งครับ เซ็นรับด้วยครับ`, 2.5, () => { w.faceToward(owner.id, courierId); });
+        w.say(courierId, init.visitor.source ? t('เอกสารจาก {source} มาส่งครับ เซ็นรับด้วยครับ', { source: init.visitor.source }) : t('เอกสารจากข้างนอกมาส่งครับ เซ็นรับด้วยครับ'), 2.5, () => { w.faceToward(owner.id, courierId); });
         await w.waitForSpeech();
         w.handOver(courierId, owner.id);
-        w.say(owner.id, 'รับแล้วครับ ขอบคุณ', 1.5);
+        w.say(owner.id, t('รับแล้วครับ ขอบคุณ'), 1.5);
         await w.waitForSpeech();
         void w.courierLeave(courierId);
-        setPhase(`${owner.name} เปิดเอกสาร แล้วไปรายงาน...`);
+        setPhase(t('{name} เปิดเอกสาร แล้วไปรายงาน...', { name: owner.name }));
         // ต่อด้วยเส้นทางปกติของโหมดตอบตรง: หัวหน้าเดินไปรายงานที่โต๊ะบอส
         w.focusRect(w.bossRect());
         await w.report(owner.id);
         w.say(w.bossId, question.length > 220 ? `${question.slice(0, 220)}...` : question, 3);
-        setPhase(`${owner.name} กำลังอ่านเอกสารและสรุป...`);
+        setPhase(t('{name} กำลังอ่านเอกสารและสรุป...', { name: owner.name }));
         return;
       }
       if (init.visitor && direct) {
         // แขกโผล่ที่ประตูสวน เดินมาหาคนตอบ (PR = หน้าเคาน์เตอร์ / แผนกอื่น = หน้าประตูห้อง)
-        setPhase(`${init.visitor.name} กำลังเดินเข้ามา...`);
+        setPhase(t('{name} กำลังเดินเข้ามา...', { name: init.visitor.name }));
         visitorId = w.spawnVisitor(init.visitor.name);
         w.focus(visitorId);
         await w.visitorApproach(visitorId, owner.id);
         w.focus(owner.id);
         w.say(visitorId, question, 3, () => { w.faceToward(owner.id, visitorId!); });
         w.visitorHostThinking(owner.id);
-        setPhase(`${owner.name} กำลังหาคำตอบให้${init.visitor.name}...`);
+        setPhase(t('{name} กำลังหาคำตอบให้{visitor}...', { name: owner.name, visitor: init.visitor.name }));
         return;
       }
       if (direct) {
-        setPhase(`${owner.name} กำลังเดินไปหาคุณ...`);
+        setPhase(t('{name} กำลังเดินไปหาคุณ...', { name: owner.name }));
         w.focusRect(w.bossRect());
         await w.report(owner.id);
         w.say(w.bossId, question, 3);
@@ -1040,9 +1038,9 @@ export default function Page() {
         w.focusRect(w.meetingRect());
         await w.gather(ids);
         w.setDeliberating(ids);
-        w.say(w.bossId, `วาระวันนี้: ${question}`, 3);
+        w.say(w.bossId, t('วาระวันนี้: {question}', { question }), 3);
       }
-      setPhase(direct ? `${owner.name} กำลังตอบ...` : relay ? `${owner.name} รับเรื่องไปเดินสาย...` : 'ทีมกำลังถกกัน...');
+      setPhase(direct ? t('{name} กำลังตอบ...', { name: owner.name }) : relay ? t('{name} รับเรื่องไปเดินสาย...', { name: owner.name }) : t('ทีมกำลังถกกัน...'));
     };
 
     let ended = false;
@@ -1051,19 +1049,19 @@ export default function Page() {
       ended = true;
       try {
         if (errorText) {
-          abortWork('ประชุมหยุดเพราะ error');
-          setPhase(`ประชุมหยุด: ${errorText.slice(0, 80)}`);
+          abortWork(t('ประชุมหยุดเพราะ error'));
+          setPhase(t('ประชุมหยุด: {error}', { error: errorText.slice(0, 80) }));
           w.clearSay(ids);
           patch(pendingId, {
             pending: false,
             role: 'system',
-            text: `เกิดข้อผิดพลาด: ${errorText}`,
+            text: t('เกิดข้อผิดพลาด: {error}', { error: errorText }),
             transcript: transcript.length ? [...transcript] : undefined,
           });
           return;
         }
-        if (!finalText) abortWork('การเชื่อมต่อถูกตัดก่อนตอบ');
-        else abortWork('ไม่ได้ผลลัพธ์');
+        if (!finalText) abortWork(t('การเชื่อมต่อถูกตัดก่อนตอบ'));
+        else abortWork(t('ไม่ได้ผลลัพธ์'));
         await finish();
       } finally {
         if (visitorId) {
@@ -1150,9 +1148,10 @@ export default function Page() {
           company,
           llm: llmAssignment(llmStore, ids),
           departments: customDefs(),
+          lang: getLang(),
         }),
       });
-      if (!res.ok || !res.body) throw new Error(`เรียก API ไม่สำเร็จ (${res.status})`);
+      if (!res.ok || !res.body) throw new Error(t('เรียก API ไม่สำเร็จ ({status})', { status: res.status }));
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -1246,10 +1245,10 @@ export default function Page() {
       // webhook เข้า (inbox) = แมสเซนเจอร์ขี่มอไซค์มาส่งเอกสารให้แผนก ไม่ใช่ลูกค้ามาถาม
       const inboxSrc = ev.source === 'api' ? /^(.*)\s*\(inbox\)\s*$/.exec(ev.askedBy?.trim() ?? '')?.[1]?.trim() || (ev.askedBy?.trim() === 'inbox' ? '' : null) : null;
       // มีชื่อจริงจากช่องทาง (เช่นชื่อโปรไฟล์ LINE) ให้ตัวละครใช้ชื่อนั้น - ไม่มีค่อยเป็น "ลูกค้า (LINE)"
-      const visitorName = inboxSrc !== null ? `แมสเซนเจอร์${inboxSrc ? ` (${inboxSrc})` : ''}`
+      const visitorName = inboxSrc !== null ? `${t('แมสเซนเจอร์')}${inboxSrc ? ` (${inboxSrc})` : ''}`
         : !via ? null
         : ev.askedBy?.trim() ? ev.askedBy.trim()
-        : ev.audience === 'customer' ? `ลูกค้า (${via})` : `Agent (${via})`;
+        : ev.audience === 'customer' ? t('ลูกค้า ({via})', { via }) : `Agent (${via})`;
       const s = openSessionRef.current({
         question: ev.question, mode: ev.mode, team, owner,
         attendees: ev.attendees, source: 'remote', serverMeetingId: meetingId,
@@ -1333,10 +1332,10 @@ export default function Page() {
               variant="outline"
               size="sm"
               onClick={() => setOfficeOpen(true)}
-              title="ยังไม่ได้ตั้งค่า Supabase - จ้างพนักงานแล้วรีเฟรชจะหาย"
+              title={t('ยังไม่ได้ตั้งค่า Supabase - จ้างพนักงานแล้วรีเฟรชจะหาย')}
               className="border-wood-deep text-parchment-2 hover:bg-wood-dark"
             >
-              <Building2 /> ในเครื่อง
+              <Building2 /> {t('ในเครื่อง')}
             </Button>
           ) : !user ? (
             <Button
@@ -1344,9 +1343,9 @@ export default function Page() {
               size="sm"
               disabled={!authReady}
               onClick={() => setOfficeOpen(true)}
-              title="เข้าสู่ระบบเพื่อเก็บพนักงานไว้ในออฟฟิศของคุณ"
+              title={t('เข้าสู่ระบบเพื่อเก็บพนักงานไว้ในออฟฟิศของคุณ')}
             >
-              <LogIn /> {authReady ? 'เข้าสู่ระบบ' : 'กำลังตรวจสอบ'}
+              <LogIn /> {authReady ? t('เข้าสู่ระบบ') : t('กำลังตรวจสอบ')}
             </Button>
           ) : (
             <>
@@ -1354,7 +1353,7 @@ export default function Page() {
                 variant="outline"
                 size="sm"
                 onClick={() => setOfficeOpen(true)}
-                title={`${accountName(user)}${user.email ? ` (${user.email})` : ''} - กดเพื่อจัดการบัญชี`}
+                title={t('{account} - กดเพื่อจัดการบัญชี', { account: `${accountName(user)}${user.email ? ` (${user.email})` : ''}` })}
                 className="max-w-44 border-wood-deep text-parchment-2 hover:bg-wood-dark"
               >
                 {accountAvatar(user) ? (
@@ -1374,13 +1373,13 @@ export default function Page() {
                 variant={office ? 'primary' : 'outline'}
                 size="sm"
                 onClick={() => setOfficeOpen(true)}
-                title={office ? `กำลังใช้ออฟฟิศ ${office.name}` : 'ยังไม่ได้เลือกออฟฟิศ'}
+                title={office ? t('กำลังใช้ออฟฟิศ {name}', { name: office.name }) : t('ยังไม่ได้เลือกออฟฟิศ')}
                 className={
                   office ? 'max-w-44' : 'max-w-44 border-brass text-brass hover:bg-wood-dark'
                 }
               >
                 <Building2 />
-                <span className="truncate">{office ? office.name : 'เลือกออฟฟิศ'}</span>
+                <span className="truncate">{office ? office.name : t('เลือกออฟฟิศ')}</span>
               </Button>
             </>
           )}
@@ -1391,10 +1390,10 @@ export default function Page() {
               variant="outline"
               size="sm"
               onClick={() => { setDeptPanel((d) => ({ ...d, open: false })); setIntegrationsTab('in'); setSideTab('connect'); }}
-              title="token สำหรับ MCP / API / LINE - ให้ agent ข้างนอกหรือลูกค้าถามออฟฟิศนี้ได้"
+              title={t('token สำหรับ MCP / API / LINE - ให้ agent ข้างนอกหรือลูกค้าถามออฟฟิศนี้ได้')}
               className="border-wood-deep text-parchment-2 hover:bg-wood-dark"
             >
-              <Plug /> เชื่อมต่อ
+              <Plug /> {t('เชื่อมต่อ')}
             </Button>
           )}
 
@@ -1408,11 +1407,11 @@ export default function Page() {
             variant={llm ? 'primary' : 'outline'}
             size="sm"
             onClick={() => setKeyOpen(true)}
-            title="ใส่ API key ของคุณเอง"
+            title={t('ใส่ API key ของคุณเอง')}
             className={llm ? undefined : 'border-wood-deep text-parchment-2 hover:bg-wood-dark'}
           >
             <KeyRound />
-            {llm ? llm.label : 'คีย์ของฉัน'}
+            {llm ? llm.label : t('คีย์ของฉัน')}
           </Button>
 
           {/* ห้องประชุม - โผล่เฉพาะตอนมีประชุม (หรือเพิ่งจบ) เปิดดูเต็ม ๆ ว่าใครทำอะไร คุยอะไรไปแล้ว */}
@@ -1421,11 +1420,11 @@ export default function Page() {
               variant={busy ? 'primary' : 'outline'}
               size="sm"
               onClick={() => setRoomOpen(true)}
-              title="ดูสถานะรายคนและบทสนทนาสดของการประชุม"
+              title={t('ดูสถานะรายคนและบทสนทนาสดของการประชุม')}
               className={busy ? undefined : 'border-brass text-brass hover:bg-wood-dark'}
             >
               {busy ? <LoaderCircle className="animate-spin" /> : <MessagesSquare />}
-              การประชุม
+              {t('การประชุม')}
               {(() => {
                 const n = messages.find((m) => m.id === liveMsgId)?.transcript?.length ?? 0;
                 return n > 0 ? (
@@ -1446,13 +1445,13 @@ export default function Page() {
                 variant="outline"
                 size="sm"
                 onClick={() => setOperatorOpen(true)}
-                title="สมุดประชาสัมพันธ์ - ลูกค้าติดต่ออะไรเข้ามา ตอบไปว่าอะไร"
+                title={t('สมุดประชาสัมพันธ์ - ลูกค้าติดต่ออะไรเข้ามา ตอบไปว่าอะไร')}
                 className={`gap-1 ${running ? 'border-brass text-brass' : 'border-wood-deep text-parchment-2'} hover:bg-wood-dark`}
               >
                 {running ? <LoaderCircle className="animate-spin" /> : <BellRing />}
-                ลูกค้า
+                {t('ลูกค้า')}
                 {todayCount > 0 && (
-                  <span className="rounded-box bg-brass px-1 text-[10px] font-bold text-ink-900" title="วันนี้">{todayCount}</span>
+                  <span className="rounded-box bg-brass px-1 text-[10px] font-bold text-ink-900" title={t('วันนี้')}>{todayCount}</span>
                 )}
               </Button>
             );
@@ -1463,11 +1462,11 @@ export default function Page() {
             variant="outline"
             size="sm"
             onClick={() => { setSideOpen(true); saveSide(sideW, true, hireH); setSideTab('notes'); }}
-            title={`${SECRETARY_NAME} - ประวัติการประชุมทั้งหมด`}
+            title={t('{name} - ประวัติการประชุมทั้งหมด', { name: SECRETARY_NAME })}
             className="gap-1 border-wood-deep pl-1 text-parchment-2 hover:bg-wood-dark"
           >
             <Portrait palette={SECRETARY_PAL} size={1} className="block shrink-0" />
-            เลขาฯ
+            {t('เลขาฯ')}
             {secretaryMeetings.length > 0 && (
               <span className="rounded-box bg-brass px-1 text-[10px] font-bold text-ink-900">
                 {secretaryMeetings.length}
@@ -1480,10 +1479,10 @@ export default function Page() {
             variant="outline"
             size="sm"
             onClick={() => { setDeptPanel((d) => ({ ...d, open: false })); setIntegrationsTab('depts'); setSideTab('connect'); }}
-            title="แผนกทั้งหมด - สร้างแผนกใหม่ ตั้งสกิล webhook รับข้อมูลเข้า และช่องส่งออกไป Teams/Slack/LINE"
+            title={t('แผนกทั้งหมด - สร้างแผนกใหม่ ตั้งสกิล webhook รับข้อมูลเข้า และช่องส่งออกไป Teams/Slack/LINE')}
             className="border-wood-deep text-parchment-2 hover:bg-wood-dark"
           >
-            <Building2 /> แผนก
+            <Building2 /> {t('แผนก')}
           </Button>
 
           {/* ข้อมูลบริษัท - ยังไม่ได้กรอกจะขึ้นเตือน เพราะไม่กรอก agent จะตอบแบบไม่รู้ว่าเราเป็นใคร */}
@@ -1491,26 +1490,26 @@ export default function Page() {
             variant={profileIsEmpty(profile) && office ? 'primary' : 'outline'}
             size="sm"
             onClick={() => setCompanyOpen(true)}
-            title="ข้อมูลบริษัท - โปรไฟล์ โน้ตแผนก เอกสาร ที่ agent ทุกตัวจะอ่านก่อนตอบ"
+            title={t('ข้อมูลบริษัท - โปรไฟล์ โน้ตแผนก เอกสาร ที่ agent ทุกตัวจะอ่านก่อนตอบ')}
             className={profileIsEmpty(profile) && office ? undefined : 'border-wood-deep text-parchment-2 hover:bg-wood-dark'}
           >
-            <BookOpen /> ข้อมูลบริษัท
+            <BookOpen /> {t('ข้อมูลบริษัท')}
             {profileIsEmpty(profile) && office && (
-              <span className="rounded-box bg-brass px-1 text-[10px] font-bold text-ink-900">ยังไม่กรอก</span>
+              <span className="rounded-box bg-brass px-1 text-[10px] font-bold text-ink-900">{t('ยังไม่กรอก')}</span>
             )}
           </Button>
 
           <div className="mx-0.5 h-5 w-px bg-wood-deep" />
 
           <Button
-            variant="outline" size="icon" disabled={!ready} title="ซูมออก"
+            variant="outline" size="icon" disabled={!ready} title={t('ซูมออก')}
             className="size-7 border-wood-deep text-parchment-2 hover:bg-wood-dark"
             onClick={() => worldRef.current?.zoomCenter(1 / 1.35)}
           >
             <ZoomOut />
           </Button>
           <Button
-            variant="outline" size="icon" disabled={!ready} title="ซูมเข้า"
+            variant="outline" size="icon" disabled={!ready} title={t('ซูมเข้า')}
             className="size-7 border-wood-deep text-parchment-2 hover:bg-wood-dark"
             onClick={() => worldRef.current?.zoomCenter(1.35)}
           >
@@ -1521,28 +1520,28 @@ export default function Page() {
             className="border-wood-deep text-parchment-2 hover:bg-wood-dark"
             onClick={() => worldRef.current?.resetView()}
           >
-            <Maximize2 /> พอดีจอ
+            <Maximize2 /> {t('พอดีจอ')}
           </Button>
 
           <Button
             variant={editSnap.on ? 'primary' : 'outline'}
             size="sm"
             disabled={!ready || locked}
-            title="จัดโต๊ะ เก้าอี้ ของตกแต่ง - ลากย้าย หมุน เลือกคนนั่ง"
+            title={t('จัดโต๊ะ เก้าอี้ ของตกแต่ง - ลากย้าย หมุน เลือกคนนั่ง')}
             className={editSnap.on ? undefined : 'border-wood-deep text-parchment-2 hover:bg-wood-dark'}
             onClick={() => {
               if (editSnap.on) { worldRef.current?.setEditMode(false); return; }
               setSideOpen(true); saveSide(sideW, true, hireH); setSideTab('layout');
             }}
           >
-            <Wrench /> จัดออฟฟิศ
+            <Wrench /> {t('จัดออฟฟิศ')}
           </Button>
 
           <Button
             variant={autoCam ? 'primary' : 'outline'}
             size="sm"
             disabled={!ready}
-            title="ซูมตามทีมเข้าห้องประชุมเองตอนถาม"
+            title={t('ซูมตามทีมเข้าห้องประชุมเองตอนถาม')}
             className={autoCam ? undefined : 'border-wood-deep text-parchment-2 hover:bg-wood-dark'}
             onClick={() => {
               const w = worldRef.current;
@@ -1551,7 +1550,7 @@ export default function Page() {
               setAutoCam(w.autoCam);
             }}
           >
-            <Video /> กล้องอัตโนมัติ
+            <Video /> {t('กล้องอัตโนมัติ')}
           </Button>
 
           <Button
@@ -1567,13 +1566,13 @@ export default function Page() {
             }}
           >
             {paused ? <Play /> : <Pause />}
-            {paused ? 'เล่นต่อ' : 'หยุด'}
+            {paused ? t('เล่นต่อ') : t('หยุด')}
           </Button>
 
           <Button
             variant="outline"
             size="icon"
-            title={sideOpen ? 'ย่อแผงขวา ให้แผนที่เต็มจอ' : 'กางแผงขวากลับมา'}
+            title={sideOpen ? t('ย่อแผงขวา ให้แผนที่เต็มจอ') : t('กางแผงขวากลับมา')}
             className="size-7 border-wood-deep text-parchment-2 hover:bg-wood-dark"
             onClick={() => {
               const next = !sideOpen;
@@ -1595,14 +1594,14 @@ export default function Page() {
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
           <div className="bevel pointer-events-auto flex flex-col items-center gap-2 rounded-box border-2 border-wood-deep bg-wood-mid px-5 py-4 text-center shadow-lg">
             <span className="text-[13px] font-semibold text-parchment">
-              {authReady ? 'เข้าสู่ระบบเพื่อใช้งานพนักงาน' : 'กำลังตรวจสอบสถานะการเข้าสู่ระบบ'}
+              {authReady ? t('เข้าสู่ระบบเพื่อใช้งานพนักงาน') : t('กำลังตรวจสอบสถานะการเข้าสู่ระบบ')}
             </span>
             <span className="text-[11px] text-parchment-2/80">
-              จ้างพนักงาน ประชุม และบันทึกทั้งหมด ผูกอยู่กับบัญชีของคุณ
+              {t('จ้างพนักงาน ประชุม และบันทึกทั้งหมด ผูกอยู่กับบัญชีของคุณ')}
             </span>
             {authReady && (
               <Button variant="primary" size="sm" onClick={() => setOfficeOpen(true)}>
-                <LogIn /> เข้าสู่ระบบ
+                <LogIn /> {t('เข้าสู่ระบบ')}
               </Button>
             )}
           </div>
@@ -1631,20 +1630,20 @@ export default function Page() {
 
           <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-1 pb-0.5 pt-2 text-[11px] text-dim">
             <span>
-              พนักงาน <b className="text-parchment">{roster.length}</b> คน
+              {t('พนักงาน')} <b className="text-parchment">{roster.length}</b>{t(' คน')}
             </span>
             <span>
-              ในห้องประชุม <b className="text-parchment">{busyAgents}</b>
+              {t('ในห้องประชุม')} <b className="text-parchment">{busyAgents}</b>
             </span>
             <span className={`ml-auto ${saveErr || aiDown ? 'text-rug-lite' : 'text-brass'}`} title={aiDown ?? undefined}>
-              {saveErr ? `บันทึกไม่สำเร็จ: ${saveErr}` : aiDown ? `AI ไม่พร้อม - พนักงานพักก่อน (${aiDown.slice(0, 60)})` : (phase ?? 'พร้อมรับงาน')}
+              {saveErr ? t('บันทึกไม่สำเร็จ: {error}', { error: saveErr }) : aiDown ? t('AI ไม่พร้อม - พนักงานพักก่อน ({reason})', { reason: aiDown.slice(0, 60) }) : (phase ?? t('พร้อมรับงาน'))}
             </span>
             {aiDown && (
               <button type="button" className="rounded-box border border-ink-500 px-1.5 py-px text-[10px] text-parchment-2 hover:border-brass" onClick={() => void checkAi()}>
-                ลองเชื่อมใหม่
+                {t('ลองเชื่อมใหม่')}
               </button>
             )}
-            <span>ลากเพื่อเลื่อน / ล้อเลื่อนเพื่อซูม</span>
+            <span>{t('ลากเพื่อเลื่อน / ล้อเลื่อนเพื่อซูม')}</span>
           </div>
         </div>
 
@@ -1653,8 +1652,8 @@ export default function Page() {
           <div
             role="separator"
             aria-orientation="vertical"
-            aria-label="ลากเพื่อปรับความกว้างแผงขวา"
-            title="ลากเพื่อปรับความกว้าง / ดับเบิลคลิกเพื่อคืนค่าเริ่มต้น"
+            aria-label={t('ลากเพื่อปรับความกว้างแผงขวา')}
+            title={t('ลากเพื่อปรับความกว้าง / ดับเบิลคลิกเพื่อคืนค่าเริ่มต้น')}
             onPointerDown={(e) => {
               e.currentTarget.setPointerCapture(e.pointerId);
               dragging.current = true;
@@ -1708,7 +1707,7 @@ export default function Page() {
               onLlm={setEmployeeLlm}
               roleLlm={llmStore.roles}
               onRoleLlm={setRoleLlm}
-              llmActiveLabel={llm ? llm.label : 'คีย์ของเซิร์ฟเวอร์'}
+              llmActiveLabel={llm ? llm.label : t('คีย์ของเซิร์ฟเวอร์')}
               llmHeadLabel={llmHeadLabel}
               onEditDept={(id) => { setDeptPanel({ open: true, id }); setSideTab('connect'); }}
               deptCanEdit={deptCanEdit}
@@ -1760,8 +1759,8 @@ export default function Page() {
           <div
             role="separator"
             aria-orientation="horizontal"
-            aria-label="ลากเพื่อแบ่งพื้นที่ระหว่างแผงจ้างพนักงานกับแผงแชท"
-            title="ลากเพื่อแบ่งพื้นที่ / ดับเบิลคลิกเพื่อคืนค่าเริ่มต้น"
+            aria-label={t('ลากเพื่อแบ่งพื้นที่ระหว่างแผงจ้างพนักงานกับแผงแชท')}
+            title={t('ลากเพื่อแบ่งพื้นที่ / ดับเบิลคลิกเพื่อคืนค่าเริ่มต้น')}
             onPointerDown={(e) => {
               e.currentTarget.setPointerCapture(e.pointerId);
               vDragging.current = true;
@@ -1818,7 +1817,7 @@ export default function Page() {
           setAgendaOpen(false);
           setMessages((ms) => [
             ...ms,
-            { id: newId(), role: 'system', text: 'ยกเลิกการประชุมแล้ว - ถามใหม่ได้เลย' },
+            { id: newId(), role: 'system', text: t('ยกเลิกการประชุมแล้ว - ถามใหม่ได้เลย') },
           ]);
         }}
         onStart={(pick) => {
@@ -1838,7 +1837,7 @@ export default function Page() {
         deptPublicNotes={deptPublicNotes}
         onChanged={refreshCompany}
         llmHeaders={authHeaders(llm)}
-        llmLabel={llm?.label ?? 'คีย์ของเซิร์ฟเวอร์'}
+        llmLabel={llm?.label ?? t('คีย์ของเซิร์ฟเวอร์')}
         blocked={secBlocked}
       />
 

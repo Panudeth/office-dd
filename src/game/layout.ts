@@ -5,6 +5,7 @@ import {
   type FootTile, type FurnKind, type LayoutItem, type OfficeLayout,
 } from './furniture';
 import type { Dir, Tile } from './types';
+import { t as tr } from '@/lib/i18n';
 
 /* ============================================================
    สถานะผัง (พื้น + ของทุกชิ้น) + ดัชนี + กฎ
@@ -254,52 +255,52 @@ export class LayoutState {
       for (const ft of footprint(it)) {
         const k = key(ft.x, ft.y);
         const t = { x: ft.x, y: ft.y };
-        if (!inMap(ft.x, ft.y)) { if (blame(t, it.id)) { mark(t); return fail('เกินขอบแผนที่'); } continue; }
+        if (!inMap(ft.x, ft.y)) { if (blame(t, it.id)) { mark(t); return fail(tr('เกินขอบแผนที่')); } continue; }
         if (spec.ghost) {
-          if (!floorAt(ft.x, ft.y) && !wallAt(ft.x, ft.y)) { if (blame(t, it.id)) { mark(t); return fail('ป้ายต้องอยู่บนพื้นหรือผนัง'); } }
+          if (!floorAt(ft.x, ft.y) && !wallAt(ft.x, ft.y)) { if (blame(t, it.id)) { mark(t); return fail(tr('ป้ายต้องอยู่บนพื้นหรือผนัง')); } }
           const o = seenGhost.get(k);
-          if (o && blame(t, it.id)) { mark(t); return fail('ทับป้ายอื่น'); }
+          if (o && blame(t, it.id)) { mark(t); return fail(tr('ทับป้ายอื่น')); }
           seenGhost.set(k, it.id);
           continue;
         }
         if (spec.wallOnly) {
-          if (!wallAt(ft.x, ft.y)) { if (blame(t, it.id)) { mark(t); return fail('ของบนผนังต้องวางบนช่องผนัง'); } }
+          if (!wallAt(ft.x, ft.y)) { if (blame(t, it.id)) { mark(t); return fail(tr('ของบนผนังต้องวางบนช่องผนัง')); } }
           const o = seenObj.get(k);
-          if (o && blame(t, it.id)) { mark(t); return fail('ทับของชิ้นอื่น'); }
+          if (o && blame(t, it.id)) { mark(t); return fail(tr('ทับของชิ้นอื่น')); }
           seenObj.set(k, it.id);
           continue;
         }
-        if (!floorAt(ft.x, ft.y)) { if (blame(t, it.id)) { mark(t); return fail('วางตรงนี้ไม่ได้ (ไม่ใช่พื้น)'); } }
-        if (spec.indoorOnly && !indoorAt(ft.x, ft.y)) { if (blame(t, it.id)) { mark(t); return fail('โต๊ะทำงานต้องอยู่ในอาคาร'); } }
+        if (!floorAt(ft.x, ft.y)) { if (blame(t, it.id)) { mark(t); return fail(tr('วางตรงนี้ไม่ได้ (ไม่ใช่พื้น)')); } }
+        if (spec.indoorOnly && !indoorAt(ft.x, ft.y)) { if (blame(t, it.id)) { mark(t); return fail(tr('โต๊ะทำงานต้องอยู่ในอาคาร')); } }
         if (spec.decal) {
           // พรม/ตรา/โลโก้ซ้อนกันได้ (วาดเรียงชั้น: พรม < ตรา < โลโก้) - แค่ต้องอยู่บนพื้น
           seenDecal.set(k, it.id);
           continue;
         }
         const o = seenObj.get(k);
-        if (o && (blame(t, it.id) || o === focusId)) { mark(t); return fail('ทับของชิ้นอื่น'); }
+        if (o && (blame(t, it.id) || o === focusId)) { mark(t); return fail(tr('ทับของชิ้นอื่น')); }
         seenObj.set(k, it.id);
         kindAt.set(k, it.kind);
         if (ft.solid) {
           solidsNew.push(t);
-          if (occupied.has(k) && k !== ignoreEmployeeTile && blame(t, it.id)) { mark(t); return fail('มีคนยืนอยู่ตรงนั้น'); }
+          if (occupied.has(k) && k !== ignoreEmployeeTile && blame(t, it.id)) { mark(t); return fail(tr('มีคนยืนอยู่ตรงนั้น')); }
         }
       }
     }
 
     // ---- ของที่ต้องมี / มีได้ชิ้นเดียว ----
     for (const [kind, spec] of Object.entries(FURN)) {
-      if (spec.single && items.filter((i) => i.kind === kind).length > 1) return fail(`${spec.label} มีได้ชิ้นเดียว`);
+      if (spec.single && items.filter((i) => i.kind === kind).length > 1) return fail(tr('{name} มีได้ชิ้นเดียว', { name: tr(spec.label) }));
     }
-    if (entrances !== 1) return fail(entrances === 0 ? 'ต้องมี "ทางเข้า" 1 จุด (แขกเดินเข้าตรงนี้)' : 'ทางเข้ามีได้จุดเดียว');
+    if (entrances !== 1) return fail(entrances === 0 ? tr('ต้องมี "ทางเข้า" 1 จุด (แขกเดินเข้าตรงนี้)') : tr('ทางเข้ามีได้จุดเดียว'));
     for (const who of ['boss', 'secretary'] as const) {
       const n = owners.get(who) ?? 0;
-      if (n !== 1) return fail(n === 0 ? `${who === 'boss' ? 'ผู้บริหาร' : 'เลขาฯ'}ต้องมีที่นั่ง 1 ตัว (เก้าอี้ที่ตั้ง "คนนั่ง" เป็นเขา)` : `${who === 'boss' ? 'ผู้บริหาร' : 'เลขาฯ'}มีที่นั่งได้ตัวเดียว`);
+      if (n !== 1) return fail(n === 0 ? tr('{who}ต้องมีที่นั่ง 1 ตัว (เก้าอี้ที่ตั้ง "คนนั่ง" เป็นเขา)', { who: who === 'boss' ? tr('ผู้บริหาร') : tr('เลขาฯ') }) : tr('{who}มีที่นั่งได้ตัวเดียว', { who: who === 'boss' ? tr('ผู้บริหาร') : tr('เลขาฯ') }));
     }
-    for (const [who, n] of owners) if (n > 1 && who !== 'boss' && who !== 'secretary') return fail('คนเดียวมีที่นั่งประจำได้ตัวเดียว');
-    if (meettables < 1) return fail('ต้องมีโต๊ะประชุมอย่างน้อย 1 ตัว');
+    for (const [who, n] of owners) if (n > 1 && who !== 'boss' && who !== 'secretary') return fail(tr('คนเดียวมีที่นั่งประจำได้ตัวเดียว'));
+    if (meettables < 1) return fail(tr('ต้องมีโต๊ะประชุมอย่างน้อย 1 ตัว'));
     const meetChairs = items.filter((i) => i.kind === 'chair' && i.tag !== 'meethead' && facesKind(i, 'meettable', kindAt)).length;
-    if (meetChairs < 2) return fail('โต๊ะประชุมต้องมีเก้าอี้หันเข้าหาอย่างน้อย 2 ตัว');
+    if (meetChairs < 2) return fail(tr('โต๊ะประชุมต้องมีเก้าอี้หันเข้าหาอย่างน้อย 2 ตัว'));
 
     // ---- ตารางเดินได้ของผังทดลอง ----
     const grid = ground ? walkableOfGround(g) : baseWalkableCopy();
@@ -319,32 +320,32 @@ export class LayoutState {
     }
     if (entranceTile) important.push(entranceTile);
     for (const t of important) {
-      if (!tileFreeOn(grid, t.x, t.y)) { mark(t); return fail('ปิดทับจุดที่ต้องว่าง (ที่นั่ง/หน้าเครื่อง/หน้าเคาน์เตอร์/ทางเข้า)'); }
+      if (!tileFreeOn(grid, t.x, t.y)) { mark(t); return fail(tr('ปิดทับจุดที่ต้องว่าง (ที่นั่ง/หน้าเครื่อง/หน้าเคาน์เตอร์/ทางเข้า)')); }
     }
     const reach = reachableFrom(grid, entranceTile!);
     for (const t of important) {
-      if (!reach.has(key(t.x, t.y))) { mark(t); return fail('ปิดทางเดิน - จะมีที่นั่งหรือจุดสำคัญที่เดินไปไม่ถึงจากทางเข้า'); }
+      if (!reach.has(key(t.x, t.y))) { mark(t); return fail(tr('ปิดทางเดิน - จะมีที่นั่งหรือจุดสำคัญที่เดินไปไม่ถึงจากทางเข้า')); }
     }
     if (reportSpots.length && !reportSpots.some((t) => tileFreeOn(grid, t.x, t.y) && reach.has(key(t.x, t.y)))) {
       reportSpots.forEach(mark);
-      return fail('หน้าโต๊ะผู้บริหารต้องมีที่ยืนรายงานว่างอย่างน้อย 1 ช่อง (แถวใต้โต๊ะ)');
+      return fail(tr('หน้าโต๊ะผู้บริหารต้องมีที่ยืนรายงานว่างอย่างน้อย 1 ช่อง (แถวใต้โต๊ะ)'));
     }
     return ok();
   }
 
   /** ทาสีช่อง (x,y) เป็น code - ตรวจว่าของบนช่องยังถูกชนิด และทุกอย่างยังเดินถึง */
   validatePaint(x: number, y: number, code: string, occupied: Set<string>): Verdict {
-    if (!tileSpec(code) || x < 0 || y < 0 || x >= MW || y >= MH) return { ok: false, reason: 'ระบายตรงนี้ไม่ได้', bad: new Set([key(x, y)]) };
+    if (!tileSpec(code) || x < 0 || y < 0 || x >= MW || y >= MH) return { ok: false, reason: tr('ระบายตรงนี้ไม่ได้'), bad: new Set([key(x, y)]) };
     const rows = this.ground.map((r) => r);
     rows[y] = rows[y].slice(0, x) + code + rows[y].slice(x + 1);
     const walk = tileSpec(code)!.walkable;
-    if (!walk && occupied.has(key(x, y))) return { ok: false, reason: 'มีคนยืนอยู่ตรงนั้น', bad: new Set([key(x, y)]) };
+    if (!walk && occupied.has(key(x, y))) return { ok: false, reason: tr('มีคนยืนอยู่ตรงนั้น'), bad: new Set([key(x, y)]) };
     // บอกให้ชัดว่าติดของชิ้นไหน (ดีกว่า "ไม่ใช่พื้น" เฉย ๆ)
     const k = key(x, y);
     const onTile = this.objAt.get(k) ?? this.decalAt.get(k) ?? this.ghostAt.get(k) ?? null;
-    if (!walk && onTile) return { ok: false, reason: `มี${FURN[onTile.kind].label}วางอยู่ - ย้ายของออกก่อน`, bad: new Set([k]) };
+    if (!walk && onTile) return { ok: false, reason: tr('มี{name}วางอยู่ - ย้ายของออกก่อน', { name: tr(FURN[onTile.kind].label) }), bad: new Set([k]) };
     const wallItem = this.wallAt.get(k);
-    if (walk && wallItem) return { ok: false, reason: `มี${FURN[wallItem.kind].label}ติดผนังอยู่ - ย้ายออกก่อน`, bad: new Set([k]) };
+    if (walk && wallItem) return { ok: false, reason: tr('มี{name}ติดผนังอยู่ - ย้ายออกก่อน', { name: tr(FURN[wallItem.kind].label) }), bad: new Set([k]) };
     return this.validate(this.layout.items, occupied, null, null, rows);
   }
   withPaint(x: number, y: number, code: string): string[] {

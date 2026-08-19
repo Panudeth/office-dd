@@ -14,6 +14,7 @@ import { GoogleMark } from '@/components/ui/google-mark';
 import { InfoTip } from '@/components/ui/infotip';
 import { Field, Input } from '@/components/ui/input';
 import { Hint } from '@/components/ui/panel';
+import { t } from '@/lib/i18n';
 
 interface Props {
   open: boolean;
@@ -74,8 +75,8 @@ export default function OfficePanel({
       setPassword('');
       setMsg(
         data.session
-          ? { ok: true, text: mode === 'up' ? 'สมัครและเข้าสู่ระบบแล้ว' : 'เข้าสู่ระบบแล้ว' }
-          : { ok: true, text: 'สมัครแล้ว เช็คอีเมลเพื่อยืนยันก่อนเข้าสู่ระบบ' },
+          ? { ok: true, text: mode === 'up' ? t('สมัครและเข้าสู่ระบบแล้ว') : t('เข้าสู่ระบบแล้ว') }
+          : { ok: true, text: t('สมัครแล้ว เช็คอีเมลเพื่อยืนยันก่อนเข้าสู่ระบบ') },
       );
     } catch (err) {
       setMsg({ ok: false, text: sbError(err) });
@@ -132,12 +133,12 @@ export default function OfficePanel({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent
         icon={<Building2 />}
-        title="ออฟฟิศของฉัน"
-        description="เข้าสู่ระบบและเลือกออฟฟิศที่จะใช้"
+        title={t('ออฟฟิศของฉัน')}
+        description={t('เข้าสู่ระบบและเลือกออฟฟิศที่จะใช้')}
       >
         {notice && (
           <p className="rounded-box border-2 border-wood-dark bg-wood-deep/60 px-2 py-1.5 text-[11px] leading-relaxed text-brass-lite">
-            <b className="text-brass">เข้าสู่ระบบไม่สำเร็จ</b>
+            <b className="text-brass">{t('เข้าสู่ระบบไม่สำเร็จ')}</b>
             <br />
             {notice}
           </p>
@@ -145,37 +146,36 @@ export default function OfficePanel({
 
         {usingSecretKeyByMistake ? (
           <Hint className="flex flex-wrap items-center gap-1.5 text-brass">
-            คีย์ที่ตั้งไว้เป็น <b>secret key</b> - ห้ามให้เบราว์เซอร์เห็น ต้องเปลี่ยนเป็น publishable key
+            {t('คีย์ที่ตั้งไว้เป็น')} <b>secret key</b> {t('- ห้ามให้เบราว์เซอร์เห็น ต้องเปลี่ยนเป็น publishable key')}
             <InfoTip>
-              คีย์ <code>sb_secret_...</code> ข้าม RLS ได้ทั้งหมด จึงห้ามให้เบราว์เซอร์เห็น
-              เปลี่ยนเป็น <b>publishable key</b> (<code>sb_publishable_...</code>) จาก Project Settings
-              หน้า API keys แล้วรีสตาร์ท dev server
+              {t('คีย์')} <code>sb_secret_...</code> {t('ข้าม RLS ได้ทั้งหมด จึงห้ามให้เบราว์เซอร์เห็น เปลี่ยนเป็น')} <b>publishable key</b> (<code>sb_publishable_...</code>){' '}
+              {t('จาก Project Settings หน้า API keys แล้วรีสตาร์ท dev server')}
             </InfoTip>
           </Hint>
         ) : !supabaseConfigured ? (
           <Hint className="flex flex-wrap items-center gap-1.5">
-            ยังไม่ได้ตั้งค่า Supabase - แอปทำงานแบบ<b className="text-parchment">ในเครื่องอย่างเดียว</b>
+            {t('ยังไม่ได้ตั้งค่า Supabase - แอปทำงานแบบ')}<b className="text-parchment">{t('ในเครื่องอย่างเดียว')}</b>
             <InfoTip>
-              ข้อมูลที่จ้างพนักงานไว้จะหายเมื่อรีเฟรช
+              {t('ข้อมูลที่จ้างพนักงานไว้จะหายเมื่อรีเฟรช')}
               <br />
               <br />
-              วิธีเปิดใช้
+              {t('วิธีเปิดใช้')}
               <br />
-              1. สร้างโปรเจกต์ที่ supabase.com
+              {t('1. สร้างโปรเจกต์ที่ supabase.com')}
               <br />
-              2. นำ <code>supabase/schema.sql</code> ไปรันใน SQL Editor
+              {t('2. นำ')} <code>supabase/schema.sql</code> {t('ไปรันใน SQL Editor')}
               <br />
-              3. ใส่ <code>NEXT_PUBLIC_SUPABASE_URL</code> และ{' '}
-              <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code> ใน <code>.env.local</code>
+              {t('3. ใส่')} <code>NEXT_PUBLIC_SUPABASE_URL</code> {t('และ')}{' '}
+              <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code> {t('ใน')} <code>.env.local</code>
               <br />
-              4. รีสตาร์ท dev server
+              {t('4. รีสตาร์ท dev server')}
             </InfoTip>
           </Hint>
         ) : !authReady ? (
           /* ยังไม่รู้ว่ามี session ไหม - โชว์ฟอร์มตอนนี้คือเชิญให้กดเข้าสู่ระบบซ้ำทั้งที่เข้าอยู่แล้ว */
           <div className="flex items-center justify-center gap-2 py-8 text-[12px] text-dim">
             <LoaderCircle className="size-4 animate-spin" />
-            กำลังตรวจสอบสถานะการเข้าสู่ระบบ
+            {t('กำลังตรวจสอบสถานะการเข้าสู่ระบบ')}
           </div>
         ) : !user ? (
           <form onSubmit={auth} className="flex flex-col gap-3">
@@ -189,16 +189,16 @@ export default function OfficePanel({
               className="border-ink-500 bg-parchment text-ink-900 hover:bg-white hover:text-ink-900"
             >
               <GoogleMark className="size-4" />
-              เข้าสู่ระบบด้วย Google
+              {t('เข้าสู่ระบบด้วย Google')}
             </Button>
 
             <div className="flex items-center gap-2">
               <span className="h-px flex-1 bg-ink-600" />
-              <span className="text-[10px] uppercase tracking-wide text-dim">หรือใช้อีเมล</span>
+              <span className="text-[10px] uppercase tracking-wide text-dim">{t('หรือใช้อีเมล')}</span>
               <span className="h-px flex-1 bg-ink-600" />
             </div>
 
-            <Field label="อีเมล" info="ต้องเป็นอีเมลจริง Supabase บล็อกโดเมนทดสอบอย่าง example.com">
+            <Field label={t('อีเมล')} info={t('ต้องเป็นอีเมลจริง Supabase บล็อกโดเมนทดสอบอย่าง example.com')}>
               <Input
                 type="email"
                 value={email}
@@ -208,7 +208,7 @@ export default function OfficePanel({
               />
             </Field>
 
-            <Field label="รหัสผ่าน">
+            <Field label={t('รหัสผ่าน')}>
               <Input
                 type="password"
                 value={password}
@@ -225,10 +225,10 @@ export default function OfficePanel({
                 variant="ghost"
                 onClick={() => setMode(mode === 'in' ? 'up' : 'in')}
               >
-                {mode === 'in' ? 'ยังไม่มีบัญชี สมัคร' : 'มีบัญชีแล้ว เข้าสู่ระบบ'}
+                {mode === 'in' ? t('ยังไม่มีบัญชี สมัคร') : t('มีบัญชีแล้ว เข้าสู่ระบบ')}
               </Button>
               <Button type="submit" variant="primary" disabled={busy}>
-                {mode === 'in' ? 'เข้าสู่ระบบ' : 'สมัคร'}
+                {mode === 'in' ? t('เข้าสู่ระบบ') : t('สมัคร')}
               </Button>
             </DialogFooter>
 
@@ -246,10 +246,10 @@ export default function OfficePanel({
                 }}
               >
                 <Plug />
-                {busy ? 'กำลังตรวจ' : 'ตรวจการเชื่อมต่อ และตาราง'}
+                {busy ? t('กำลังตรวจ') : t('ตรวจการเชื่อมต่อ และตาราง')}
               </Button>
               <Hint className="text-center">
-                กดก่อนสมัครได้ จะได้รู้ว่ารัน schema.sql แล้วหรือยัง
+                {t('กดก่อนสมัครได้ จะได้รู้ว่ารัน schema.sql แล้วหรือยัง')}
               </Hint>
             </div>
           </form>
@@ -278,17 +278,17 @@ export default function OfficePanel({
                 disabled={busy}
                 onClick={leave}
               >
-                <LogOut /> ออกจากระบบ
+                <LogOut /> {t('ออกจากระบบ')}
               </Button>
             </div>
 
-            <Field label="เลือกออฟฟิศ">
+            <Field label={t('เลือกออฟฟิศ')}>
               {loadingOffices ? (
                 <Hint className="flex items-center gap-1.5">
-                  <LoaderCircle className="size-3 animate-spin" /> กำลังโหลดออฟฟิศ
+                  <LoaderCircle className="size-3 animate-spin" /> {t('กำลังโหลดออฟฟิศ')}
                 </Hint>
               ) : offices.length === 0 ? (
-                <Hint>ยังไม่มีออฟฟิศ สร้างอันแรกด้านล่าง</Hint>
+                <Hint>{t('ยังไม่มีออฟฟิศ สร้างอันแรกด้านล่าง')}</Hint>
               ) : (
                 <ul className="flex flex-col gap-1">
                   {offices.map((o) => {
@@ -307,10 +307,10 @@ export default function OfficePanel({
                           }`}
                         >
                           <b className="font-semibold text-parchment">{o.name}</b>
-                          {o.owner_id === user.id && <Badge>เจ้าของ</Badge>}
+                          {o.owner_id === user.id && <Badge>{t('เจ้าของ')}</Badge>}
                           {active && (
                             <Badge variant="brass" className="ml-auto">
-                              กำลังใช้
+                              {t('กำลังใช้')}
                             </Badge>
                           )}
                         </button>
@@ -321,12 +321,12 @@ export default function OfficePanel({
               )}
             </Field>
 
-            <Field label="สร้างออฟฟิศใหม่">
+            <Field label={t('สร้างออฟฟิศใหม่')}>
               <div className="flex gap-1.5">
                 <Input
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  placeholder="เช่น OneDD HQ"
+                  placeholder={t('เช่น OneDD HQ')}
                   maxLength={80}
                 />
                 <Button
@@ -335,7 +335,7 @@ export default function OfficePanel({
                   onClick={create}
                   disabled={busy || !newName.trim()}
                 >
-                  <Plus /> สร้าง
+                  <Plus /> {t('สร้าง')}
                 </Button>
               </div>
             </Field>

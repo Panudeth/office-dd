@@ -1,6 +1,7 @@
 import { DEPT_BY_ID, ROLES, ROLE_ORDER, type Department } from '@/lib/departments';
 import { decalSprite, decorSprite, drawBubble, mk, objSprite, shade, tileSprite, type Surface } from './art';
 import { DIRS, GADGETS, buildAtlas, drawGadget, makePalette } from './character';
+import { t } from '@/lib/i18n';
 import {
   BH, BOSS_HOME, BW, GROUND, MAX_STAFF, MH, MW, SECRETARY_NAME, SECRETARY_PAL, SECRETARY_TITLE, SEC_HOME,
   TS, findPath, tileFree, type MapObject,
@@ -57,7 +58,9 @@ const STATE_TH: Record<AgentState, string> = {
   report: 'มารายงาน', coffee: 'ชงกาแฟ', eat: 'กินข้าว', lounge: 'นั่งเล่น',
   bench: 'นั่งสวน', pond: 'ชมบ่อน้ำ', chat: 'คุยกัน', smoke: 'สูบบุหรี่', idle: 'ยืนเล่น',
 };
-export const stateLabel = (s: AgentState) => STATE_TH[s] ?? s;
+export const stateLabel = (s: AgentState) => t(STATE_TH[s] ?? s);
+/** ชื่อที่วาดบนจอ - บอส/เลขาฯ/แขก ชื่อเป็นคำทั่วไปแปลได้ ส่วนชื่อเล่นพนักงานคงเดิม */
+const dispName = (e: Employee) => (e.isBoss || e.isSecretary || e.isVisitor ? t(e.name) : e.name);
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 const dist2 = (a: Tile, b: Tile) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
@@ -1606,7 +1609,7 @@ export class World {
       const cx = bx * z + ox;
       const cy = by * z + oy;
       // ข้อความที่ผู้ใช้ตั้งเองมาก่อน ไม่ตั้ง = ชื่อย่อแผนก
-      const label = text || d.shortTh;
+      const label = text || t(d.shortTh);
       const w = s.measureText(label).width + plateSize;
       s.fillStyle = 'rgba(10,14,20,.72)';
       s.fillRect(cx - w / 2, cy - plateSize, w, plateSize * 1.5);
@@ -1627,10 +1630,11 @@ export class World {
         const x = e.px * z + ox;
         const y = (e.py - 27) * z + oy;
         if (x < -80 || x > this.canvas.width + 80 || y < -20 || y > this.canvas.height + 20) return;
+        const nm = dispName(e);
         s.strokeStyle = 'rgba(10,14,20,.85)';
-        s.strokeText(e.name, x, y);
+        s.strokeText(nm, x, y);
         s.fillStyle = e.busy ? '#ffd166' : '#fff';
-        s.fillText(e.name, x, y);
+        s.fillText(nm, x, y);
       });
     }
 
@@ -1730,7 +1734,7 @@ export class World {
       // แถบชื่อในฟอง - ตอนซ้อนกันหลายฟองจะได้รู้ว่าใครพูด
       const nameFs = Math.max(9, Math.round(fs * 0.82));
       const nameH = Math.round(nameFs * 1.35);
-      const label = `${e.name} / ${e.title.replace(/^\S+\s/, '')}`;
+      const label = `${dispName(e)} / ${t(e.title.replace(/^\S+\s/, ''))}`;
       s.font = `700 ${nameFs}px "Segoe UI","Noto Sans Thai",sans-serif`;
       const wName = s.measureText(label).width;
       s.font = `500 ${fs}px "Segoe UI","Noto Sans Thai",sans-serif`;
@@ -2092,9 +2096,9 @@ export class World {
     return {
       on: this.editOn,
       selected: it && spec ? {
-        id: it.id, kind: it.kind, label: spec.label + (it.kind === 'deptsign' && it.dept ? ` · ${DEPT_BY_ID.get(it.dept)?.shortTh ?? it.dept}` : ''),
+        id: it.id, kind: it.kind, label: t(spec.label) + (it.kind === 'deptsign' && it.dept ? ` · ${t(DEPT_BY_ID.get(it.dept)?.shortTh ?? it.dept)}` : ''),
         dir: it.dir ?? null, owner: it.owner ?? null, dept: it.dept ?? null,
-        signText: it.kind === 'deptsign' ? { value: it.text ?? null, fallback: (it.dept && DEPT_BY_ID.get(it.dept)?.shortTh) || '' } : null,
+        signText: it.kind === 'deptsign' ? { value: it.text ?? null, fallback: (it.dept && t(DEPT_BY_ID.get(it.dept)?.shortTh ?? '')) || '' } : null,
         rotates: !!spec.rotates,
         // ที่นั่งประจำตั้งได้กับโต๊ะทำงาน และเก้าอี้ที่ไม่ใช่เก้าอี้ประชุม/หัวโต๊ะ (เก้าอี้ PR ตั้งได้ - คนนั่งเคาน์เตอร์)
         canOwn: it.kind === 'desk' || (it.kind === 'chair' && it.tag !== 'meethead' && !this.lay.meetSeats().some((m) => m.item.id === it.id)),
@@ -2134,17 +2138,17 @@ export class World {
   editStartPlace(kind: FurnKind, extra: { dept?: string } = {}) {
     if (!this.editOn) return;
     const spec = FURN[kind];
-    if (this.lay.items.length >= 400) { this.say_('ของเยอะเกินไปแล้ว (400 ชิ้น) - ลบบางชิ้นก่อน'); return; }
+    if (this.lay.items.length >= 400) { this.say_(t('ของเยอะเกินไปแล้ว (400 ชิ้น) - ลบบางชิ้นก่อน')); return; }
     if ((spec.unique || spec.single) && this.lay.items.some((i) => i.kind === kind)) {
       const ex = this.lay.items.find((i) => i.kind === kind)!;
       this.editSel = ex.id; this.editPlacing = null; this.editPaint = null;
-      this.say_(`${spec.label} มีได้ชิ้นเดียว - เลือกชิ้นเดิมให้แล้ว ลากไปที่ใหม่ได้เลย`);
+      this.say_(t('{label} มีได้ชิ้นเดียว - เลือกชิ้นเดิมให้แล้ว ลากไปที่ใหม่ได้เลย', { label: t(spec.label) }));
       return;
     }
     this.editSel = null; this.editPaint = null;
     this.editPlacing = { kind, dir: kind === 'chair' ? 'down' : 'up', v: spec.variants ? Math.floor(Math.random() * spec.variants) : 0, ...(extra.dept ? { dept: extra.dept } : {}) };
     this.ghost = null;
-    this.say_(`คลิกบนแผนที่เพื่อวาง${spec.label}${spec.rotates ? ' (R หมุน)' : ''}${spec.wallOnly ? ' - วางบนช่องผนัง' : ''} - Esc ยกเลิก`);
+    this.say_(t('คลิกบนแผนที่เพื่อวาง{label}{rotate}{wall} - Esc ยกเลิก', { label: t(spec.label), rotate: spec.rotates ? t(' (R หมุน)') : '', wall: spec.wallOnly ? t(' - วางบนช่องผนัง') : '' }));
   }
   /** เริ่มทาสีพื้น/ผนัง - ลากบนแผนที่ (Esc เลิก) */
   editStartPaint(code: string) {
@@ -2152,7 +2156,7 @@ export class World {
     this.editSel = null; this.editPlacing = null; this.ghost = null;
     this.editPaint = code;
     this.canvas.classList.add('painting');
-    this.say_(`ลากบนแผนที่เพื่อระบาย "${tileSpec(code)!.label}" - Esc/คลิกขวา กลับโหมดเลือก`);
+    this.say_(t('ลากบนแผนที่เพื่อระบาย "{label}" - Esc/คลิกขวา กลับโหมดเลือก', { label: t(tileSpec(code)!.label) }));
   }
   /** กลับโหมด "เลือก/ย้าย" - วางของ/ระบายอยู่ก็เลิก (คงชิ้นที่เลือกไว้) */
   editSelectTool() {
@@ -2171,14 +2175,14 @@ export class World {
     if (!code || x < 0 || y < 0 || x >= MW || y >= MH) return;
     if (this.lay.ground[y][x] === code) return;
     const v = this.lay.validatePaint(x, y, code, this.occupiedTiles());
-    if (!v.ok) { this.editMsg = `ระบายไม่ได้: ${v.reason}`; this.emitEdit(); return; }
+    if (!v.ok) { this.editMsg = t('ระบายไม่ได้: {reason}', { reason: t(v.reason ?? '') }); this.emitEdit(); return; }
     this.lay.layout.ground = this.lay.withPaint(x, y, code);
     this.editMsg = null;
     this.commitLayout('user');
   }
   /** ตั้ง/ลบโลโก้บริษัท (data URL) */
   setLogo(dataUrl: string | null) {
-    if (dataUrl && (!dataUrl.startsWith('data:image/') || dataUrl.length > MAX_LOGO_CHARS)) { this.say_('โลโก้ใหญ่เกินไป - ย่อรูปแล้วลองใหม่'); return; }
+    if (dataUrl && (!dataUrl.startsWith('data:image/') || dataUrl.length > MAX_LOGO_CHARS)) { this.say_(t('โลโก้ใหญ่เกินไป - ย่อรูปแล้วลองใหม่')); return; }
     this.lay.layout.logo = dataUrl;
     // ยังไม่มีชิ้น "โลโก้" บนพื้น - วางให้ทับตรา (หรือกลางล็อบบี้) แล้วเลือกไว้ให้ลาก/ย่อขยายต่อ
     if (dataUrl && !this.lay.items.some((i) => i.kind === 'logo')) {
@@ -2247,7 +2251,7 @@ export class World {
     if (w === (it.w ?? rs.defW) && h === (it.h ?? rs.defH)) return;
     const trial = this.lay.items.map((i) => (i.id === it.id ? { ...i, w, h } : i));
     const v = this.lay.validate(trial, this.occupiedTiles(), it.id);
-    if (!v.ok) { this.say_(`ขยายไม่ได้: ${v.reason}`); return; }
+    if (!v.ok) { this.say_(t('ขยายไม่ได้: {reason}', { reason: t(v.reason ?? '') })); return; }
     it.w = w; it.h = h;
     this.say_(null);
     this.commitLayout('user');
@@ -2265,7 +2269,7 @@ export class World {
     if (!it || !FURN[it.kind].rotates) return;
     const dir = nextDir(it.dir ?? 'up');
     const v = this.lay.validate(this.lay.withMoved(it.id, it.x, it.y, dir), this.occupiedTiles(), it.id, it.owner ? this.tileOf(it.owner) : null);
-    if (!v.ok) { this.say_(`หมุนไม่ได้: ${v.reason}`); return; }
+    if (!v.ok) { this.say_(t('หมุนไม่ได้: {reason}', { reason: t(v.reason ?? '') })); return; }
     it.dir = dir;
     this.afterItemChanged(it);
     this.commitLayout('user');
@@ -2275,13 +2279,13 @@ export class World {
     if (!it) return;
     if (it.owner) {
       const who = this.employees.find((e) => e.id === it.owner);
-      this.say_(`ที่นั่งนี้เป็นของ${who ? who.name : 'คน'} - เปลี่ยน "คนนั่ง" เป็นว่าง (ย้ายเขาไปที่อื่นก่อน) แล้วค่อยลบ`);
+      this.say_(t('ที่นั่งนี้เป็นของ{name} - เปลี่ยน "คนนั่ง" เป็นว่าง (ย้ายเขาไปที่อื่นก่อน) แล้วค่อยลบ', { name: who ? dispName(who) : t('คน') }));
       return;
     }
-    if (FURN[it.kind].unique) { this.say_(`${FURN[it.kind].label} ลบไม่ได้ - ลากไปที่ใหม่แทน`); return; }
+    if (FURN[it.kind].unique) { this.say_(t('{label} ลบไม่ได้ - ลากไปที่ใหม่แทน', { label: t(FURN[it.kind].label) })); return; }
     // ลบแล้วผังต้องยังผ่านกฎ (เช่นเก้าอี้ประชุมต้องเหลือ ≥ 2, โต๊ะประชุมต้องมี)
     const v = this.lay.validate(this.lay.withRemoved(it.id), new Set(), null);
-    if (!v.ok) { this.say_(`ลบไม่ได้: ${v.reason}`); return; }
+    if (!v.ok) { this.say_(t('ลบไม่ได้: {reason}', { reason: t(v.reason ?? '') })); return; }
     this.lay.layout.items = this.lay.layout.items.filter((i) => i.id !== it.id);
     this.editSel = null;
     this.say_(null);
@@ -2292,11 +2296,11 @@ export class World {
     const it = this.lay.item(itemId);
     if (!it || (it.kind !== 'desk' && it.kind !== 'chair')) return false;
     if (it.kind === 'chair' && (it.tag === 'meethead' || this.lay.meetSeats().some((m) => m.item.id === it.id))) {
-      this.say_('เก้าอี้ประชุม/หัวโต๊ะใช้เป็นที่นั่งประจำไม่ได้ - ย้ายออกจากโต๊ะประชุมก่อน'); return false;
+      this.say_(t('เก้าอี้ประชุม/หัวโต๊ะใช้เป็นที่นั่งประจำไม่ได้ - ย้ายออกจากโต๊ะประชุมก่อน')); return false;
     }
     const prevOwner = it.owner ? this.employees.find((e) => e.id === it.owner) ?? null : null;
     if (!employeeId) {
-      if (prevOwner) { this.say_(`${prevOwner.name} ต้องมีที่นั่ง - เลือกคนอื่นมานั่งแทน หรือย้ายเขาไปที่ว่างก่อน`); return false; }
+      if (prevOwner) { this.say_(t('{name} ต้องมีที่นั่ง - เลือกคนอื่นมานั่งแทน หรือย้ายเขาไปที่ว่างก่อน', { name: dispName(prevOwner) })); return false; }
       return true;
     }
     const e = this.employees.find((x) => x.id === employeeId && !x.isVisitor);
@@ -2304,7 +2308,7 @@ export class World {
     if (it.owner === e.id) return true;
     const mine = this.lay.seatItemOf(e.id);
     // สลับ: คนเดิมของที่นั่งนี้ไปนั่งที่เก่าของเรา (ถ้ามี) - ห้ามมีใครไร้ที่นั่ง
-    if (prevOwner && !mine) { this.say_(`${prevOwner.name} จะไม่มีที่นั่ง - ย้าย${prevOwner.name}ไปที่ว่างก่อน`); return false; }
+    if (prevOwner && !mine) { this.say_(t('{name} จะไม่มีที่นั่ง - ย้าย{name}ไปที่ว่างก่อน', { name: dispName(prevOwner) })); return false; }
     if (mine) mine.owner = prevOwner ? prevOwner.id : null;
     it.owner = e.id;
     if (prevOwner && mine) { const st = seatOf(mine)!; this.moveSeat(prevOwner, { x: st.x, y: st.y }); }
@@ -2320,7 +2324,7 @@ export class World {
     fresh.logo = this.lay.layout.logo ?? null; // โลโก้ไม่ใช่ "ผัง" - คงไว้
     this.editSel = null; this.editPlacing = null; this.ghost = null;
     this.setLayout(fresh, 'user');
-    this.say_('คืนผังเริ่มต้นแล้ว');
+    this.say_(t('คืนผังเริ่มต้นแล้ว'));
   }
   /** ชิ้นที่พนักงานคนนี้ยืน/นั่งอยู่ - ใช้ยกเว้นตอนตรวจ "ทับคน" ให้เจ้าของโต๊ะที่กำลังย้าย */
   private tileOf(empId: string): string | null {
@@ -2367,7 +2371,7 @@ export class World {
     const g = this.ghost;
     if (this.editPlacing) {
       if (!g) return;
-      if (!g.verdict.ok) { this.say_(`วางไม่ได้: ${g.verdict.reason}`); return; }
+      if (!g.verdict.ok) { this.say_(t('วางไม่ได้: {reason}', { reason: t(g.verdict.reason ?? '') })); return; }
       const rs = FURN[g.kind].resizable;
       const it: LayoutItem = { id: newItemId(), kind: g.kind, x: g.x, y: g.y, ...(FURN[g.kind].rotates ? { dir: g.dir } : {}), v: g.v, ...(this.editPlacing.dept ? { dept: this.editPlacing.dept } : {}), ...(rs ? { w: rs.defW, h: rs.defH } : {}) };
       this.lay.layout.items.push(it);
@@ -2383,7 +2387,7 @@ export class World {
       this.editDrag = null;
       if (!it) { this.ghost = null; return; }
       if (moved && g) {
-        if (!g.verdict.ok) { this.ghost = null; this.say_(`วางไม่ได้: ${g.verdict.reason}`); return; }
+        if (!g.verdict.ok) { this.ghost = null; this.say_(t('วางไม่ได้: {reason}', { reason: t(g.verdict.reason ?? '') })); return; }
         it.x = g.x; it.y = g.y;
         this.afterItemChanged(it);
         this.ghost = null;

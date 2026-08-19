@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 import type { ComponentProps, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from './button';
+import { t } from '@/lib/i18n';
 
 /* Radix จัดการ focus trap, ปิดด้วย Escape, aria และคืนโฟกัสให้ปุ่มเดิม
    ของพวกนี้เขียนเองแล้วพลาดง่าย เลยยืมมาใช้ แต่หน้าตายังเป็นกล่อง GBA เหมือนเดิม */
@@ -49,7 +50,7 @@ export function DialogContent({
           <DialogPrimitive.Close asChild>
             <Button variant="ghost" size="icon" className="ml-auto text-parchment-2 hover:bg-wood-dark">
               <X />
-              <span className="sr-only">ปิด</span>
+              <span className="sr-only">{t('ปิด')}</span>
             </Button>
           </DialogPrimitive.Close>
         </header>

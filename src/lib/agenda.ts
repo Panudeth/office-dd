@@ -2,6 +2,7 @@ import { mergeDepartments, type Department, type DepartmentDef } from './departm
 import { ask, type Creds } from './llm';
 import type { Agenda, AgendaItem, MeetingMode } from './protocol';
 import { profileBlock } from './company';
+import { langNote, type ReplyLang } from '@/lib/lang';
 
 /* ============================================================
    เลขานุการที่ประชุม - อ่านคำถามแล้วบอกว่าเรื่องนี้ต้องมีใครเข้าบ้าง
@@ -110,6 +111,7 @@ export async function buildAgenda(
   creds: Creds | null,
   profile?: Record<string, string>,
   custom: DepartmentDef[] = [],
+  lang?: ReplyLang,
 ): Promise<Agenda> {
   if (!creds || !hiredDeptIds.length) return keywordAgenda(question, hiredDeptIds, custom);
   const depts = mergeDepartments(custom);
@@ -118,7 +120,7 @@ export async function buildAgenda(
   let raw: unknown;
   try {
     const text = await ask(
-      { system: SYSTEM, user: userPrompt(question, depts, hiredDeptIds, profile), maxTokens: 2000, effort: 'low' },
+      { system: SYSTEM + langNote(lang), user: userPrompt(question, depts, hiredDeptIds, profile), maxTokens: 2000, effort: 'low' },
       creds,
     );
     raw = extractJson(text);

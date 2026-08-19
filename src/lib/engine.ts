@@ -1,4 +1,5 @@
 import { ROLES, deptMap, type DepartmentDef } from '@/lib/departments';
+import { langNote, type ReplyLang } from '@/lib/lang';
 import { SECRETARY_NAME } from '@/game/map';
 import { ask, byokCreds, effectiveModel, type Creds } from '@/lib/llm';
 import { loadSkillFor, type LoadedSkill } from '@/lib/skills';
@@ -63,7 +64,7 @@ ${roomNote}
 - พูดจากมุมของ${a.deptName}ให้สุด แม้จะรู้ว่าแผนกอื่นจะไม่ชอบ
 - ห้ามพยายามหาข้อสรุปร่วมกันเอง หน้าที่สรุปเป็นของประธาน ไม่ใช่ของคุณ
 - คุณ **ไม่ใช่ผู้เชี่ยวชาญของแผนกอื่น** เรื่องที่อยู่นอกความรับผิดชอบของคุณ
-  ให้บอกว่าต้องให้แผนกไหนตอบ อย่าเดาแทนเขา`;
+  ให้บอกว่าต้องให้แผนกไหนตอบ อย่าเดาแทนเขา${langNote(company?.lang)}`;
 }
 
 const ROOM_CROSS =
@@ -318,6 +319,7 @@ export const ESCALATE_MARK = '[[ESCALATE]]';
  */
 const CUSTOMER_RULES = `## โหมดบริการลูกค้า - คนที่ถามคือ "ลูกค้า/บุคคลภายนอก" ไม่ใช่คนในบริษัท
 
+- ตอบด้วยภาษาเดียวกับที่ลูกค้าใช้ถาม (ลูกค้าถามอังกฤษก็ตอบอังกฤษ)
 - ตอบสุภาพ กระชับ ใช้เฉพาะข้อมูลที่ให้ไว้และติดว่าเปิดเผยได้ (โปรไฟล์ สินค้า "ข้อมูลที่ตอบลูกค้าได้" ของแผนกคุณ เอกสารสาธารณะ) ห้ามเดา ห้ามสัญญาแทนบริษัท
 - ห้ามเปิดเผยข้อมูลภายใน: ต้นทุน มาร์จิน ปัญหา แผนที่ยังไม่ประกาศ ชื่อพนักงาน โน้ตแผนกอื่น การถกเถียงภายใน
 - ถ้าตอบได้จากข้อมูลที่มี ให้ตอบเลย
@@ -412,14 +414,14 @@ const mockAsk = (owner: AskAgent, t: AskAgent) =>
    ใช้โมเดลถูก ๆ ได้ เพราะไม่ต้องคิด แค่เรียบเรียงตามโครง
    ============================================================ */
 function writeMinutes(
-  question: string, agents: AskAgent[], dump: string, final: string, chairName: string, creds: Creds,
+  question: string, agents: AskAgent[], dump: string, final: string, chairName: string, creds: Creds, lang?: ReplyLang,
 ) {
   const who = agents.map((a) => `${a.name} (${ROLES[a.role].th} - ${a.deptName})`).join(', ');
   return ask({
     system: `คุณคือ **${SECRETARY_NAME}** เลขานุการของบริษัท นั่งจดอยู่ในห้องประชุม
 หน้าที่ของคุณคือเขียน "รายงานการประชุม" ให้เป็นกลางและครบถ้วน - คุณไม่ตัดสิน ไม่เพิ่มความเห็นตัวเอง
 บันทึกให้คนที่ไม่ได้อยู่ในห้องอ่านแล้วรู้ว่าเกิดอะไรขึ้น ใครยืนยันอะไร และตกลงกันว่าอย่างไร
-เขียนภาษาไทย กระชับ เป็นข้อ ๆ`,
+เขียนภาษาไทย กระชับ เป็นข้อ ๆ${langNote(lang)}`,
     user: `วาระ: "${question}"
 ผู้เข้าประชุม: ${who}
 ประธาน/ผู้สรุป: ${chairName}
@@ -535,7 +537,7 @@ export async function runMeetingEngine(input: EngineInput, send: (ev: AskEvent) 
         send({ type: 'phase', phase: 'synthesis', label: `${SECRETARY_NAME} กำลังจดรายงานการประชุม` });
         await working({ id: 'secretary', name: SECRETARY_NAME }, 'minutes', 'จดรายงานการประชุม', secretaryCreds);
         try {
-          const text = await writeMinutes(question, agents, dump, final, chairName, secretaryCreds);
+          const text = await writeMinutes(question, agents, dump, final, chairName, secretaryCreds, company?.lang);
           send({ type: 'minutes', text, model: await modelOf(secretaryCreds) });
         } catch (e) {
           // ไม่มีรายงานก็ยังมีคำตอบของประธานอยู่ - แต่ต้องบอก ไม่งั้นผู้ใช้คิดว่าเลขาฯ ลืมจด

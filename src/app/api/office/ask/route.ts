@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   if (!t) return Response.json({ error: 'token ไม่ถูกต้อง' }, { status: 401 });
   const { officeId, scope } = t;
 
-  let body: { question?: string; deptIds?: string[]; mode?: MeetingMode; publicOnly?: boolean; askedBy?: string };
+  let body: { question?: string; deptIds?: string[]; mode?: MeetingMode; publicOnly?: boolean; askedBy?: string; lang?: 'th' | 'en' };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
     question: body.question,
     deptIds: body.deptIds,
     mode: body.mode,
+    lang: body.lang === 'en' ? 'en' : 'th',
     audience: customer ? 'customer' : 'internal',
     askedByLabel: body.askedBy,
     source: 'api',

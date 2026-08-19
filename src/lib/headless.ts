@@ -16,6 +16,7 @@ import type {
   AskAgent, AskEvent, MeetingAttendeeLite, MeetingAudience, MeetingMode, MeetingSource, Opinion,
 } from '@/lib/protocol';
 import type { Palette } from '@/game/types';
+import type { ReplyLang } from '@/lib/lang';
 
 /* ============================================================
    ประชุมแบบไม่มีเบราว์เซอร์ - MCP / LINE / API เรียกเข้ามา
@@ -48,6 +49,8 @@ export interface HeadlessInput {
    * และ playbook ของแผนกจะถูกแนบให้หัวหน้าที่ตอบรู้ว่าต้องทำอะไรกับมัน
    */
   inbox?: { title: string; source: string; dataText: string };
+  /** ภาษาที่ให้ agent ตอบ - 'th' (ดีฟอลต์) | 'en' */
+  lang?: ReplyLang;
 }
 
 export interface HeadlessResult {
@@ -235,6 +238,7 @@ export async function runHeadless(input: HeadlessInput): Promise<HeadlessResult>
   const front = team.chair;
 
   const company = await loadCompany(input.officeId, question, deptIds, creds, customer);
+  if (input.lang === 'en') company.lang = 'en';
   // ชื่อแผนกที่มีคนอยู่ - ข้อเท็จจริงสาธารณะ (ลูกค้าถาม "มีฝ่ายไหนบ้าง" ตอบได้ ไม่ต้องบอกชื่อคน)
   company.departments = hiredDeptIds.map((id) => depts.byId.get(id)?.nameTh ?? id);
   // ของจาก inbox = เอกสารเข้า: วางในชั้นข้อมูลของแผนกเจ้าของเรื่อง (agent อ่านเป็นข้อมูล ไม่ใช่คำสั่ง)
@@ -351,6 +355,7 @@ export async function runHeadless(input: HeadlessInput): Promise<HeadlessResult>
 
     // ประชุมภายในแบบสายพาน: PR เดินไปถามทีละแผนก แล้วสรุปเอง (บทถกอยู่ในสมุด ลูกค้าไม่เห็น)
     const internalCompany = await loadCompany(input.officeId, internalQuestion, finalDeptIds, creds, false);
+    if (input.lang === 'en') internalCompany.lang = 'en';
     await runMeetingEngine({
       question: `${internalQuestion}\n\n(บริบท: ลูกค้าถามเข้ามาว่า "${question}" - ${front.name} จาก${front.deptName}รับเรื่องมาปรึกษา)`,
       mode: 'relay', ownerDeptId, chairId: front.id, agents: meetTeam.agents, company: internalCompany, creds, assign, departments: custom,

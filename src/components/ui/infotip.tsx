@@ -4,6 +4,7 @@ import { Info } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 
 /* ============================================================
    InfoTip - ไอคอน (i) เล็ก ๆ ที่กด/ชี้แล้วโผล่คำอธิบาย
@@ -54,7 +55,7 @@ export function InfoTip({ children, className, side, ...props }: Omit<ComponentP
       <button
         ref={btn}
         type="button"
-        aria-label="รายละเอียด"
+        aria-label={t('รายละเอียด')}
         aria-expanded={open}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v); }}
         onMouseEnter={() => setOpen(true)}

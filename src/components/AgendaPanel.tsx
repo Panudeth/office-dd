@@ -12,6 +12,7 @@ import { Field } from '@/components/ui/input';
 import { Hint } from '@/components/ui/panel';
 import Portrait from '@/components/Portrait';
 import { deptHeadIds } from '@/lib/heads';
+import { t } from '@/lib/i18n';
 
 export interface AgendaPick {
   agentIds: string[];
@@ -125,17 +126,17 @@ export default function AgendaPanel({
   const relayTooSmall = mode === 'relay' && pickedDepts.length < 2;
 
   const blocked = !picked.length
-    ? 'ต้องเลือกอย่างน้อย 1 คน'
+    ? t('ต้องเลือกอย่างน้อย 1 คน')
     : relayTooSmall
-      ? 'สายพานต้องมีอย่างน้อย 2 แผนก ไม่งั้นไม่มีใครให้เดินไปถาม'
+      ? t('สายพานต้องมีอย่างน้อย 2 แผนก ไม่งั้นไม่มีใครให้เดินไปถาม')
       : null;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onCancel()}>
       <DialogContent
         icon={<ClipboardList />}
-        title="ระเบียบวาระการประชุม"
-        description="ตรวจว่าใครควรเข้าประชุม แก้ได้ก่อนเริ่ม"
+        title={t('ระเบียบวาระการประชุม')}
+        description={t('ตรวจว่าใครควรเข้าประชุม แก้ได้ก่อนเริ่ม')}
       >
         <p className="rounded-box border border-ink-600 bg-ink-700 px-2 py-1.5 text-[12px] leading-relaxed text-parchment">
           {question}
@@ -144,13 +145,13 @@ export default function AgendaPanel({
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-8 text-[12px] text-dim">
             <LoaderCircle className="size-4 animate-spin" />
-            เลขานุการกำลังอ่านคำถาม และเลือกแผนกที่เกี่ยวข้อง
+            {t('เลขานุการกำลังอ่านคำถาม และเลือกแผนกที่เกี่ยวข้อง')}
           </div>
         ) : error ? (
           <p className="rounded-box border-2 border-wood-dark bg-wood-deep/60 px-2 py-1.5 text-[11px] leading-relaxed text-brass-lite">
-            <b className="text-brass">เลือกแผนกอัตโนมัติไม่สำเร็จ</b> {error}
+            <b className="text-brass">{t('เลือกแผนกอัตโนมัติไม่สำเร็จ')}</b> {error}
             <br />
-            เลือกเองด้านล่างแล้วเริ่มประชุมได้เลย
+            {t('เลือกเองด้านล่างแล้วเริ่มประชุมได้เลย')}
           </p>
         ) : null}
 
@@ -164,14 +165,14 @@ export default function AgendaPanel({
             )}
             {agenda.fallback && (
               <Hint className="text-brass">
-                ยังไม่มีคีย์ LLM เลขาฯ จึงเลือกจากการนับคำในคำถาม ไม่ได้อ่านความหมายจริง
+                {t('ยังไม่มีคีย์ LLM เลขาฯ จึงเลือกจากการนับคำในคำถาม ไม่ได้อ่านความหมายจริง')}
               </Hint>
             )}
 
             <Field
-              label="รูปแบบการประชุม"
+              label={t('รูปแบบการประชุม')}
               info={MEETING_MODES.map((m) => (
-                <span key={m.id} className="block"><b className="text-parchment">{m.th}</b> - {m.hint}</span>
+                <span key={m.id} className="block"><b className="text-parchment">{t(m.th)}</b> - {t(m.hint)}</span>
               ))}
             >
               <div className="flex gap-1.5">
@@ -183,15 +184,15 @@ export default function AgendaPanel({
                     className={mode === m.id ? 'flex-1' : 'flex-1 border-ink-500'}
                     onClick={() => changeMode(m.id)}
                   >
-                    {m.th}
+                    {t(m.th)}
                   </Button>
                 ))}
               </div>
             </Field>
 
             <Field
-              label={mode === 'relay' ? 'เจ้าของเรื่อง (คนถือคำถามและสรุป)' : mode === 'direct' ? 'คนตอบ' : 'ประธานที่ประชุม (คนสรุป)'}
-              info="เลือกได้เฉพาะหัวหน้าแผนก (คนแรกที่จ้างในแผนก) หัวหน้าร่วมถกในรอบปกติด้วย แล้วรับหน้าที่ประธานตอนสรุป"
+              label={mode === 'relay' ? t('เจ้าของเรื่อง (คนถือคำถามและสรุป)') : mode === 'direct' ? t('คนตอบ') : t('ประธานที่ประชุม (คนสรุป)')}
+              info={t('เลือกได้เฉพาะหัวหน้าแผนก (คนแรกที่จ้างในแผนก) หัวหน้าร่วมถกในรอบปกติด้วย แล้วรับหน้าที่ประธานตอนสรุป')}
             >
               <div className="flex flex-wrap gap-1.5">
                 {chairOptions.map((r) => {
@@ -209,20 +210,20 @@ export default function AgendaPanel({
                       <Portrait palette={r.palette} size={1} className="block shrink-0" />
                       {on && <Crown className="size-3 text-brass" />}
                       {r.name}
-                      <span className={on ? 'font-normal text-parchment-2/70' : 'font-normal text-dim'}>{d?.shortTh ?? r.deptId}</span>
+                      <span className={on ? 'font-normal text-parchment-2/70' : 'font-normal text-dim'}>{t(d?.shortTh ?? r.deptId)}</span>
                     </button>
                   );
                 })}
-                {!chairOptions.length && <Hint>เลือกคนก่อน แล้วค่อยเลือกประธาน</Hint>}
+                {!chairOptions.length && <Hint>{t('เลือกคนก่อน แล้วค่อยเลือกประธาน')}</Hint>}
               </div>
             </Field>
 
-            <Field label="ผู้เข้าประชุม">
+            <Field label={t('ผู้เข้าประชุม')}>
               <div className="mb-1 flex items-center gap-2">
                 <Users className="size-3.5 text-dim" />
                 <span className={`text-[11px] ${full ? 'text-brass' : 'text-dim'}`}>
-                  {picked.length} / {MAX_ATTENDEES} ที่นั่ง
-                  {full && ' - เต็มแล้ว เอาใครออกก่อนถึงจะเพิ่มได้'}
+                  {t('{n} / {max} ที่นั่ง', { n: picked.length, max: MAX_ATTENDEES })}
+                  {full && t(' - เต็มแล้ว เอาใครออกก่อนถึงจะเพิ่มได้')}
                 </span>
               </div>
 
@@ -237,11 +238,11 @@ export default function AgendaPanel({
                       style={{ borderLeftColor: d.color }}
                     >
                       <div className="flex items-center gap-2">
-                        <span className="text-[12px] font-semibold text-parchment">{d.nameTh}</span>
+                        <span className="text-[12px] font-semibold text-parchment">{t(d.nameTh)}</span>
                         {reason ? (
-                          <Badge variant="brass">เลขาฯ แนะนำ</Badge>
+                          <Badge variant="brass">{t('เลขาฯ แนะนำ')}</Badge>
                         ) : (
-                          <Badge>ไม่ได้ถูกเสนอ</Badge>
+                          <Badge>{t('ไม่ได้ถูกเสนอ')}</Badge>
                         )}
                       </div>
                       {reason && (
@@ -256,7 +257,7 @@ export default function AgendaPanel({
                               key={m.id}
                               onClick={() => toggle(m.id)}
                               disabled={!on && full}
-                              title={on ? 'เอาออกจากวาระ' : full ? 'ที่นั่งเต็มแล้ว' : 'เพิ่มเข้าวาระ'}
+                              title={on ? t('เอาออกจากวาระ') : full ? t('ที่นั่งเต็มแล้ว') : t('เพิ่มเข้าวาระ')}
                               className={`flex items-center gap-1.5 rounded-box border-2 px-1.5 py-1 text-[11px] disabled:opacity-40 ${
                                 on
                                   ? 'border-carpet bg-carpet-dark text-white'
@@ -276,7 +277,7 @@ export default function AgendaPanel({
                             </button>
                           );
                         })}
-                        {!team.length && <Hint>ยังไม่มีพนักงานในแผนกนี้</Hint>}
+                        {!team.length && <Hint>{t('ยังไม่มีพนักงานในแผนกนี้')}</Hint>}
                       </div>
                     </div>
                   );
@@ -294,14 +295,14 @@ export default function AgendaPanel({
 
         <DialogFooter>
           <Button variant="ghost" onClick={onCancel}>
-            ยกเลิก
+            {t('ยกเลิก')}
           </Button>
           <Button
             variant="primary"
             disabled={loading || !!blocked || !picked.length}
             onClick={() => onStart({ agentIds: picked, mode, ownerDeptId: effectiveOwner, chairId: effectiveChair })}
           >
-            <Play /> เริ่มประชุม
+            <Play /> {t('เริ่มประชุม')}
           </Button>
         </DialogFooter>
       </DialogContent>

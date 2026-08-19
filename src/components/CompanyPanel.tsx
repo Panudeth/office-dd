@@ -21,6 +21,7 @@ import { InfoTip } from '@/components/ui/infotip';
 import { Field, Input, Textarea } from '@/components/ui/input';
 import { Hint } from '@/components/ui/panel';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { t } from '@/lib/i18n';
 
 /* ============================================================
    ข้อมูลบริษัท - สี่ชั้นที่ agent จะอ่านก่อนตอบ
@@ -103,7 +104,7 @@ export default function CompanyPanel({
       const clean = Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, (v ?? '').trim()]).filter(([, v]) => v));
       await saveProfile(officeId, clean, userId);
       onChanged();
-      setMsg({ ok: true, text: 'บันทึกโปรไฟล์แล้ว - agent ทุกตัวจะเห็นในคำถามถัดไป' });
+      setMsg({ ok: true, text: t('บันทึกโปรไฟล์แล้ว - agent ทุกตัวจะเห็นในคำถามถัดไป') });
     } catch (e) {
       setMsg({ ok: false, text: sbError(e) });
     } finally {
@@ -124,7 +125,7 @@ export default function CompanyPanel({
       await saveProducts(officeId, filledItems, userId);
       onChanged();
       setItems(filledItems.map((p) => ({ ...p })));
-      setMsg({ ok: true, text: `บันทึกสินค้า ${filledItems.length} รายการแล้ว - agent ทุกตัวจะเห็นในคำถามถัดไป` });
+      setMsg({ ok: true, text: t('บันทึกสินค้า {n} รายการแล้ว - agent ทุกตัวจะเห็นในคำถามถัดไป', { n: filledItems.length }) });
     } catch (e) {
       setMsg({ ok: false, text: sbError(e) });
     } finally {
@@ -150,7 +151,7 @@ export default function CompanyPanel({
     try {
       await saveDeptNote(officeId, noteDept, (notes[noteDept] ?? '').trim(), userId, (pubNotes[noteDept] ?? '').trim());
       onChanged();
-      setMsg({ ok: true, text: `บันทึกโน้ตของ${DEPT_BY_ID.get(noteDept)?.nameTh ?? noteDept}แล้ว` });
+      setMsg({ ok: true, text: t('บันทึกโน้ตของ{name}แล้ว', { name: t(DEPT_BY_ID.get(noteDept)?.nameTh ?? noteDept) }) });
     } catch (e) {
       setMsg({ ok: false, text: sbError(e) });
     } finally {
@@ -165,7 +166,7 @@ export default function CompanyPanel({
    */
   const ingest = async (name: string, text: string, size: number, file?: File) => {
     if (!officeId) return;
-    if (!text.trim()) { setMsg({ ok: false, text: 'ไฟล์ว่าง หรืออ่านเป็นข้อความไม่ได้' }); return; }
+    if (!text.trim()) { setMsg({ ok: false, text: t('ไฟล์ว่าง หรืออ่านเป็นข้อความไม่ได้') }); return; }
     setUploading(name); setMsg(null);
     let row: DocRow | null = null;
     try {
@@ -186,7 +187,7 @@ export default function CompanyPanel({
       })));
       if (file) await uploadDocFile(officeId, row.id, file);
       await updateDoc(row.id, { status: 'ready', chunk_count: data.texts.length });
-      setMsg({ ok: true, text: `อัปโหลด "${name}" แล้ว ${data.texts.length} ชิ้น - agent จะค้นเจอตอนถามเรื่องที่เกี่ยว` });
+      setMsg({ ok: true, text: t('อัปโหลด "{name}" แล้ว {n} ชิ้น - agent จะค้นเจอตอนถามเรื่องที่เกี่ยว', { name, n: data.texts.length }) });
     } catch (e) {
       const text = e instanceof Error ? e.message : String(e);
       if (row) await updateDoc(row.id, { status: 'error', error: text }).catch(() => {});
@@ -200,7 +201,7 @@ export default function CompanyPanel({
   const onFile = async (file: File) => {
     const ok = /\.(txt|md|markdown|csv|json)$/i.test(file.name);
     if (!ok) {
-      setMsg({ ok: false, text: 'ตอนนี้รับเฉพาะไฟล์ข้อความ (.txt .md .csv .json) - PDF/Word ให้แปลงเป็นข้อความก่อน หรือวางข้อความในช่องด้านล่าง' });
+      setMsg({ ok: false, text: t('ตอนนี้รับเฉพาะไฟล์ข้อความ (.txt .md .csv .json) - PDF/Word ให้แปลงเป็นข้อความก่อน หรือวางข้อความในช่องด้านล่าง') });
       return;
     }
     const text = await file.text();
@@ -214,8 +215,8 @@ export default function CompanyPanel({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent
         icon={<BookOpen />}
-        title="ข้อมูลบริษัท"
-        description="สิ่งที่ agent ทุกตัวอ่านก่อนตอบ - ทำให้คำตอบเป็นเรื่องของบริษัทเรา ไม่ใช่บริษัทไหนก็ได้"
+        title={t('ข้อมูลบริษัท')}
+        description={t('สิ่งที่ agent ทุกตัวอ่านก่อนตอบ - ทำให้คำตอบเป็นเรื่องของบริษัทเรา ไม่ใช่บริษัทไหนก็ได้')}
         wide
       >
         {blocked ? (
@@ -224,26 +225,25 @@ export default function CompanyPanel({
           <>
             {!canEdit && (
               <p className="flex items-center gap-1.5 rounded-box border border-ink-600 bg-ink-700 px-2 py-1 text-[11px] text-dim">
-                <ShieldAlert className="size-3.5" /> คุณอ่านได้อย่างเดียว - เจ้าของหรือ exec ของออฟฟิศเท่านั้นที่แก้ได้
+                <ShieldAlert className="size-3.5" /> {t('คุณอ่านได้อย่างเดียว - เจ้าของหรือ exec ของออฟฟิศเท่านั้นที่แก้ได้')}
               </p>
             )}
             <p className="flex items-start gap-1.5 rounded-box border border-dashed border-ink-500 px-2 py-1 text-[10px] leading-relaxed text-dim">
               <ShieldAlert className="mt-px size-3 shrink-0 text-brass" />
               <span className="flex flex-wrap items-center gap-1.5">
-                ข้อมูลนี้ถูกส่งไปที่ <b className="text-parchment">{llmLabel}</b> ทุกคำถาม - อย่าใส่รหัสผ่าน เลขบัตร หรือข้อมูลลับ
+                {t('ข้อมูลนี้ถูกส่งไปที่')} <b className="text-parchment">{llmLabel}</b> {t('ทุกคำถาม - อย่าใส่รหัสผ่าน เลขบัตร หรือข้อมูลลับ')}
                 <InfoTip>
-                  ทุกฟิลด์ในหน้านี้ถูกแนบไปกับทุกคำถามที่ส่งถึงผู้ให้บริการโมเดล จึงไม่ควรใส่รหัสผ่าน เลขบัตร
-                  หรือข้อมูลที่ห้ามออกนอกบริษัท Ollama ในเครื่องปลอดภัยที่สุด ส่วน free tier ของบางผู้ให้บริการอาจนำข้อมูลไปฝึกโมเดล
+                  {t('ทุกฟิลด์ในหน้านี้ถูกแนบไปกับทุกคำถามที่ส่งถึงผู้ให้บริการโมเดล จึงไม่ควรใส่รหัสผ่าน เลขบัตร หรือข้อมูลที่ห้ามออกนอกบริษัท Ollama ในเครื่องปลอดภัยที่สุด ส่วน free tier ของบางผู้ให้บริการอาจนำข้อมูลไปฝึกโมเดล')}
                 </InfoTip>
               </span>
             </p>
 
             <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-col">
               <TabsList className="rounded-t-box border border-b-0 border-wood-deep">
-                <TabsTrigger value="profile"><BookOpen /> โปรไฟล์</TabsTrigger>
-                <TabsTrigger value="products"><Package /> สินค้า{products.length ? ` ${products.length}` : ''}</TabsTrigger>
-                <TabsTrigger value="depts">แผนก</TabsTrigger>
-                <TabsTrigger value="docs"><FileText /> เอกสาร{docs.length ? ` ${docs.length}` : ''}</TabsTrigger>
+                <TabsTrigger value="profile"><BookOpen /> {t('โปรไฟล์')}</TabsTrigger>
+                <TabsTrigger value="products"><Package /> {t('สินค้า')}{products.length ? ` ${products.length}` : ''}</TabsTrigger>
+                <TabsTrigger value="depts">{t('แผนก')}</TabsTrigger>
+                <TabsTrigger value="docs"><FileText /> {t('เอกสาร')}{docs.length ? ` ${docs.length}` : ''}</TabsTrigger>
               </TabsList>
 
               {/* ---------- โปรไฟล์ ---------- */}
@@ -257,15 +257,15 @@ export default function CompanyPanel({
                         key={f.key}
                         label={
                           <span className="flex items-center gap-2">
-                            {f.label}
+                            {t(f.label)}
                             {/* ชั้นข้อมูล - ลูกค้าที่ถามผ่าน LINE/ช่องทางสาธารณะเห็นเฉพาะฟิลด์ที่ติดป้ายนี้ */}
                             {f.public
-                              ? <Badge variant="brass" title="ลูกค้าที่ถามผ่านช่องทางสาธารณะเห็นได้">ลูกค้าเห็น</Badge>
-                              : <Badge title="เฉพาะคนในและ agent ภายใน">ภายใน</Badge>}
+                              ? <Badge variant="brass" title={t('ลูกค้าที่ถามผ่านช่องทางสาธารณะเห็นได้')}>{t('ลูกค้าเห็น')}</Badge>
+                              : <Badge title={t('เฉพาะคนในและ agent ภายใน')}>{t('ภายใน')}</Badge>}
                             <span className={`ml-auto text-[10px] font-normal ${over ? 'text-brass' : 'text-dim'}`}>{v.length}/{f.max}</span>
                           </span>
                         }
-                        info={f.hint}
+                        info={t(f.hint)}
                       >
                         {f.long ? (
                           <Textarea rows={2} value={v} disabled={!canEdit} onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))} className="h-auto" />
@@ -278,11 +278,11 @@ export default function CompanyPanel({
                 </div>
                 <div className="mt-2 flex items-center gap-2">
                   <span className={`text-[11px] ${overTotal ? 'text-brass' : 'text-dim'}`}>
-                    รวม {total.toLocaleString()}/{PROFILE_MAX_TOTAL.toLocaleString()} ตัวอักษร
-                    {overTotal && ' - ยาวเกิน จะถูกส่งทุกคอล ตัดให้สั้นลงก่อน'}
+                    {t('รวม {n}/{max} ตัวอักษร', { n: total.toLocaleString(), max: PROFILE_MAX_TOTAL.toLocaleString() })}
+                    {overTotal && t(' - ยาวเกิน จะถูกส่งทุกคอล ตัดให้สั้นลงก่อน')}
                   </span>
                   <Button variant="primary" className="ml-auto" disabled={!canEdit || saving || overTotal} onClick={doSaveProfile}>
-                    {saving ? <LoaderCircle className="animate-spin" /> : <Save />} บันทึกโปรไฟล์
+                    {saving ? <LoaderCircle className="animate-spin" /> : <Save />} {t('บันทึกโปรไฟล์')}
                   </Button>
                 </div>
               </TabsContent>
@@ -291,15 +291,14 @@ export default function CompanyPanel({
               <TabsContent value="products" className="min-h-0">
                 <div className="flex max-h-[56vh] flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5">
                   <Hint className="flex items-center gap-1.5">
-                    รายการสินค้า/บริการที่ agent ใช้อ้างอิง
+                    {t('รายการสินค้า/บริการที่ agent ใช้อ้างอิง')}
                     <InfoTip>
-                      รายการนี้ถูกส่งให้ agent ทุกตัวพร้อมโปรไฟล์ ควรใส่ชื่อและราคาให้ตรงของจริง agent จะอ้างตามนี้และไม่แต่งราคาเอง
-                      ราคาพิมพ์เป็นข้อความได้ เช่น &quot;990-2,990 บาท/เดือน&quot; หรือ &quot;เริ่มต้น 15,000 บาท/โปรเจกต์&quot;
+                      {t('รายการนี้ถูกส่งให้ agent ทุกตัวพร้อมโปรไฟล์ ควรใส่ชื่อและราคาให้ตรงของจริง agent จะอ้างตามนี้และไม่แต่งราคาเอง ราคาพิมพ์เป็นข้อความได้ เช่น "990-2,990 บาท/เดือน" หรือ "เริ่มต้น 15,000 บาท/โปรเจกต์"')}
                     </InfoTip>
                   </Hint>
 
                   {!items.length ? (
-                    <Hint className="py-2 text-center">ยังไม่มีสินค้า - กด "เพิ่มสินค้า" ด้านล่าง</Hint>
+                    <Hint className="py-2 text-center">{t('ยังไม่มีสินค้า - กด "เพิ่มสินค้า" ด้านล่าง')}</Hint>
                   ) : (
                     <ul className="flex flex-col gap-1.5">
                       {items.map((p, i) => {
@@ -314,7 +313,7 @@ export default function CompanyPanel({
                                 disabled={!canEdit}
                                 maxLength={PRODUCT_LIMITS.name}
                                 onChange={(e) => setItem(p.id, { name: e.target.value })}
-                                placeholder="ชื่อสินค้า/บริการ *"
+                                placeholder={t('ชื่อสินค้า/บริการ *')}
                                 className="min-w-0 flex-1 font-semibold"
                               />
                               <Input
@@ -322,14 +321,14 @@ export default function CompanyPanel({
                                 disabled={!canEdit}
                                 maxLength={PRODUCT_LIMITS.price}
                                 onChange={(e) => setItem(p.id, { price: e.target.value })}
-                                placeholder="ราคา"
+                                placeholder={t('ราคา')}
                                 className="w-40 shrink-0"
                               />
                               {canEdit && (
                                 <>
-                                  <Button size="icon" variant="ghost" className="size-7" title="เลื่อนขึ้น" disabled={i === 0} onClick={() => moveItem(p.id, -1)}><ArrowUp /></Button>
-                                  <Button size="icon" variant="ghost" className="size-7" title="เลื่อนลง" disabled={i === items.length - 1} onClick={() => moveItem(p.id, 1)}><ArrowDown /></Button>
-                                  <Button size="icon" variant="ghost" className="size-7" title="ลบรายการนี้" onClick={() => setItems((xs) => xs.filter((x) => x.id !== p.id))}><Trash2 /></Button>
+                                  <Button size="icon" variant="ghost" className="size-7" title={t('เลื่อนขึ้น')} disabled={i === 0} onClick={() => moveItem(p.id, -1)}><ArrowUp /></Button>
+                                  <Button size="icon" variant="ghost" className="size-7" title={t('เลื่อนลง')} disabled={i === items.length - 1} onClick={() => moveItem(p.id, 1)}><ArrowDown /></Button>
+                                  <Button size="icon" variant="ghost" className="size-7" title={t('ลบรายการนี้')} onClick={() => setItems((xs) => xs.filter((x) => x.id !== p.id))}><Trash2 /></Button>
                                 </>
                               )}
                             </div>
@@ -340,7 +339,7 @@ export default function CompanyPanel({
                                 disabled={!canEdit}
                                 maxLength={PRODUCT_LIMITS.description}
                                 onChange={(e) => setItem(p.id, { description: e.target.value })}
-                                placeholder="รายละเอียด - ทำอะไร ให้ใคร จุดขาย"
+                                placeholder={t('รายละเอียด - ทำอะไร ให้ใคร จุดขาย')}
                                 className="h-auto min-w-0 flex-1 text-[11px]"
                               />
                               <Textarea
@@ -349,11 +348,11 @@ export default function CompanyPanel({
                                 disabled={!canEdit}
                                 maxLength={PRODUCT_LIMITS.note}
                                 onChange={(e) => setItem(p.id, { note: e.target.value })}
-                                placeholder="หมายเหตุ (ภายใน - ลูกค้าไม่เห็น) ต้นทุน/มาร์จิน เงื่อนไข สถานะ"
+                                placeholder={t('หมายเหตุ (ภายใน - ลูกค้าไม่เห็น) ต้นทุน/มาร์จิน เงื่อนไข สถานะ')}
                                 className="h-auto w-56 shrink-0 text-[11px]"
                               />
                             </div>
-                            {issue && !blank && <span className="pl-6 text-[10px] text-brass">{issue}</span>}
+                            {issue && !blank && <span className="pl-6 text-[10px] text-brass">{t(issue)}</span>}
                           </li>
                         );
                       })}
@@ -366,16 +365,16 @@ export default function CompanyPanel({
                       disabled={items.length >= PRODUCT_MAX_COUNT}
                       onClick={() => setItems((xs) => [...xs, emptyProduct(crypto.randomUUID())])}
                     >
-                      <Plus /> เพิ่มสินค้า{items.length >= PRODUCT_MAX_COUNT ? ` (เต็ม ${PRODUCT_MAX_COUNT} รายการ)` : ''}
+                      <Plus /> {t('เพิ่มสินค้า')}{items.length >= PRODUCT_MAX_COUNT ? t(' (เต็ม {n} รายการ)', { n: PRODUCT_MAX_COUNT }) : ''}
                     </Button>
                   )}
                 </div>
                 <div className="mt-2 flex items-center gap-2">
                   <span className={`text-[11px] ${productProblem ? 'text-brass' : 'text-dim'}`}>
-                    {productProblem ?? `${filledItems.length}/${PRODUCT_MAX_COUNT} รายการ`}
+                    {productProblem ? t(productProblem) : t('{n}/{max} รายการ', { n: filledItems.length, max: PRODUCT_MAX_COUNT })}
                   </span>
                   <Button variant="primary" className="ml-auto" disabled={!canEdit || saving || !!productProblem || !productsDirty} onClick={doSaveProducts}>
-                    {saving ? <LoaderCircle className="animate-spin" /> : <Save />} บันทึกรายการสินค้า
+                    {saving ? <LoaderCircle className="animate-spin" /> : <Save />} {t('บันทึกรายการสินค้า')}
                   </Button>
                 </div>
               </TabsContent>
@@ -394,7 +393,7 @@ export default function CompanyPanel({
                           className={`flex items-center gap-1.5 rounded-box border-2 px-2 py-1 text-[11px] font-semibold ${on ? 'border-brass bg-ink-700 text-parchment' : 'border-ink-600 bg-ink-800 text-dim hover:border-ink-500'}`}
                         >
                           <i className="size-2 rounded-[2px]" style={{ background: d.color }} />
-                          {d.shortTh}
+                          {t(d.shortTh)}
                           {has && <Check className="size-3 text-carpet-lite" />}
                         </button>
                       );
@@ -403,13 +402,13 @@ export default function CompanyPanel({
                   <Field
                     label={
                       <span className="flex items-center gap-2">
-                        ข้อมูลภายในของ{DEPT_BY_ID.get(noteDept)?.nameTh}
+                        {t('ข้อมูลภายในของ{name}', { name: t(DEPT_BY_ID.get(noteDept)?.nameTh ?? '') })}
                         <span className={`ml-auto text-[10px] font-normal ${(notes[noteDept] ?? '').length > DEPT_NOTE_MAX ? 'text-brass' : 'text-dim'}`}>
                           {(notes[noteDept] ?? '').length}/{DEPT_NOTE_MAX}
                         </span>
                       </span>
                     }
-                    info={`เฉพาะคนของแผนกนี้ที่จะเห็น ควรมี: ${DEPT_NOTE_HINTS[noteDept] ?? ''}`}
+                    info={t('เฉพาะคนของแผนกนี้ที่จะเห็น ควรมี: {hint}', { hint: t(DEPT_NOTE_HINTS[noteDept] ?? '') })}
                   >
                     <Textarea
                       rows={7}
@@ -417,20 +416,20 @@ export default function CompanyPanel({
                       disabled={!canEdit}
                       onChange={(e) => setNotes((n) => ({ ...n, [noteDept]: e.target.value }))}
                       className="h-auto font-mono text-[12px]"
-                      placeholder="เขียนเป็นข้อ ๆ ได้เลย ไม่ต้องสวย - agent อ่านได้"
+                      placeholder={t('เขียนเป็นข้อ ๆ ได้เลย ไม่ต้องสวย - agent อ่านได้')}
                     />
                   </Field>
                   <Field
                     className="mt-2"
                     label={
                       <span className="flex items-center gap-2">
-                        ข้อมูลที่ตอบลูกค้าได้ <Badge variant="brass">ลูกค้าเห็น</Badge>
+                        {t('ข้อมูลที่ตอบลูกค้าได้')} <Badge variant="brass">{t('ลูกค้าเห็น')}</Badge>
                         <span className={`ml-auto text-[10px] font-normal ${(pubNotes[noteDept] ?? '').length > DEPT_NOTE_MAX ? 'text-brass' : 'text-dim'}`}>
                           {(pubNotes[noteDept] ?? '').length}/{DEPT_NOTE_MAX}
                         </span>
                       </span>
                     }
-                    info="ลูกค้าที่ทักมาทาง LINE/ช่องทางสาธารณะจะได้คำตอบจากตรงนี้ (และโปรไฟล์/สินค้า/เอกสารสาธารณะ) เท่านั้น - โน้ตภายในด้านบนไม่ออกไปหาลูกค้า · ใส่คำถามที่ลูกค้าถามบ่อยพร้อมคำตอบมาตรฐาน เวลาทำการ เงื่อนไข ช่องทางติดต่อ"
+                    info={t('ลูกค้าที่ทักมาทาง LINE/ช่องทางสาธารณะจะได้คำตอบจากตรงนี้ (และโปรไฟล์/สินค้า/เอกสารสาธารณะ) เท่านั้น - โน้ตภายในด้านบนไม่ออกไปหาลูกค้า · ใส่คำถามที่ลูกค้าถามบ่อยพร้อมคำตอบมาตรฐาน เวลาทำการ เงื่อนไข ช่องทางติดต่อ')}
                   >
                     <Textarea
                       rows={6}
@@ -438,12 +437,12 @@ export default function CompanyPanel({
                       disabled={!canEdit}
                       onChange={(e) => setPubNotes((n) => ({ ...n, [noteDept]: e.target.value }))}
                       className="h-auto font-mono text-[12px]"
-                      placeholder={'เช่น\nถาม: เปิดกี่โมง  ตอบ: จันทร์-ศุกร์ 9:00-18:00\nถาม: มีบริการอะไรบ้าง  ตอบ: ...'}
+                      placeholder={t('เช่น\nถาม: เปิดกี่โมง  ตอบ: จันทร์-ศุกร์ 9:00-18:00\nถาม: มีบริการอะไรบ้าง  ตอบ: ...')}
                     />
                   </Field>
                   <div className="mt-2 flex justify-end">
                     <Button variant="primary" disabled={!canEdit || saving || (notes[noteDept] ?? '').length > DEPT_NOTE_MAX || (pubNotes[noteDept] ?? '').length > DEPT_NOTE_MAX} onClick={doSaveNote}>
-                      {saving ? <LoaderCircle className="animate-spin" /> : <Save />} บันทึกโน้ตแผนกนี้
+                      {saving ? <LoaderCircle className="animate-spin" /> : <Save />} {t('บันทึกโน้ตแผนกนี้')}
                     </Button>
                   </div>
                 </div>
@@ -453,35 +452,33 @@ export default function CompanyPanel({
               <TabsContent value="docs" className="min-h-0">
                 <div className="flex max-h-[56vh] flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5">
                   <Hint className="flex items-center gap-1.5">
-                    เอกสารอ้างอิงสำหรับ agent (ค้นด้วย embedding)
+                    {t('เอกสารอ้างอิงสำหรับ agent (ค้นด้วย embedding)')}
                     <InfoTip>
-                      เอกสารจะถูกตัดเป็นชิ้น แปลงเป็น vector ด้วย <b className="text-parchment">{llmLabel}</b> แล้วเก็บใน Supabase
-                      ตอนถาม ระบบค้นชิ้นที่เกี่ยวข้องมาแนบให้ agent พร้อมอ้างอิงชื่อไฟล์
-                      ต้องใช้คีย์ที่ทำ embedding ได้ (Gemini / OpenAI / Ollama ที่ pull nomic-embed-text แล้ว)
+                      {t('เอกสารจะถูกตัดเป็นชิ้น แปลงเป็น vector ด้วย')} <b className="text-parchment">{llmLabel}</b> {t('แล้วเก็บใน Supabase ตอนถาม ระบบค้นชิ้นที่เกี่ยวข้องมาแนบให้ agent พร้อมอ้างอิงชื่อไฟล์ ต้องใช้คีย์ที่ทำ embedding ได้ (Gemini / OpenAI / Ollama ที่ pull nomic-embed-text แล้ว)')}
                     </InfoTip>
                   </Hint>
 
-                  <Field label="ชั้นข้อมูล" info="ภายใน = คนในและ agent ภายในเท่านั้น สาธารณะ = ลูกค้าที่ถามผ่าน LINE/ช่องทางสาธารณะให้ PR ค้นตอบได้ด้วย (เช่น โบรชัวร์ ราคา FAQ เงื่อนไขบริการ)">
+                  <Field label={t('ชั้นข้อมูล')} info={t('ภายใน = คนในและ agent ภายในเท่านั้น สาธารณะ = ลูกค้าที่ถามผ่าน LINE/ช่องทางสาธารณะให้ PR ค้นตอบได้ด้วย (เช่น โบรชัวร์ ราคา FAQ เงื่อนไขบริการ)')}>
                     <div className="flex gap-1">
                       <button onClick={() => setUploadPublic(false)} disabled={!canEdit}
                         className={`rounded-box border-2 px-2 py-0.5 text-[10px] ${!uploadPublic ? 'border-brass bg-ink-700 text-parchment' : 'border-ink-600 bg-ink-800 text-dim hover:border-ink-500'}`}>
-                        ภายใน
+                        {t('ภายใน')}
                       </button>
                       <button onClick={() => setUploadPublic(true)} disabled={!canEdit}
                         className={`rounded-box border-2 px-2 py-0.5 text-[10px] ${uploadPublic ? 'border-brass bg-brass/20 text-brass' : 'border-ink-600 bg-ink-800 text-dim hover:border-ink-500'}`}>
-                        สาธารณะ - ลูกค้าเห็นได้
+                        {t('สาธารณะ - ลูกค้าเห็นได้')}
                       </button>
                     </div>
                   </Field>
 
-                  <Field label="ให้แผนกไหนอ่านได้" info="ไม่เลือก = ทุกแผนก เลือกเฉพาะแผนกที่เกี่ยวข้อง เช่น เอกสารกฎหมายเลือกเฉพาะแผนกกฎหมาย">
+                  <Field label={t('ให้แผนกไหนอ่านได้')} info={t('ไม่เลือก = ทุกแผนก เลือกเฉพาะแผนกที่เกี่ยวข้อง เช่น เอกสารกฎหมายเลือกเฉพาะแผนกกฎหมาย')}>
                     <div className="flex flex-wrap gap-1">
                       {DEPARTMENTS.map((d) => {
                         const on = uploadDepts.includes(d.id);
                         return (
                           <button key={d.id} onClick={() => toggleDept(d.id)} disabled={!canEdit}
                             className={`flex items-center gap-1 rounded-box border-2 px-1.5 py-0.5 text-[10px] ${on ? 'border-carpet bg-carpet-dark text-white' : 'border-ink-600 bg-ink-800 text-dim hover:border-ink-500'}`}>
-                            <i className="size-2 rounded-[2px]" style={{ background: d.color }} />{d.shortTh}
+                            <i className="size-2 rounded-[2px]" style={{ background: d.color }} />{t(d.shortTh)}
                           </button>
                         );
                       })}
@@ -492,28 +489,28 @@ export default function CompanyPanel({
                     <input ref={fileRef} type="file" accept=".txt,.md,.markdown,.csv,.json" className="hidden"
                       onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = ''; }} />
                     <Button variant="outline" size="sm" disabled={!canEdit || !!uploading} onClick={() => fileRef.current?.click()}>
-                      {uploading ? <LoaderCircle className="animate-spin" /> : <Upload />} {uploading ? `กำลังอ่าน ${uploading}` : 'อัปโหลดไฟล์ข้อความ'}
+                      {uploading ? <LoaderCircle className="animate-spin" /> : <Upload />} {uploading ? t('กำลังอ่าน {name}', { name: uploading }) : t('อัปโหลดไฟล์ข้อความ')}
                     </Button>
-                    <span className="text-[10px] text-dim">.txt .md .csv .json - PDF/Word แปลงเป็นข้อความก่อน</span>
+                    <span className="text-[10px] text-dim">{t('.txt .md .csv .json - PDF/Word แปลงเป็นข้อความก่อน')}</span>
                   </div>
 
                   <details className="rounded-box border border-ink-600 bg-ink-700 p-2">
-                    <summary className="cursor-pointer text-[11px] text-dim hover:text-parchment">หรือวางข้อความตรงนี้</summary>
+                    <summary className="cursor-pointer text-[11px] text-dim hover:text-parchment">{t('หรือวางข้อความตรงนี้')}</summary>
                     <div className="mt-2 flex flex-col gap-1.5">
-                      <Input value={pasteName} onChange={(e) => setPasteName(e.target.value)} placeholder="ตั้งชื่อเอกสาร เช่น คู่มือพนักงาน 2569" disabled={!canEdit} />
-                      <Textarea rows={6} value={pasteText} onChange={(e) => setPasteText(e.target.value)} className="h-auto font-mono text-[11px]" placeholder="วางข้อความทั้งก้อน" disabled={!canEdit} />
+                      <Input value={pasteName} onChange={(e) => setPasteName(e.target.value)} placeholder={t('ตั้งชื่อเอกสาร เช่น คู่มือพนักงาน 2569')} disabled={!canEdit} />
+                      <Textarea rows={6} value={pasteText} onChange={(e) => setPasteText(e.target.value)} className="h-auto font-mono text-[11px]" placeholder={t('วางข้อความทั้งก้อน')} disabled={!canEdit} />
                       <Button variant="primary" size="sm" className="self-end"
                         disabled={!canEdit || !!uploading || !pasteName.trim() || !pasteText.trim()}
                         onClick={async () => { await ingest(`${pasteName.trim()}.txt`, pasteText, pasteText.length); setPasteName(''); setPasteText(''); }}>
-                        <Upload /> เพิ่มเป็นเอกสาร
+                        <Upload /> {t('เพิ่มเป็นเอกสาร')}
                       </Button>
                     </div>
                   </details>
 
                   {docsLoading && !docs.length ? (
-                    <Hint className="py-2 text-center"><LoaderCircle className="inline size-3 animate-spin" /> กำลังโหลดรายการ</Hint>
+                    <Hint className="py-2 text-center"><LoaderCircle className="inline size-3 animate-spin" /> {t('กำลังโหลดรายการ')}</Hint>
                   ) : !docs.length ? (
-                    <Hint className="py-2 text-center">ยังไม่มีเอกสาร</Hint>
+                    <Hint className="py-2 text-center">{t('ยังไม่มีเอกสาร')}</Hint>
                   ) : (
                     <ul className="flex flex-col gap-1">
                       {docs.map((d) => (
@@ -522,16 +519,16 @@ export default function CompanyPanel({
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-[12px] font-semibold text-parchment">{d.name}</span>
                             <span className="flex flex-wrap items-center gap-1.5 text-[10px] text-dim">
-                              {d.status === 'ready' && <Badge variant="good">{d.chunk_count} ชิ้น</Badge>}
-                              {d.status === 'processing' && <Badge variant="brass">กำลังประมวลผล</Badge>}
-                              {d.status === 'error' && <Badge variant="bad" title={d.error ?? ''}>พัง - {d.error?.slice(0, 60)}</Badge>}
-                              {d.visibility === 'public' && <Badge variant="brass">สาธารณะ</Badge>}
-                              {d.dept_ids.length ? d.dept_ids.map((id) => DEPT_BY_ID.get(id)?.shortTh ?? id).join(', ') : 'ทุกแผนก'}
+                              {d.status === 'ready' && <Badge variant="good">{t('{n} ชิ้น', { n: d.chunk_count })}</Badge>}
+                              {d.status === 'processing' && <Badge variant="brass">{t('กำลังประมวลผล')}</Badge>}
+                              {d.status === 'error' && <Badge variant="bad" title={d.error ?? ''}>{t('พัง')} - {d.error?.slice(0, 60)}</Badge>}
+                              {d.visibility === 'public' && <Badge variant="brass">{t('สาธารณะ')}</Badge>}
+                              {d.dept_ids.length ? d.dept_ids.map((id) => t(DEPT_BY_ID.get(id)?.shortTh ?? id)).join(', ') : t('ทุกแผนก')}
                               <span>· {(d.bytes / 1024).toFixed(1)} KB</span>
                             </span>
                           </span>
                           {canEdit && (
-                            <Button size="icon" variant="ghost" className="size-7" title="ลบเอกสารนี้"
+                            <Button size="icon" variant="ghost" className="size-7" title={t('ลบเอกสารนี้')}
                               onClick={() => { setDocs((x) => x.filter((y) => y.id !== d.id)); deleteDoc(d).catch((e) => { setMsg({ ok: false, text: sbError(e) }); refreshDocs(); }); }}>
                               <Trash2 />
                             </Button>

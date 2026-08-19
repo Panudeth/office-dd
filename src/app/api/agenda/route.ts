@@ -4,6 +4,7 @@ import { sanitizeDeptDefs } from '@/lib/departments';
 import { resolveCreds } from '@/lib/llm';
 import { checkOfficePolicy } from '@/lib/office-policy';
 import type { AgendaRequest } from '@/lib/protocol';
+import { normLang } from '@/lib/lang';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
   const deny = await checkOfficePolicy(body.officeId, creds);
   if (deny) return Response.json({ error: deny }, { status: 403 });
   try {
-    const agenda = await buildAgenda(question, body.hiredDeptIds ?? [], creds, body.profile, sanitizeDeptDefs(body.departments));
+    const agenda = await buildAgenda(question, body.hiredDeptIds ?? [], creds, body.profile, sanitizeDeptDefs(body.departments), normLang(body.lang));
     return Response.json(agenda);
   } catch (err) {
     return Response.json(

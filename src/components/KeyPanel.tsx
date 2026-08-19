@@ -19,6 +19,7 @@ import {
 import { defaultModelForBase } from '@/lib/openai';
 import { deptHeadIds } from '@/lib/heads';
 import type { LlmAssignment } from '@/lib/protocol';
+import { t } from '@/lib/i18n';
 
 export type ProviderId = 'anthropic' | 'gemini' | 'openai';
 
@@ -132,21 +133,21 @@ export function validateSettings(s: {
   label?: string;
 }): string | null {
   if (s.label !== undefined && !s.label.trim())
-    return 'ตั้งชื่อการเชื่อมต่อก่อน จะได้แยกออกว่าอันไหนเป็นอันไหน';
+    return t('ตั้งชื่อการเชื่อมต่อก่อน จะได้แยกออกว่าอันไหนเป็นอันไหน');
   if (s.provider === 'openai') {
     const b = s.baseUrl.trim();
-    if (!b) return 'ยังไม่ได้ใส่ปลายทาง (base URL) - เลือกจากรายการหรือพิมพ์เอง';
+    if (!b) return t('ยังไม่ได้ใส่ปลายทาง (base URL) - เลือกจากรายการหรือพิมพ์เอง');
     let u: URL;
     try {
       u = new URL(b);
     } catch {
-      return 'base URL ไม่ถูกรูปแบบ ต้องเป็น URL เต็ม เช่น https://api.groq.com/openai/v1';
+      return t('base URL ไม่ถูกรูปแบบ ต้องเป็น URL เต็ม เช่น https://api.groq.com/openai/v1');
     }
     if (u.protocol !== 'http:' && u.protocol !== 'https:')
-      return 'base URL ต้องขึ้นต้นด้วย http:// หรือ https://';
+      return t('base URL ต้องขึ้นต้นด้วย http:// หรือ https://');
   }
   if (!s.apiKey.trim() && !keyIsOptional(s.provider, s.baseUrl))
-    return 'ยังไม่ได้ใส่ API key';
+    return t('ยังไม่ได้ใส่ API key');
   return null;
 }
 
@@ -377,7 +378,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
       };
       if (!res.ok || !data.models) throw new Error(data.error ?? `HTTP ${res.status}`);
       setModels(data.models);
-      setCheckMsg({ ok: true, text: `คีย์ใช้ได้ เรียกได้ ${data.models.length} โมเดล` });
+      setCheckMsg({ ok: true, text: t('คีย์ใช้ได้ เรียกได้ {n} โมเดล', { n: data.models.length }) });
       // โมเดลที่เลือกไว้ไม่มีในรายชื่อ คือสาเหตุของ 400 ที่เคยเจอ
       if (draft.model && !data.models.some((m) => m.id === draft.model)) patch({ model: '' });
     } catch (err) {
@@ -449,22 +450,22 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent
         icon={<KeyRound />}
-        title="คีย์ของคุณเอง"
-        description="เก็บได้หลายชุด แล้วเลือกว่าจะใช้อันไหน"
+        title={t('คีย์ของคุณเอง')}
+        description={t('เก็บได้หลายชุด แล้วเลือกว่าจะใช้อันไหน')}
       >
         {!draft ? (
           <>
             {localOnly && (
               <p className={`rounded-box border px-2 py-1 text-[11px] ${offending.length || !activeIsLocal ? 'border-rug-dark bg-[#3f2018] text-rug-lite' : 'border-carpet-dark bg-[#22401f] text-carpet-lite'}`}>
-                ออฟฟิศนี้ใช้ได้เฉพาะโมเดลในเครื่อง/LAN (Ollama, LM Studio){' '}
+                {t('ออฟฟิศนี้ใช้ได้เฉพาะโมเดลในเครื่อง/LAN (Ollama, LM Studio)')}{' '}
                 {offending.length
-                  ? `- ชุด "${offending.map((c) => c.label).join('", "')}" ชี้ออกข้างนอก เซิร์ฟเวอร์จะปฏิเสธ เลือกชุดที่เป็น localhost/LAN แทน`
-                  : !activeConn ? '- ยังไม่ได้เลือกชุดคีย์ จะใช้ค่าของเซิร์ฟเวอร์ (ต้องเป็นในเครื่องเช่นกัน)' : '- ชุดที่ใช้อยู่ผ่านนโยบาย'}
+                  ? t('- ชุด "{names}" ชี้ออกข้างนอก เซิร์ฟเวอร์จะปฏิเสธ เลือกชุดที่เป็น localhost/LAN แทน', { names: offending.map((c) => c.label).join('", "') })
+                  : !activeConn ? t('- ยังไม่ได้เลือกชุดคีย์ จะใช้ค่าของเซิร์ฟเวอร์ (ต้องเป็นในเครื่องเช่นกัน)') : t('- ชุดที่ใช้อยู่ผ่านนโยบาย')}
               </p>
             )}
-            <Field label="การเชื่อมต่อที่บันทึกไว้">
+            <Field label={t('การเชื่อมต่อที่บันทึกไว้')}>
               {!store.items.length ? (
-                <Hint>ยังไม่มี - กดเพิ่มด้านล่าง ถ้าไม่มีเลยจะใช้คีย์ของเซิร์ฟเวอร์แทน</Hint>
+                <Hint>{t('ยังไม่มี - กดเพิ่มด้านล่าง ถ้าไม่มีเลยจะใช้คีย์ของเซิร์ฟเวอร์แทน')}</Hint>
               ) : (
                 <ul className="flex flex-col gap-1">
                   {store.items.map((c) => {
@@ -479,7 +480,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                         <button
                           onClick={() => onChange({ ...store, active: c.id })}
                           className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                          title={on ? 'กำลังใช้อยู่' : 'กดเพื่อเปลี่ยนมาใช้ชุดนี้'}
+                          title={on ? t('กำลังใช้อยู่') : t('กดเพื่อเปลี่ยนมาใช้ชุดนี้')}
                         >
                           <span
                             className={`flex size-3.5 shrink-0 items-center justify-center rounded-full border-2 ${
@@ -504,7 +505,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                               <X />
                             </Button>
                             <Button size="sm" variant="danger" onClick={() => remove(c.id)}>
-                              ลบ
+                              {t('ลบ')}
                             </Button>
                           </span>
                         ) : (
@@ -513,8 +514,8 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                               size="icon"
                               variant="ghost"
                               className="size-7"
-                              title="ทำสำเนา - ปลายทางเดิม เปลี่ยนแค่โมเดล (เหมาะกับ Ollama หลายโมเดล)"
-                              onClick={() => { setDraft({ ...c, id: crypto.randomUUID(), label: `${c.label} (สำเนา)`, model: '' }); setIsNew(true); }}
+                              title={t('ทำสำเนา - ปลายทางเดิม เปลี่ยนแค่โมเดล (เหมาะกับ Ollama หลายโมเดล)')}
+                              onClick={() => { setDraft({ ...c, id: crypto.randomUUID(), label: t('{label} (สำเนา)', { label: c.label }), model: '' }); setIsNew(true); }}
                             >
                               <Plus />
                             </Button>
@@ -522,7 +523,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                               size="icon"
                               variant="ghost"
                               className="size-7"
-                              title="แก้ไข"
+                              title={t('แก้ไข')}
                               onClick={() => startEdit(c)}
                             >
                               <Pencil />
@@ -531,7 +532,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                               size="icon"
                               variant="ghost"
                               className="size-7"
-                              title="ลบชุดนี้"
+                              title={t('ลบชุดนี้')}
                               onClick={() => setConfirmDel(c.id)}
                             >
                               <Trash2 />
@@ -545,7 +546,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
               )}
 
               <Button variant="outline" size="sm" className="mt-1.5 w-full" onClick={startAdd}>
-                <Plus /> เพิ่มการเชื่อมต่อ
+                <Plus /> {t('เพิ่มการเชื่อมต่อ')}
               </Button>
             </Field>
 
@@ -555,21 +556,21 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                 size="sm"
                 onClick={() => onChange({ ...store, active: null })}
               >
-                เลิกใช้คีย์ของตัวเอง กลับไปใช้ของเซิร์ฟเวอร์
+                {t('เลิกใช้คีย์ของตัวเอง กลับไปใช้ของเซิร์ฟเวอร์')}
               </Button>
             )}
 
             {store.items.length > 0 && (
               <Field
-                label="ใครใช้ชุดไหนในห้องประชุม"
-                info="หัวหน้าแผนก (คนแรกที่จ้าง) ใช้โมเดลเก่งเสมอ และเป็นประธานที่ประชุม/คนสรุป ลูกทีมใช้โมเดลราคาถูกกว่าได้ ตั้งรายคนทับได้ที่ด้านล่างหรือแผงพนักงาน"
+                label={t('ใครใช้ชุดไหนในห้องประชุม')}
+                info={t('หัวหน้าแผนก (คนแรกที่จ้าง) ใช้โมเดลเก่งเสมอ และเป็นประธานที่ประชุม/คนสรุป ลูกทีมใช้โมเดลราคาถูกกว่าได้ ตั้งรายคนทับได้ที่ด้านล่างหรือแผงพนักงาน')}
               >
                 <div className="flex flex-col gap-1.5">
                   {(
                     [
-                      { k: 'chair', icon: <Crown className="size-3.5 text-brass" />, label: 'หัวหน้าแผนก (ประธาน)', note: 'ทุกรอบ' },
-                      { k: 'member', icon: <Users className="size-3.5 text-dim" />, label: 'ลูกทีมที่เหลือ', note: 'ถ้าไม่ตั้งรายคน' },
-                      { k: 'secretary', icon: <NotebookPen className="size-3.5 text-dim" />, label: 'เลขาฯ จดรายงาน', note: 'หลังจบประชุม' },
+                      { k: 'chair', icon: <Crown className="size-3.5 text-brass" />, label: t('หัวหน้าแผนก (ประธาน)'), note: t('ทุกรอบ') },
+                      { k: 'member', icon: <Users className="size-3.5 text-dim" />, label: t('ลูกทีมที่เหลือ'), note: t('ถ้าไม่ตั้งรายคน') },
+                      { k: 'secretary', icon: <NotebookPen className="size-3.5 text-dim" />, label: t('เลขาฯ จดรายงาน'), note: t('หลังจบประชุม') },
                     ] as { k: keyof LlmRoles; icon: ReactNode; label: string; note: string }[]
                   ).map(({ k, icon, label, note }) => (
                     <div key={k} className="flex items-center gap-2">
@@ -582,9 +583,9 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="_default">
-                            {k === 'secretary' ? 'ตามค่าลูกทีม' : `ค่าเริ่มต้น${activeConn ? ` (${activeConn.label})` : ' (คีย์ของเซิร์ฟเวอร์)'}`}
+                            {k === 'secretary' ? t('ตามค่าลูกทีม') : activeConn ? t('ค่าเริ่มต้น ({label})', { label: activeConn.label }) : t('ค่าเริ่มต้น (คีย์ของเซิร์ฟเวอร์)')}
                           </SelectItem>
-                          {k === 'secretary' && <SelectItem value={SECRETARY_OFF}>ไม่จดรายงาน (เร็วขึ้น ประหยัดขึ้น)</SelectItem>}
+                          {k === 'secretary' && <SelectItem value={SECRETARY_OFF}>{t('ไม่จดรายงาน (เร็วขึ้น ประหยัดขึ้น)')}</SelectItem>}
                           {store.items.map((c) => (
                             <SelectItem key={c.id} value={c.id}>{c.label} · {connSubtitle(c)}</SelectItem>
                           ))}
@@ -599,8 +600,8 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
 
             {store.items.length > 0 && roster.length > 0 && (
               <Field
-                label={<span className="flex items-center gap-1.5"><Cpu className="size-3.5" /> โมเดลรายคน</span>}
-                info="ตั้งเฉพาะคนที่ต้องการให้ต่างจากค่าหัวหน้า/ลูกทีม ตั้งจากการ์ดพนักงานในแผงขวาได้เช่นกัน"
+                label={<span className="flex items-center gap-1.5"><Cpu className="size-3.5" /> {t('โมเดลรายคน')}</span>}
+                info={t('ตั้งเฉพาะคนที่ต้องการให้ต่างจากค่าหัวหน้า/ลูกทีม ตั้งจากการ์ดพนักงานในแผงขวาได้เช่นกัน')}
               >
                 <div className="flex max-h-56 flex-col gap-1 overflow-y-auto pr-1">
                   {DEPARTMENTS.map((d) => {
@@ -610,7 +611,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                     return (
                       <div key={d.id}>
                         <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-dim">
-                          <i className="size-2 rounded-[2px]" style={{ background: d.color }} /> {d.nameTh}
+                          <i className="size-2 rounded-[2px]" style={{ background: d.color }} /> {t(d.nameTh)}
                         </div>
                         {team.map((m) => {
                           const cur = store.byEmployee?.[m.id];
@@ -618,7 +619,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                           return (
                             <div key={m.id} className="mb-1 flex items-center gap-2">
                               <Portrait palette={m.palette} size={1} className="block shrink-0" />
-                              <span className="flex w-28 shrink-0 items-center gap-1 text-[11px] text-parchment" title={`${m.name} - ${m.title}${m.id === headId ? ' (หัวหน้าแผนก)' : ''}`}>
+                              <span className="flex w-28 shrink-0 items-center gap-1 text-[11px] text-parchment" title={`${m.name} - ${m.title}${m.id === headId ? ` ${t('(หัวหน้าแผนก)')}` : ''}`}>
                                 {m.id === headId && <Crown className="size-3 shrink-0 text-brass" />}
                                 <span className="truncate">{m.name}</span>
                               </span>
@@ -634,7 +635,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="_default">{m.id === headId ? 'ตามค่าหัวหน้าแผนก' : 'ตามค่าลูกทีม'}</SelectItem>
+                                  <SelectItem value="_default">{m.id === headId ? t('ตามค่าหัวหน้าแผนก') : t('ตามค่าลูกทีม')}</SelectItem>
                                   {store.items.map((c) => (
                                     <SelectItem key={c.id} value={c.id}>{c.label} · {connSubtitle(c)}</SelectItem>
                                   ))}
@@ -651,27 +652,25 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
             )}
 
             <Hint className="flex items-center gap-1.5">
-              คีย์เก็บไว้ในเบราว์เซอร์นี้ - ลบเมื่อเลิกใช้บนเครื่องที่ใช้ร่วมกัน
+              {t('คีย์เก็บไว้ในเบราว์เซอร์นี้ - ลบเมื่อเลิกใช้บนเครื่องที่ใช้ร่วมกัน')}
               <InfoTip side="top">
-                คีย์เก็บใน <code>localStorage</code> ของเบราว์เซอร์ และส่งไปที่เซิร์ฟเวอร์ของแอปตอนถามคำถาม
-                เพื่อเรียกต่อไปยังผู้ให้บริการ โดยไม่ถูก log
+                {t('คีย์เก็บใน')} <code>localStorage</code> {t('ของเบราว์เซอร์ และส่งไปที่เซิร์ฟเวอร์ของแอปตอนถามคำถาม เพื่อเรียกต่อไปยังผู้ให้บริการ โดยไม่ถูก log')}
                 <br />
-                ถ้าคุณเป็นเจ้าของ/exec ของออฟฟิศที่เปิดอยู่ ชุดนี้จะถูก sync ขึ้นเซิร์ฟเวอร์ (เข้ารหัสก่อนบันทึก)
-                เพื่อให้ MCP / API / LINE ใช้โมเดลรายคนแบบเดียวกับหน้าเว็บ ลบได้ที่ &quot;การเชื่อมต่อภายนอก&quot;
+                {t('ถ้าคุณเป็นเจ้าของ/exec ของออฟฟิศที่เปิดอยู่ ชุดนี้จะถูก sync ขึ้นเซิร์ฟเวอร์ (เข้ารหัสก่อนบันทึก) เพื่อให้ MCP / API / LINE ใช้โมเดลรายคนแบบเดียวกับหน้าเว็บ ลบได้ที่ "การเชื่อมต่อภายนอก"')}
                 <br />
-                ถ้าเครื่องนี้มีผู้ใช้ร่วม หรือจะนำแอปไป deploy บนอินเทอร์เน็ต ควรลบคีย์เมื่อเลิกใช้
+                {t('ถ้าเครื่องนี้มีผู้ใช้ร่วม หรือจะนำแอปไป deploy บนอินเทอร์เน็ต ควรลบคีย์เมื่อเลิกใช้')}
               </InfoTip>
             </Hint>
 
             <DialogFooter>
               <Button variant="primary" onClick={onClose}>
-                เสร็จแล้ว
+                {t('เสร็จแล้ว')}
               </Button>
             </DialogFooter>
           </>
         ) : (
           <>
-            <Field label="ชื่อการเชื่อมต่อ" info="ตั้งชื่อให้จำง่าย เช่น Gemini ส่วนตัว หรือ Ollama ในเครื่อง">
+            <Field label={t('ชื่อการเชื่อมต่อ')} info={t('ตั้งชื่อให้จำง่าย เช่น Gemini ส่วนตัว หรือ Ollama ในเครื่อง')}>
               <Input
                 value={draft.label}
                 onChange={(e) => patch({ label: e.target.value })}
@@ -680,7 +679,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
               />
             </Field>
 
-            <Field label="ผู้ให้บริการ">
+            <Field label={t('ผู้ให้บริการ')}>
               <Select
                 value={draft.provider}
                 onValueChange={(v) => patch({ provider: v as ProviderId, model: '' })}
@@ -698,15 +697,14 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
 
             {draft.provider === 'openai' && (
               <Field
-                label="ปลายทาง (base URL)"
+                label={t('ปลายทาง (base URL)')}
                 info={
                   <>
-                    เลือกจากรายการ หรือใส่ URL เอง โดยต้องรองรับ /chat/completions และ /models (ปกติลงท้ายด้วย /v1)
+                    {t('เลือกจากรายการ หรือใส่ URL เอง โดยต้องรองรับ /chat/completions และ /models (ปกติลงท้ายด้วย /v1)')}
                     {remoteWarning && (
                       <>
                         <br />
-                        เว็บนี้ไม่ได้รันบนเครื่องคุณ localhost จึงหมายถึงเครื่องเซิร์ฟเวอร์ของเว็บ ไม่ใช่เครื่องคุณ
-                        ต้องเปิด Ollama ออกอินเทอร์เน็ต (เช่น cloudflared / ngrok / Tailscale) แล้วใส่ URL นั้นแทน
+                        {t('เว็บนี้ไม่ได้รันบนเครื่องคุณ localhost จึงหมายถึงเครื่องเซิร์ฟเวอร์ของเว็บ ไม่ใช่เครื่องคุณ ต้องเปิด Ollama ออกอินเทอร์เน็ต (เช่น cloudflared / ngrok / Tailscale) แล้วใส่ URL นั้นแทน')}
                       </>
                     )}
                   </>
@@ -714,10 +712,10 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                 hint={
                   (preset || remoteWarning) ? (
                     <>
-                      {preset && (optional ? 'ไม่ต้องใช้คีย์ - โหลดรายชื่อโมเดลจากเครื่องให้อัตโนมัติ' : `รับคีย์ได้ที่ ${preset.keys}`)}
+                      {preset && (optional ? t('ไม่ต้องใช้คีย์ - โหลดรายชื่อโมเดลจากเครื่องให้อัตโนมัติ') : t('รับคีย์ได้ที่ {keys}', { keys: t(preset.keys) }))}
                       {remoteWarning && (
                         <b className="mt-1 block text-brass">
-                          เว็บนี้ไม่ได้รันบนเครื่องคุณ - localhost จะเรียก Ollama ไม่เจอ
+                          {t('เว็บนี้ไม่ได้รันบนเครื่องคุณ - localhost จะเรียก Ollama ไม่เจอ')}
                         </b>
                       )}
                     </>
@@ -734,10 +732,10 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                   <SelectContent>
                     {OPENAI_PRESETS.map((p) => (
                       <SelectItem key={p.id} value={p.url}>
-                        {p.label}
+                        {t(p.label)}
                       </SelectItem>
                     ))}
-                    <SelectItem value="custom">กำหนดเอง</SelectItem>
+                    <SelectItem value="custom">{t('กำหนดเอง')}</SelectItem>
                   </SelectContent>
                 </Select>
                 <Input
@@ -754,11 +752,11 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
             {!optional && (
             <Field
               label="API key"
-              info={`รับคีย์ได้ที่ ${meta.where} - ${meta.note}`}
+              info={t('รับคีย์ได้ที่ {where} - {note}', { where: t(meta.where), note: t(meta.note) })}
               hint={
                 looksWrong ? (
                   <b className="text-brass">
-                    คีย์ของ{meta.label}มักขึ้นต้นด้วย {meta.prefix} - ตรวจสอบว่าเลือกผู้ให้บริการถูกต้อง
+                    {t('คีย์ของ{label}มักขึ้นต้นด้วย {prefix} - ตรวจสอบว่าเลือกผู้ให้บริการถูกต้อง', { label: meta.label, prefix: meta.prefix })}
                   </b>
                 ) : undefined
               }
@@ -768,7 +766,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                   type={reveal ? 'text' : 'password'}
                   value={draft.apiKey}
                   onChange={(e) => patch({ apiKey: e.target.value })}
-                  placeholder={meta.prefix ? `${meta.prefix}...` : 'วางคีย์ของเจ้าที่เลือกไว้'}
+                  placeholder={meta.prefix ? `${meta.prefix}...` : t('วางคีย์ของเจ้าที่เลือกไว้')}
                   autoComplete="off"
                   spellCheck={false}
                 />
@@ -778,7 +776,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                   size="icon"
                   className="h-9 shrink-0"
                   onClick={() => setReveal((v) => !v)}
-                  title={reveal ? 'ซ่อนคีย์' : 'แสดงคีย์'}
+                  title={reveal ? t('ซ่อนคีย์') : t('แสดงคีย์')}
                 >
                   {reveal ? <EyeOff /> : <Eye />}
                 </Button>
@@ -787,16 +785,16 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
             )}
 
             <Field
-              label="โมเดล"
-              info={`ไม่ระบุจะใช้ค่าดีฟอลต์ (${effDefault}) กดปุ่มด้านล่างเพื่อโหลดรายชื่อโมเดลที่คีย์นี้ใช้ได้แทนการพิมพ์ชื่อเอง ต้องการอีกโมเดลบนปลายทางเดียวกัน ให้ทำสำเนาชุดนี้จากหน้ารายการ`}
+              label={t('โมเดล')}
+              info={t('ไม่ระบุจะใช้ค่าดีฟอลต์ ({model}) กดปุ่มด้านล่างเพื่อโหลดรายชื่อโมเดลที่คีย์นี้ใช้ได้แทนการพิมพ์ชื่อเอง ต้องการอีกโมเดลบนปลายทางเดียวกัน ให้ทำสำเนาชุดนี้จากหน้ารายการ', { model: effDefault })}
               hint={
                 checkMsg ? (
                   <b className={checkMsg.ok ? 'text-carpet-lite' : 'text-brass'}>{checkMsg.text}</b>
                 ) : !models ? (
                   optional
-                    ? (loading ? 'กำลังโหลดรายชื่อโมเดลจากเครื่อง...' : `โหลดรายชื่อจากเครื่องไม่ได้ - Ollama เปิดอยู่หรือไม่ (ค่าดีฟอลต์ ${effDefault} อาจไม่มี)`)
-                    : 'กดปุ่มด้านล่างเพื่อโหลดรายชื่อโมเดล'
-                ) : optional ? `มี ${models.length} โมเดลในเครื่อง` : null
+                    ? (loading ? t('กำลังโหลดรายชื่อโมเดลจากเครื่อง...') : t('โหลดรายชื่อจากเครื่องไม่ได้ - Ollama เปิดอยู่หรือไม่ (ค่าดีฟอลต์ {model} อาจไม่มี)', { model: effDefault }))
+                    : t('กดปุ่มด้านล่างเพื่อโหลดรายชื่อโมเดล')
+                ) : optional ? t('มี {n} โมเดลในเครื่อง', { n: models.length }) : null
               }
             >
               {models ? (
@@ -808,7 +806,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="default">ใช้ค่าดีฟอลต์ ({effDefault})</SelectItem>
+                    <SelectItem value="default">{t('ใช้ค่าดีฟอลต์ ({model})', { model: effDefault })}</SelectItem>
                     {models.map((m) => (
                       <SelectItem key={m.id} value={m.id}>
                         {m.label}
@@ -820,7 +818,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                 <Input
                   value={draft.model}
                   onChange={(e) => patch({ model: e.target.value })}
-                  placeholder={`${effDefault} (ไม่ใส่ก็ได้)`}
+                  placeholder={t('{model} (ไม่ใส่ก็ได้)', { model: effDefault })}
                   spellCheck={false}
                 />
               )}
@@ -833,22 +831,22 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [], 
                 disabled={loading || (!draft.apiKey.trim() && !optional)}
               >
                 {models ? <RefreshCw /> : <ShieldCheck />}
-                {loading ? (optional ? 'กำลังโหลด' : 'กำลังตรวจ') : models ? 'โหลดรายชื่อใหม่' : optional ? 'โหลดรายชื่อโมเดลจากเครื่อง' : 'ตรวจคีย์ และโหลดรายชื่อโมเดล'}
+                {loading ? (optional ? t('กำลังโหลด') : t('กำลังตรวจ')) : models ? t('โหลดรายชื่อใหม่') : optional ? t('โหลดรายชื่อโมเดลจากเครื่อง') : t('ตรวจคีย์ และโหลดรายชื่อโมเดล')}
               </Button>
             </Field>
 
             {saveErr && (
               <p className="rounded-box border-2 border-wood-dark bg-wood-deep/60 px-2 py-1.5 text-[11px] leading-relaxed text-brass-lite">
-                <b className="text-brass">บันทึกไม่ได้</b> {saveErr}
+                <b className="text-brass">{t('บันทึกไม่ได้')}</b> {saveErr}
               </p>
             )}
 
             <DialogFooter>
               <Button variant="ghost" onClick={() => setDraft(null)}>
-                ยกเลิก
+                {t('ยกเลิก')}
               </Button>
               <Button variant="primary" onClick={commit}>
-                {isNew ? 'เพิ่ม' : 'บันทึก'}
+                {isNew ? t('เพิ่ม') : t('บันทึก')}
               </Button>
             </DialogFooter>
           </>

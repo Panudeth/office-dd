@@ -6,6 +6,7 @@
  */
 
 import { DEPT_BY_ID } from './departments';
+import type { ReplyLang } from './lang';
 
 /* ---------- โปรไฟล์บริษัท ---------- */
 
@@ -128,6 +129,8 @@ export interface CompanyContext {
   chunks?: { docName: string; seq: number; content: string }[];
   /** ชื่อแผนก/ทีมที่บริษัทมี (ที่มีคนอยู่จริง) - ข้อเท็จจริงสาธารณะ ลูกค้าถาม "มีฝ่ายไหนบ้าง" ตอบได้ */
   departments?: string[];
+  /** ภาษาที่ให้ agent ตอบ (th ดีฟอลต์ / en) - ฝากมากับ context เพราะทุก prompt รับ company อยู่แล้ว */
+  lang?: ReplyLang;
 }
 
 /** ส่วนโปรไฟล์ - ทุกแผนกได้เหมือนกัน */

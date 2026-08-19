@@ -73,6 +73,8 @@ export interface AgendaRequest {
   departments?: DepartmentDef[];
   /** ออฟฟิศ - ให้เซิร์ฟเวอร์บังคับนโยบายโมเดล (เฉพาะในเครื่อง) ได้ */
   officeId?: string;
+  /** ภาษาที่ให้ตอบ/ตั้งชื่อวาระ - 'th' (ดีฟอลต์) | 'en' ตามภาษา UI ของคนถาม */
+  lang?: 'th' | 'en';
 }
 
 /* ---------- หลักฐานว่า skill ถูกส่งไปจริง ---------- */
@@ -144,6 +146,8 @@ export interface AskRequest {
   attendees?: MeetingAttendeeLite[];
   /** แผนกที่ออฟฟิศสร้างเอง/ทับ preset (สกิล inline) - engine ใช้แทน skills/*.md */
   departments?: DepartmentDef[];
+  /** ภาษาที่ให้ agent ตอบ - 'th' (ดีฟอลต์) | 'en' */
+  lang?: 'th' | 'en';
 }
 
 export interface MeetingAttendeeLite {

@@ -7,6 +7,7 @@ import type { WorkTask } from '@/lib/protocol';
 import type { Palette } from '@/game/types';
 import Portrait from '@/components/Portrait';
 import { Button } from '@/components/ui/button';
+import { t } from '@/lib/i18n';
 
 /* ============================================================
    แผงสถานะการประชุม - บอกว่าใครกำลังทำอะไร นานแค่ไหน ด้วยโมเดลไหน
@@ -42,7 +43,7 @@ interface Props {
 
 const fmt = (ms: number) => {
   const s = Math.max(0, Math.round(ms / 1000));
-  return s < 60 ? `${s} วิ` : `${Math.floor(s / 60)} นาที ${s % 60} วิ`;
+  return s < 60 ? t('{s} วิ', { s }) : t('{m} นาที {s} วิ', { m: Math.floor(s / 60), s: s % 60 });
 };
 
 export default function MeetingStatus({ startedAt, phase, activities, onClose }: Props) {
@@ -51,8 +52,8 @@ export default function MeetingStatus({ startedAt, phase, activities, onClose }:
   const running = startedAt !== null && activities.some((a) => !a.doneAt);
   useEffect(() => {
     if (!running) return;
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
   }, [running]);
 
   if (startedAt === null && !activities.length) return null;
@@ -74,16 +75,16 @@ export default function MeetingStatus({ startedAt, phase, activities, onClose }:
           <Check className="size-3.5 shrink-0 text-carpet-lite" />
         )}
         <span className={`min-w-0 flex-1 truncate ${aborted ? 'text-rug-lite' : 'text-parchment'}`}>
-          {running ? phase ?? 'กำลังประชุม' : aborted ? 'ประชุมหยุดกลางทาง - ดูสาเหตุในแชท' : 'ประชุมเสร็จแล้ว'}
+          {running ? t(phase ?? 'กำลังประชุม') : aborted ? t('ประชุมหยุดกลางทาง - ดูสาเหตุในแชท') : t('ประชุมเสร็จแล้ว')}
         </span>
         {running && thinking > 0 && (
-          <span className="shrink-0 text-dim">{thinking} คนกำลังคิด</span>
+          <span className="shrink-0 text-dim">{t('{n} คนกำลังคิด', { n: thinking })}</span>
         )}
-        <span className="flex shrink-0 items-center gap-1 text-dim" title="เวลารวมตั้งแต่เริ่มประชุม">
+        <span className="flex shrink-0 items-center gap-1 text-dim" title={t('เวลารวมตั้งแต่เริ่มประชุม')}>
           <Clock className="size-3" /> {fmt(total)}
         </span>
         {!running && onClose && (
-          <Button size="icon" variant="ghost" className="size-5" title="ซ่อน" onClick={onClose}>
+          <Button size="icon" variant="ghost" className="size-5" title={t('ซ่อน')} onClick={onClose}>
             <X className="size-3" />
           </Button>
         )}
@@ -105,26 +106,26 @@ export default function MeetingStatus({ startedAt, phase, activities, onClose }:
               <span className="w-24 shrink-0 truncate font-semibold text-parchment" title={a.name}>
                 {a.name}
               </span>
-              {d && <i className="size-2 shrink-0 rounded-[2px]" style={{ background: d.color }} title={d.nameTh} />}
+              {d && <i className="size-2 shrink-0 rounded-[2px]" style={{ background: d.color }} title={t(d.nameTh)} />}
               <span className={`min-w-0 flex-1 truncate ${a.doneAt ? 'text-dim' : 'text-parchment-2'}`}>
                 {a.failed ? (
-                  <span className="text-rug-lite">ไม่สำเร็จ - {a.label}</span>
+                  <span className="text-rug-lite">{t('ไม่สำเร็จ - {label}', { label: t(a.label) })}</span>
                 ) : a.doneAt ? (
-                  <>ตอบแล้ว · {a.label}</>
+                  <>{t('ตอบแล้ว · {label}', { label: t(a.label) })}</>
                 ) : (
-                  <>กำลัง{a.label}…</>
+                  <>{t('กำลัง{label}…', { label: t(a.label) })}</>
                 )}
               </span>
               {a.model && (
-                <span className="hidden max-w-28 shrink-0 truncate text-[10px] text-dim/80 sm:inline" title={a.model}>
-                  {a.model}
+                <span className="hidden max-w-28 shrink-0 truncate text-[10px] text-dim/80 sm:inline" title={t(a.model)}>
+                  {t(a.model)}
                 </span>
               )}
               <span
                 className={`w-16 shrink-0 text-right tabular-nums ${
                   a.failed ? 'text-rug-lite' : a.doneAt ? 'text-carpet-lite' : isSlow ? 'text-brass' : 'text-parchment-2'
                 }`}
-                title={prev ? `รอบก่อนหน้ารวม ${fmt(prev)}` : undefined}
+                title={prev ? t('รอบก่อนหน้ารวม {time}', { time: fmt(prev) }) : undefined}
               >
                 {a.doneAt ? <Check className="mr-0.5 inline size-3" /> : null}
                 {fmt(elapsed)}

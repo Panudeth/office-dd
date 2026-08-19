@@ -19,6 +19,7 @@ import {
   DEPARTMENTS, DEPT_BY_ID, DEPT_ID_RE, MAX_PLAYBOOK_CHARS, MAX_SKILL_CHARS, PRESET_BY_ID, ROLES, ROLE_ORDER, sanitizeDeptDef,
   slugifyDeptId, type AgentRole, type DepartmentDef,
 } from '@/lib/departments';
+import { t } from '@/lib/i18n';
 import {
   accessToken, deleteChannel, listChannels, listInbox, saveChannel, sbError,
   type ChannelKind, type DeptChannel, type InboxRow,
@@ -96,7 +97,7 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
   const canSave = canEdit && !!def.nameTh.trim() && idOk && !idTaken && busy === null;
 
   const draft = async () => {
-    if (!def.nameTh.trim()) { setErr('ใส่ชื่อแผนกก่อน'); return; }
+    if (!def.nameTh.trim()) { setErr(t('ใส่ชื่อแผนกก่อน')); return; }
     setBusy('draft'); setErr(null); setOk(null);
     try {
       const res = await fetch('/api/department/draft', {
@@ -116,7 +117,7 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
         skillText: d.skillText || cur.skillText,
         playbook: d.playbook || cur.playbook,
       }));
-      setOk('AI ร่างให้แล้ว - ตรวจแท็บ "สกิล" และ "Webhook" แล้วกดบันทึก');
+      setOk(t('AI ร่างให้แล้ว - ตรวจแท็บ "สกิล" และ "Webhook" แล้วกดบันทึก'));
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally { setBusy(null); }
@@ -124,11 +125,11 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
 
   const save = async () => {
     const clean = sanitizeDeptDef({ ...def, shortTh: def.shortTh || def.nameTh.slice(0, 12) });
-    if (!clean) { setErr('ข้อมูลไม่ครบ - ต้องมีชื่อ และ id เป็น a-z 0-9 ขีด (2-32 ตัว)'); return; }
+    if (!clean) { setErr(t('ข้อมูลไม่ครบ - ต้องมีชื่อ และ id เป็น a-z 0-9 ขีด (2-32 ตัว)')); return; }
     setBusy('save'); setErr(null); setOk(null);
     try {
       await onSave(clean);
-      setOk('บันทึกแล้ว');
+      setOk(t('บันทึกแล้ว'));
       if (isNew) onClose();
     } catch (e) {
       setErr(sbError(e));
@@ -146,19 +147,19 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
     <>
         {inline && (
           <div className="flex items-center gap-2 text-[12px] font-semibold text-parchment">
-            {onBack && <Button size="sm" variant="ghost" className="h-6 px-1.5" onClick={onBack} title="กลับไปรายการแผนก">←</Button>}
-            <Building2 className="size-3.5" /> {isNew ? 'สร้างแผนกใหม่' : `แผนก: ${def.nameTh || deptId}`}
+            {onBack && <Button size="sm" variant="ghost" className="h-6 px-1.5" onClick={onBack} title={t('กลับไปรายการแผนก')}>←</Button>}
+            <Building2 className="size-3.5" /> {isNew ? t('สร้างแผนกใหม่') : t('แผนก: {name}', { name: t(def.nameTh) || deptId || '' })}
           </div>
         )}
         {!canEdit && (
-          <p className="rounded-box border border-ink-600 bg-ink-700 px-2 py-1 text-[11px] text-dim">อ่านได้อย่างเดียว - เจ้าของหรือ exec ของออฟฟิศเท่านั้นที่แก้แผนกได้</p>
+          <p className="rounded-box border border-ink-600 bg-ink-700 px-2 py-1 text-[11px] text-dim">{t('อ่านได้อย่างเดียว - เจ้าของหรือ exec ของออฟฟิศเท่านั้นที่แก้แผนกได้')}</p>
         )}
         <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-col">
           <TabsList className="rounded-t-box border border-b-0 border-wood-deep">
-            <TabsTrigger value="main"><Building2 /> แผนก</TabsTrigger>
-            <TabsTrigger value="skill"><Sparkles /> สกิล</TabsTrigger>
-            <TabsTrigger value="inbox" disabled={isNew}><Inbox /> ขาเข้า</TabsTrigger>
-            <TabsTrigger value="out" disabled={isNew}><Send /> ขาออก</TabsTrigger>
+            <TabsTrigger value="main"><Building2 /> {t('ข้อมูลแผนก')}</TabsTrigger>
+            <TabsTrigger value="skill"><Sparkles /> {t('สกิล')}</TabsTrigger>
+            <TabsTrigger value="inbox" disabled={isNew}><Inbox /> {t('ขาเข้า')}</TabsTrigger>
+            <TabsTrigger value="out" disabled={isNew}><Send /> {t('ขาออก')}</TabsTrigger>
           </TabsList>
 
           {/* ---------- แผนก ---------- */}
@@ -166,23 +167,23 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
             <div className={`flex flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5 ${inline ? '' : 'max-h-[56vh]'}`}>
               {overrideOfPreset && (
                 <div className="flex items-center gap-1.5 text-[11px] text-dim">
-                  <Badge>แผนกมาตรฐาน</Badge>
-                  <InfoTip>ค่าที่แก้ในหน้านี้ถูกเก็บเป็นค่าทับของออฟฟิศนี้เท่านั้น สกิลเดิมอยู่ใน <code>skills/{preset!.skill}.md</code> - ปุ่ม "คืนค่าเดิม" ล้างค่าทับทั้งหมด</InfoTip>
+                  <Badge>{t('แผนกมาตรฐาน')}</Badge>
+                  <InfoTip>{t('ค่าที่แก้ในหน้านี้ถูกเก็บเป็นค่าทับของออฟฟิศนี้เท่านั้น สกิลเดิมอยู่ใน')} <code>skills/{preset!.skill}.md</code> {t('- ปุ่ม "คืนค่าเดิม" ล้างค่าทับทั้งหมด')}</InfoTip>
                 </div>
               )}
               <div className="grid grid-cols-[1fr_120px] gap-2">
-                <Field label="ชื่อแผนก">
-                  <Input value={def.nameTh} onChange={(e) => onName(e.target.value)} placeholder="เช่น IT Support, บัญชี GCP, Data Team" disabled={!canEdit} maxLength={60} />
+                <Field label={t('ชื่อแผนก')}>
+                  <Input value={def.nameTh} onChange={(e) => onName(e.target.value)} placeholder={t('เช่น IT Support, บัญชี GCP, Data Team')} disabled={!canEdit} maxLength={60} />
                 </Field>
-                <Field label="ชื่อย่อ (ป้าย)">
-                  <Input value={def.shortTh} onChange={(e) => set('shortTh', e.target.value)} placeholder={def.nameTh.slice(0, 12) || 'ย่อ'} disabled={!canEdit} maxLength={20} />
+                <Field label={t('ชื่อย่อ (ป้าย)')}>
+                  <Input value={def.shortTh} onChange={(e) => set('shortTh', e.target.value)} placeholder={def.nameTh.slice(0, 12) || t('ย่อ')} disabled={!canEdit} maxLength={20} />
                 </Field>
               </div>
               <div className="grid grid-cols-[1fr_auto] gap-2">
-                <Field label="id" info="ใช้ใน URL ของ webhook และ API (a-z 0-9 ขีดกลาง/ล่าง 2-32 ตัว) - ตั้งครั้งเดียว เปลี่ยนทีหลังไม่ได้ ระบบตั้งจากชื่อให้อัตโนมัติ" hint={idTaken ? 'id นี้มีอยู่แล้ว' : !idOk && def.id ? 'ใช้ได้เฉพาะ a-z 0-9 ขีดกลาง/ล่าง 2-32 ตัว' : undefined}>
+                <Field label="id" info={t('ใช้ใน URL ของ webhook และ API (a-z 0-9 ขีดกลาง/ล่าง 2-32 ตัว) - ตั้งครั้งเดียว เปลี่ยนทีหลังไม่ได้ ระบบตั้งจากชื่อให้อัตโนมัติ')} hint={idTaken ? t('id นี้มีอยู่แล้ว') : !idOk && def.id ? t('ใช้ได้เฉพาะ a-z 0-9 ขีดกลาง/ล่าง 2-32 ตัว') : undefined}>
                   <Input value={def.id} onChange={(e) => { setIdTouched(true); set('id', e.target.value.toLowerCase()); }} disabled={!canEdit || !isNew} placeholder="it-support" className={idTaken || (def.id && !idOk) ? 'border-rug' : ''} />
                 </Field>
-                <Field label="สี">
+                <Field label={t('สี')}>
                   <div className="flex flex-wrap gap-1 pt-1" style={{ maxWidth: 150 }}>
                     {COLORS.map((c) => (
                       <button key={c} type="button" disabled={!canEdit} onClick={() => set('color', c)} title={c}
@@ -192,17 +193,17 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
                 </Field>
               </div>
               <Field
-                label="หน้าที่ของแผนก"
-                info="เขียนเหมือนอธิบายให้พนักงานใหม่ฟัง ใช้ 3 อย่าง: AI ร่างสกิล/มุมมอง/keywords/playbook จากตรงนี้ · เลขาฯ ใช้ตัดสินว่าคำถามไหนควรส่งมาแผนกนี้ · เป็นสกิลมาตรฐานถ้ายังไม่มีสกิล"
+                label={t('หน้าที่ของแผนก')}
+                info={t('เขียนเหมือนอธิบายให้พนักงานใหม่ฟัง ใช้ 3 อย่าง: AI ร่างสกิล/มุมมอง/keywords/playbook จากตรงนี้ · เลขาฯ ใช้ตัดสินว่าคำถามไหนควรส่งมาแผนกนี้ · เป็นสกิลมาตรฐานถ้ายังไม่มีสกิล')}
               >
                 <Textarea rows={5} value={def.description ?? ''} onChange={(e) => set('description', e.target.value)} disabled={!canEdit} maxLength={1000}
-                  placeholder={'เช่น รับ bug report จาก logger ของระบบ จัดระดับความรุนแรง (low/medium/high/critical) สรุปว่ากระทบใคร แนะนำขั้นตอนแก้เบื้องต้น ถ้า high ขึ้นไปให้แจ้งทีมทันที และสรุปรายวันว่ามีอะไรค้าง'} />
+                  placeholder={t('เช่น รับ bug report จาก logger ของระบบ จัดระดับความรุนแรง (low/medium/high/critical) สรุปว่ากระทบใคร แนะนำขั้นตอนแก้เบื้องต้น ถ้า high ขึ้นไปให้แจ้งทีมทันที และสรุปรายวันว่ามีอะไรค้าง')} />
               </Field>
               <div className="flex items-center gap-2">
                 <Button size="sm" variant="primary" onClick={draft} disabled={!canEdit || busy !== null || !def.nameTh.trim()}>
-                  {busy === 'draft' ? <LoaderCircle className="animate-spin" /> : <Wand2 />} ให้ AI ร่างที่เหลือ
+                  {busy === 'draft' ? <LoaderCircle className="animate-spin" /> : <Wand2 />} {t('ให้ AI ร่างที่เหลือ')}
                 </Button>
-                <InfoTip>ใช้คีย์ AI ที่เลือกอยู่ ร่างสกิล มุมมอง 4 บทบาท keywords และ playbook จากชื่อ + หน้าที่ แก้ได้ทุกช่องก่อนบันทึก - ไม่กดก็ได้ ระบบใช้สกิลมาตรฐานให้</InfoTip>
+                <InfoTip>{t('ใช้คีย์ AI ที่เลือกอยู่ ร่างสกิล มุมมอง 4 บทบาท keywords และ playbook จากชื่อ + หน้าที่ แก้ได้ทุกช่องก่อนบันทึก - ไม่กดก็ได้ ระบบใช้สกิลมาตรฐานให้')}</InfoTip>
               </div>
             </div>
           </TabsContent>
@@ -211,19 +212,19 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
           <TabsContent value="skill" className="min-h-0">
             <div className={`flex flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5 ${inline ? '' : 'max-h-[56vh]'}`}>
               <Field
-                label={<span className="flex flex-1 items-center gap-2">สกิล <span className="ml-auto text-[10px] font-normal text-dim">{(def.skillText ?? '').length}/{MAX_SKILL_CHARS}</span></span>}
-                info={<>markdown ที่ agent ทุกคนในแผนกอ่านก่อนตอบ (วางไว้ต้น system prompt) {overrideOfPreset ? <>ว่าง = ใช้ <code>skills/{preset!.skill}.md</code> ของเดิม</> : 'ว่าง = ใช้สกิลมาตรฐานที่ประกอบจากชื่อ + หน้าที่ + playbook'}</>}
+                label={<span className="flex flex-1 items-center gap-2">{t('สกิล')} <span className="ml-auto text-[10px] font-normal text-dim">{(def.skillText ?? '').length}/{MAX_SKILL_CHARS}</span></span>}
+                info={<>{t('markdown ที่ agent ทุกคนในแผนกอ่านก่อนตอบ (วางไว้ต้น system prompt)')} {overrideOfPreset ? <>{t('ว่าง = ใช้')} <code>skills/{preset!.skill}.md</code>{t('ของเดิม')}</> : t('ว่าง = ใช้สกิลมาตรฐานที่ประกอบจากชื่อ + หน้าที่ + playbook')}</>}
               >
                 <Textarea rows={12} className="font-mono text-[11px]" value={def.skillText ?? ''} onChange={(e) => set('skillText', e.target.value)} disabled={!canEdit} maxLength={MAX_SKILL_CHARS}
-                  placeholder={'# Skill: ...\n\n## หน้าที่\n\n## หลักการทำงาน\n\n## ขอบเขต\n\n## รูปแบบคำตอบ'} />
+                  placeholder={t('# Skill: ...\n\n## หน้าที่\n\n## หลักการทำงาน\n\n## ขอบเขต\n\n## รูปแบบคำตอบ')} />
               </Field>
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-wall-mid">มุมมองต่อบทบาท <InfoTip>คนที่ 1-4 ของแผนกได้บทบาทผู้เสนอ/ผู้ค้าน/ผู้ตรวจสอบ/ผู้ดูความเป็นไปได้ตามลำดับ - มุมมองตรงนี้บอกว่าแต่ละบทบาทต้องมองเรื่องจากมุมไหน ทำให้ 4 คนในแผนกเดียวกันไม่พูดเหมือนกัน</InfoTip></div>
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-wall-mid">{t('มุมมองต่อบทบาท')} <InfoTip>{t('คนที่ 1-4 ของแผนกได้บทบาทผู้เสนอ/ผู้ค้าน/ผู้ตรวจสอบ/ผู้ดูความเป็นไปได้ตามลำดับ - มุมมองตรงนี้บอกว่าแต่ละบทบาทต้องมองเรื่องจากมุมไหน ทำให้ 4 คนในแผนกเดียวกันไม่พูดเหมือนกัน')}</InfoTip></div>
               {ROLE_ORDER.map((r) => (
-                <Field key={r} label={ROLES[r].th}>
-                  <Input value={def.lenses?.[r] ?? ''} onChange={(e) => setLens(r, e.target.value)} disabled={!canEdit} maxLength={300} placeholder={preset?.lenses[r] ?? 'มุมที่คนบทบาทนี้ต้องมองเป็นหลัก'} />
+                <Field key={r} label={t(ROLES[r].th)}>
+                  <Input value={def.lenses?.[r] ?? ''} onChange={(e) => setLens(r, e.target.value)} disabled={!canEdit} maxLength={300} placeholder={preset?.lenses[r] ?? t('มุมที่คนบทบาทนี้ต้องมองเป็นหลัก')} />
                 </Field>
               ))}
-              <Field label="keywords" info="คั่นด้วยจุลภาค - ใช้เลือกแผนกจากคำในคำถามเฉพาะตอนไม่มีคีย์ AI (มีคีย์ เลขาฯ อ่านจากหน้าที่ + มุมมองแทน) ไม่บังคับ">
+              <Field label="keywords" info={t('คั่นด้วยจุลภาค - ใช้เลือกแผนกจากคำในคำถามเฉพาะตอนไม่มีคีย์ AI (มีคีย์ เลขาฯ อ่านจากหน้าที่ + มุมมองแทน) ไม่บังคับ')}>
                 <Input value={(def.keywords ?? []).join(', ')} onChange={(e) => set('keywords', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean).slice(0, 40))} disabled={!canEdit} />
               </Field>
             </div>
@@ -234,13 +235,13 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
             <div className={`flex flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5 ${inline ? '' : 'max-h-[56vh]'}`}>
               <Field
                 label={<span className="flex flex-1 items-center gap-2">Playbook <span className="ml-auto text-[10px] font-normal text-dim">{(def.playbook ?? '').length}/{MAX_PLAYBOOK_CHARS}</span></span>}
-                info="สิ่งที่แผนกต้องทำเมื่อมีข้อมูลยิงเข้ามาทาง webhook - หัวหน้าแผนกอ่าน playbook พร้อมข้อมูล แล้วเขียนรายงาน/ตัดสินใจตามนั้น ข้อมูลที่เข้ามาถือเป็นข้อมูล ไม่ใช่คำสั่ง"
+                info={t('สิ่งที่แผนกต้องทำเมื่อมีข้อมูลยิงเข้ามาทาง webhook - หัวหน้าแผนกอ่าน playbook พร้อมข้อมูล แล้วเขียนรายงาน/ตัดสินใจตามนั้น ข้อมูลที่เข้ามาถือเป็นข้อมูล ไม่ใช่คำสั่ง')}
               >
                 <Textarea rows={3} value={def.playbook ?? ''} onChange={(e) => set('playbook', e.target.value)} disabled={!canEdit} maxLength={MAX_PLAYBOOK_CHARS}
-                  placeholder={'1. อ่านข้อมูล จัดระดับความรุนแรง\n2. สรุป: เกิดอะไร กระทบใคร ต้องทำอะไรใน 24 ชม.\n3. ถ้า severity ≥ high ระบุ "แจ้งทีมทันที" ไว้บรรทัดแรก\n4. ตอบสั้น อ่านในแชทได้จบใน 10 บรรทัด'} />
+                  placeholder={t('1. อ่านข้อมูล จัดระดับความรุนแรง\n2. สรุป: เกิดอะไร กระทบใคร ต้องทำอะไรใน 24 ชม.\n3. ถ้า severity ≥ high ระบุ "แจ้งทีมทันที" ไว้บรรทัดแรก\n4. ตอบสั้น อ่านในแชทได้จบใน 10 บรรทัด')} />
               </Field>
               {!isNew && officeId ? <RoutingTab officeId={officeId} deptId={def.id} canEdit={canEdit} part="in" /> : (
-                <Hint>ใช้ได้เมื่อล็อกอินและเลือกออฟฟิศ <InfoTip>ต้องตั้ง Supabase และ SUPABASE_SECRET_KEY บนเซิร์ฟเวอร์ - webhook เข้าเก็บและประมวลผลฝั่งเซิร์ฟเวอร์</InfoTip></Hint>
+                <Hint>{t('ใช้ได้เมื่อล็อกอินและเลือกออฟฟิศ')} <InfoTip>{t('ต้องตั้ง Supabase และ SUPABASE_SECRET_KEY บนเซิร์ฟเวอร์ - webhook เข้าเก็บและประมวลผลฝั่งเซิร์ฟเวอร์')}</InfoTip></Hint>
               )}
             </div>
           </TabsContent>
@@ -249,7 +250,7 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
           <TabsContent value="out" className="min-h-0">
             <div className={`flex flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5 ${inline ? '' : 'max-h-[56vh]'}`}>
               {!isNew && officeId ? <RoutingTab officeId={officeId} deptId={def.id} canEdit={canEdit} part="out" /> : (
-                <Hint>ใช้ได้เมื่อล็อกอินและเลือกออฟฟิศ</Hint>
+                <Hint>{t('ใช้ได้เมื่อล็อกอินและเลือกออฟฟิศ')}</Hint>
               )}
             </div>
           </TabsContent>
@@ -259,17 +260,17 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
           <p className={`rounded-box border px-2 py-1 text-[11px] ${err ? 'border-rug-dark bg-[#3f2018] text-rug-lite' : 'border-carpet-dark bg-[#22401f] text-carpet-lite'}`}>{err ?? ok}</p>
         )}
         <div className="flex items-center gap-2 pt-1">
-          {onBack && !inline && <Button size="sm" variant="outline" onClick={onBack} title="กลับไปหน้ารวมแผนก">← แผนกทั้งหมด</Button>}
+          {onBack && !inline && <Button size="sm" variant="outline" onClick={onBack} title={t('กลับไปหน้ารวมแผนก')}>← {t('แผนกทั้งหมด')}</Button>}
           {!isNew && canEdit && (
             <Button size="sm" variant="danger" onClick={remove} disabled={busy !== null || (!overrideOfPreset && headcount > 0)}
-              title={!overrideOfPreset && headcount > 0 ? `มีพนักงาน ${headcount} คนอยู่ - เลิกจ้างก่อน` : overrideOfPreset ? 'ล้างค่าทับ กลับเป็นแผนกมาตรฐาน' : 'ลบแผนกนี้ (พร้อม channel/webhook ของมัน)'}>
-              {busy === 'delete' ? <LoaderCircle className="animate-spin" /> : <Trash2 />} {overrideOfPreset ? 'คืนค่าเดิม' : 'ลบแผนก'}
+              title={!overrideOfPreset && headcount > 0 ? t('มีพนักงาน {n} คนอยู่ - เลิกจ้างก่อน', { n: headcount }) : overrideOfPreset ? t('ล้างค่าทับ กลับเป็นแผนกมาตรฐาน') : t('ลบแผนกนี้ (พร้อม channel/webhook ของมัน)')}>
+              {busy === 'delete' ? <LoaderCircle className="animate-spin" /> : <Trash2 />} {overrideOfPreset ? t('คืนค่าเดิม') : t('ลบแผนก')}
             </Button>
           )}
           <span className="flex-1" />
-          {!inline && <Button size="sm" variant="outline" onClick={onClose}>ปิด</Button>}
+          {!inline && <Button size="sm" variant="outline" onClick={onClose}>{t('ปิด')}</Button>}
           <Button size="sm" variant="primary" onClick={save} disabled={!canSave}>
-            {busy === 'save' ? <LoaderCircle className="animate-spin" /> : <Check />} {isNew ? 'สร้างแผนก' : 'บันทึก'}
+            {busy === 'save' ? <LoaderCircle className="animate-spin" /> : <Check />} {isNew ? t('สร้างแผนก') : t('บันทึก')}
           </Button>
         </div>
     </>
@@ -277,7 +278,7 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
   if (inline) return open ? body : null;
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent icon={<Building2 />} title={isNew ? 'สร้างแผนกใหม่' : `แผนก: ${def.nameTh || deptId}`} description="ตั้งชื่อ หน้าที่ สกิล และช่องทางเข้า-ออกของแผนก" wide>
+      <DialogContent icon={<Building2 />} title={isNew ? t('สร้างแผนกใหม่') : t('แผนก: {name}', { name: t(def.nameTh) || deptId || '' })} description={t('ตั้งชื่อ หน้าที่ สกิล และช่องทางเข้า-ออกของแผนก')} wide>
         {body}
       </DialogContent>
     </Dialog>
@@ -325,7 +326,7 @@ export function LineInboundSection({ officeId, deptId, canEdit }: { officeId: st
   const startEdit = (r: InboundMasked) => { setEditing(r); setLabel(r.label); setSecret(''); setToken(''); setAck(r.ack); setPickDept(r.dept_id); setOpen(true); setErr(null); };
   const save = async () => {
     const target = all ? pickDept : deptId;
-    if (!target) { setErr('เลือกแผนกที่จะตอบลูกค้าก่อน'); return; }
+    if (!target) { setErr(t('เลือกแผนกที่จะตอบลูกค้าก่อน')); return; }
     setBusy('save'); setErr(null);
     try {
       const res = await fetch('/api/office/inbound', {
@@ -365,16 +366,16 @@ export function LineInboundSection({ officeId, deptId, canEdit }: { officeId: st
         <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-wall-mid">
           LINE Official Account
           <InfoTip>
-            ลูกค้าทัก LINE OA แล้ว<b>แผนกนี้</b>ตอบ (ตอบรับทันที แล้ว push คำตอบจริงตาม - ลูกค้าเห็นเฉพาะข้อมูลสาธารณะ)<br />
-            ค่าจาก LINE Developers → channel: <b>Basic settings → Channel secret</b> และ <b>Messaging API → Channel access token (long-lived)</b><br />
-            บันทึกแล้วจะได้ Webhook URL ไปวางใน Messaging API → Webhook URL → Verify → เปิด Use webhook · ปิด Auto-reply ของ OA ด้วย<br />
-            token เดียวกันถูกใช้กับช่องส่งออกแบบ LINE ของแผนกนี้ให้อัตโนมัติ
+            {t('ลูกค้าทัก LINE OA แล้ว')}<b>{t('แผนกนี้')}</b>{t('ตอบ (ตอบรับทันที แล้ว push คำตอบจริงตาม - ลูกค้าเห็นเฉพาะข้อมูลสาธารณะ)')}<br />
+            {t('ค่าจาก LINE Developers → channel:')} <b>Basic settings → Channel secret</b> {t('และ')} <b>Messaging API → Channel access token (long-lived)</b><br />
+            {t('บันทึกแล้วจะได้ Webhook URL ไปวางใน Messaging API → Webhook URL → Verify → เปิด Use webhook · ปิด Auto-reply ของ OA ด้วย')}<br />
+            {t('token เดียวกันถูกใช้กับช่องส่งออกแบบ LINE ของแผนกนี้ให้อัตโนมัติ')}
           </InfoTip>
         </span>
         <span className="flex-1" />
-        {canEdit && !open && <Button size="sm" variant="outline" onClick={() => { reset(); setOpen(true); }}><Plus /> เพิ่ม LINE OA</Button>}
+        {canEdit && !open && <Button size="sm" variant="outline" onClick={() => { reset(); setOpen(true); }}><Plus /> {t('เพิ่ม LINE OA')}</Button>}
       </div>
-      {rows.length === 0 && !open && <Hint className="text-[10px]">ยังไม่ได้ผูก LINE OA กับแผนกนี้</Hint>}
+      {rows.length === 0 && !open && <Hint className="text-[10px]">{t('ยังไม่ได้ผูก LINE OA กับแผนกนี้')}</Hint>}
       {rows.map((r) => {
         const url = `${origin}/api/line/webhook/${r.id}`;
         return (
@@ -382,14 +383,14 @@ export function LineInboundSection({ officeId, deptId, canEdit }: { officeId: st
             <div className="flex items-center gap-2">
               <Badge variant={r.enabled ? 'good' : 'default'}>LINE</Badge>
               <span className="text-parchment">{r.label}</span>
-              {all && <span className="text-[10px] text-dim">→ ตอบโดย {DEPT_BY_ID.get(r.dept_id)?.nameTh ?? r.dept_id}</span>}
-              {(!r.hasSecret || !r.hasToken) && <Badge variant="bad">secret/token ไม่ครบ</Badge>}
+              {all && <span className="text-[10px] text-dim">→ {t('ตอบโดย')} {t(DEPT_BY_ID.get(r.dept_id)?.nameTh ?? r.dept_id)}</span>}
+              {(!r.hasSecret || !r.hasToken) && <Badge variant="bad">{t('secret/token ไม่ครบ')}</Badge>}
               <span className="flex-1" />
               {canEdit && (
                 <>
-                  <Button size="sm" variant="ghost" onClick={() => startEdit(r)} disabled={busy !== null}>แก้ไข</Button>
-                  <Button size="sm" variant="ghost" onClick={() => toggle(r)} disabled={busy !== null}>{r.enabled ? 'ปิด' : 'เปิด'}</Button>
-                  <Button size="sm" variant="ghost" onClick={() => remove(r.id)} disabled={busy !== null} title="ลบ"><Trash2 /></Button>
+                  <Button size="sm" variant="ghost" onClick={() => startEdit(r)} disabled={busy !== null}>{t('แก้ไข')}</Button>
+                  <Button size="sm" variant="ghost" onClick={() => toggle(r)} disabled={busy !== null}>{r.enabled ? t('ปิด') : t('เปิด')}</Button>
+                  <Button size="sm" variant="ghost" onClick={() => remove(r.id)} disabled={busy !== null} title={t('ลบ')}><Trash2 /></Button>
                 </>
               )}
             </div>
@@ -404,33 +405,33 @@ export function LineInboundSection({ officeId, deptId, canEdit }: { officeId: st
       {open && canEdit && (
         <div className="flex flex-col gap-1.5 rounded-box border border-dashed border-ink-500 p-2">
           {all && (
-            <Field label="แผนกที่ตอบลูกค้าจาก OA นี้">
+            <Field label={t('แผนกที่ตอบลูกค้าจาก OA นี้')}>
               <div className="flex flex-wrap gap-1">
                 {DEPARTMENTS.map((d) => (
                   <button key={d.id} type="button" onClick={() => setPickDept(d.id)}
-                    className={`rounded-box border px-2 py-0.5 text-[11px] ${pickDept === d.id ? 'border-carpet bg-[#22401f] text-carpet-lite' : 'border-ink-500 bg-ink-800 text-dim hover:border-brass'}`}>{d.nameTh}</button>
+                    className={`rounded-box border px-2 py-0.5 text-[11px] ${pickDept === d.id ? 'border-carpet bg-[#22401f] text-carpet-lite' : 'border-ink-500 bg-ink-800 text-dim hover:border-brass'}`}>{t(d.nameTh)}</button>
                 ))}
               </div>
             </Field>
           )}
           <div className="grid grid-cols-[1fr_1fr] gap-2">
-            <Field label="ชื่อเรียก"><Input className="h-8" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="เช่น LINE ร้านหลัก" maxLength={80} /></Field>
-            <Field label="ข้อความตอบรับทันที" info="ส่งกลับทันทีที่ลูกค้าทัก ระหว่างรอคำตอบจริง - ว่าง = ใช้ข้อความมาตรฐาน">
-              <Input className="h-8" value={ack} onChange={(e) => setAck(e.target.value)} placeholder="รับเรื่องแล้วค่ะ กำลังหาข้อมูลให้ สักครู่นะคะ" maxLength={300} />
+            <Field label={t('ชื่อเรียก')}><Input className="h-8" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('เช่น LINE ร้านหลัก')} maxLength={80} /></Field>
+            <Field label={t('ข้อความตอบรับทันที')} info={t('ส่งกลับทันทีที่ลูกค้าทัก ระหว่างรอคำตอบจริง - ว่าง = ใช้ข้อความมาตรฐาน')}>
+              <Input className="h-8" value={ack} onChange={(e) => setAck(e.target.value)} placeholder={t('รับเรื่องแล้วค่ะ กำลังหาข้อมูลให้ สักครู่นะคะ')} maxLength={300} />
             </Field>
           </div>
           <div className="grid grid-cols-[1fr_1fr] gap-2">
-            <Field label="Channel secret" info="LINE Developers → channel → Basic settings → Channel secret" hint={editing ? 'ว่าง = คงค่าเดิม' : undefined}>
+            <Field label="Channel secret" info="LINE Developers → channel → Basic settings → Channel secret" hint={editing ? t('ว่าง = คงค่าเดิม') : undefined}>
               <Input className="h-8" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} />
             </Field>
-            <Field label="Channel access token" info="LINE Developers → Messaging API → Channel access token (long-lived) → Issue" hint={editing ? 'ว่าง = คงค่าเดิม' : undefined}>
+            <Field label="Channel access token" info="LINE Developers → Messaging API → Channel access token (long-lived) → Issue" hint={editing ? t('ว่าง = คงค่าเดิม') : undefined}>
               <Input className="h-8" type="password" value={token} onChange={(e) => setToken(e.target.value)} />
             </Field>
           </div>
           <div className="flex items-center gap-2">
-            <Button size="sm" variant="primary" onClick={save} disabled={busy !== null || !canSave}>{busy === 'save' ? <LoaderCircle className="animate-spin" /> : <Check />} {editing ? 'บันทึกการแก้ไข' : 'บันทึก'}</Button>
-            <Button size="sm" variant="outline" onClick={reset} disabled={busy !== null}>ยกเลิก</Button>
-            {!editing && <span className="text-[10px] text-dim">บันทึกแล้วจะได้ Webhook URL ไปวางใน LINE console</span>}
+            <Button size="sm" variant="primary" onClick={save} disabled={busy !== null || !canSave}>{busy === 'save' ? <LoaderCircle className="animate-spin" /> : <Check />} {editing ? t('บันทึกการแก้ไข') : t('บันทึก')}</Button>
+            <Button size="sm" variant="outline" onClick={reset} disabled={busy !== null}>{t('ยกเลิก')}</Button>
+            {!editing && <span className="text-[10px] text-dim">{t('บันทึกแล้วจะได้ Webhook URL ไปวางใน LINE console')}</span>}
           </div>
         </div>
       )}
@@ -514,16 +515,16 @@ function InboxSection({ officeId, deptId, canEdit }: { officeId: string; deptId:
   const curl = `curl -X POST "${url}" \\
   -H "Authorization: Bearer ${fresh ?? '<token>'}" \\
   -H "Content-Type: application/json" \\
-  -d '{"title":"ตัวอย่าง","source":"my-service","ask":"สรุปให้หน่อย","data":{"anything":"here"}}'`;
+  -d '{"title":"${t('ตัวอย่าง')}","source":"my-service","ask":"${t('สรุปให้หน่อย')}","data":{"anything":"here"}}'`;
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-wall-mid">
-        URL รับข้อมูลเข้า
+        {t('URL รับข้อมูลเข้า')}
         <InfoTip>
-          POST JSON มาที่ URL นี้พร้อม <code>Authorization: Bearer &lt;token&gt;</code><br />
-          ห่อเป็น <code>{'{ title, source, ask, data, intent:"note"|"task", deliver, idempotencyKey, wait }'}</code> หรือไม่ห่อก็ได้ (ทั้งก้อน = data)<br />
-          ตอบ 202 ทันที หัวหน้าแผนกทำงานต่อ - ดูสถานะที่ <code>?id=</code> · ผลถูกส่งออกไปทุกช่องในแท็บ "ส่งออก"
+          {t('POST JSON มาที่ URL นี้พร้อม')} <code>Authorization: Bearer &lt;token&gt;</code><br />
+          {t('ห่อเป็น')} <code>{'{ title, source, ask, data, intent:"note"|"task", deliver, idempotencyKey, wait }'}</code> {t('หรือไม่ห่อก็ได้ (ทั้งก้อน = data)')}<br />
+          {t('ตอบ 202 ทันที หัวหน้าแผนกทำงานต่อ - ดูสถานะที่')} <code>?id=</code> {t('· ผลถูกส่งออกไปทุกช่องในแท็บ "ส่งออก"')}
         </InfoTip>
       </div>
       <div className="flex items-center gap-1.5">
@@ -533,22 +534,22 @@ function InboxSection({ officeId, deptId, canEdit }: { officeId: string; deptId:
 
       <div className="flex items-center gap-2">
         <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-wall-mid">
-          token ต่อแหล่งข้อมูล
-          <InfoTip>ตั้งชื่อตามระบบที่จะเรียกเข้ามา (gcp-billing, sentry, n8n ...) แล้วสร้าง token ให้ระบบนั้นโดยเฉพาะ - สร้างได้หลายอัน<br />
-            ทุกอย่างที่ยิงผ่าน token ไหนจะติด source = ชื่อนั้นอัตโนมัติ (เห็นในรายการด้านล่าง ในสมุดเลขาฯ และใช้เลือกช่องส่งออก) เพิกถอนทีละอันได้โดยไม่กระทบระบบอื่น<br />
-            token ยิงเข้าได้เฉพาะแผนกนี้ โชว์ครั้งเดียว หายแล้วสร้างใหม่</InfoTip>
+          {t('token ต่อแหล่งข้อมูล')}
+          <InfoTip>{t('ตั้งชื่อตามระบบที่จะเรียกเข้ามา (gcp-billing, sentry, n8n ...) แล้วสร้าง token ให้ระบบนั้นโดยเฉพาะ - สร้างได้หลายอัน')}<br />
+            {t('ทุกอย่างที่ยิงผ่าน token ไหนจะติด source = ชื่อนั้นอัตโนมัติ (เห็นในรายการด้านล่าง ในสมุดเลขาฯ และใช้เลือกช่องส่งออก) เพิกถอนทีละอันได้โดยไม่กระทบระบบอื่น')}<br />
+            {t('token ยิงเข้าได้เฉพาะแผนกนี้ โชว์ครั้งเดียว หายแล้วสร้างใหม่')}</InfoTip>
         </span>
         {canEdit && (
           <>
-            <Input className="h-7 w-52 px-2 text-[11px]" value={srcName} onChange={(e) => setSrcName(e.target.value)} placeholder="ชื่อระบบที่จะเรียกเข้ามา เช่น gcp-billing" maxLength={60}
+            <Input className="h-7 w-52 px-2 text-[11px]" value={srcName} onChange={(e) => setSrcName(e.target.value)} placeholder={t('ชื่อระบบที่จะเรียกเข้ามา เช่น gcp-billing')} maxLength={60}
               onKeyDown={(e) => { if (e.key === 'Enter' && srcName.trim()) void create(); }} />
-            <Button size="sm" onClick={create} disabled={busy || !srcName.trim()} title={srcName.trim() ? `สร้าง token ชื่อ "${srcName.trim()}"` : 'ตั้งชื่อก่อน'}><KeyRound /> สร้าง token</Button>
+            <Button size="sm" onClick={create} disabled={busy || !srcName.trim()} title={srcName.trim() ? t('สร้าง token ชื่อ "{name}"', { name: srcName.trim() }) : t('ตั้งชื่อก่อน')}><KeyRound /> {t('สร้าง token')}</Button>
           </>
         )}
       </div>
       {fresh && (
         <div className="rounded-box border-2 border-brass/60 bg-wood-deep/50 p-2 text-[11px]">
-          <div className="mb-1 text-brass-lite">token ใหม่{tokens?.[0] ? ` สำหรับ "${tokens[0].name}"` : ''} - โชว์ครั้งเดียว</div>
+          <div className="mb-1 text-brass-lite">{tokens?.[0] ? t('token ใหม่ สำหรับ "{name}" - โชว์ครั้งเดียว', { name: tokens[0].name }) : t('token ใหม่ - โชว์ครั้งเดียว')}</div>
           <div className="flex items-center gap-1.5">
             <code className="min-w-0 flex-1 truncate rounded-box bg-ink-900 px-2 py-1 text-parchment">{fresh}</code>
             <Button size="sm" variant="outline" onClick={() => copy('tok', fresh)}>{copied === 'tok' ? <Check /> : <Copy />}</Button>
@@ -557,50 +558,50 @@ function InboxSection({ officeId, deptId, canEdit }: { officeId: string; deptId:
       )}
       {tokens && tokens.length > 0 && (
         <ul className="flex flex-col gap-1">
-          <li className="text-[10px] text-dim">token ที่ใช้อยู่ {tokens.length} อัน (แต่ละอัน = 1 ระบบที่เรียกเข้ามา)</li>
-          {tokens.map((t) => (
-            <li key={t.id} className="flex items-center gap-2 rounded-box border border-ink-600 bg-ink-700 px-2 py-1 text-[11px]">
+          <li className="text-[10px] text-dim">{t('token ที่ใช้อยู่ {n} อัน (แต่ละอัน = 1 ระบบที่เรียกเข้ามา)', { n: tokens.length })}</li>
+          {tokens.map((tk) => (
+            <li key={tk.id} className="flex items-center gap-2 rounded-box border border-ink-600 bg-ink-700 px-2 py-1 text-[11px]">
               <KeyRound className="size-3 text-dim" />
-              <span className="text-parchment">{t.name}</span>
-              <span className="text-dim">สร้าง {new Date(t.created_at).toLocaleDateString('th-TH')}{t.last_used_at ? ` · ใช้ล่าสุด ${new Date(t.last_used_at).toLocaleString('th-TH')}` : ' · ยังไม่เคยใช้'}</span>
+              <span className="text-parchment">{tk.name}</span>
+              <span className="text-dim">{t('สร้าง {date}', { date: new Date(tk.created_at).toLocaleDateString('th-TH') })}{tk.last_used_at ? ` · ${t('ใช้ล่าสุด {date}', { date: new Date(tk.last_used_at).toLocaleString('th-TH') })}` : ` · ${t('ยังไม่เคยใช้')}`}</span>
               <span className="flex-1" />
-              {canEdit && <Button size="sm" variant="ghost" onClick={() => revoke(t.id)} disabled={busy} title="เพิกถอน"><Trash2 /></Button>}
+              {canEdit && <Button size="sm" variant="ghost" onClick={() => revoke(tk.id)} disabled={busy} title={t('เพิกถอน')}><Trash2 /></Button>}
             </li>
           ))}
         </ul>
       )}
       <details className="rounded-box border border-ink-600 bg-ink-900 p-2 text-[11px]">
-        <summary className="cursor-pointer text-dim">ตัวอย่าง curl</summary>
+        <summary className="cursor-pointer text-dim">{t('ตัวอย่าง curl')}</summary>
         <pre className="mt-1 whitespace-pre-wrap break-all font-mono text-[10px] text-parchment-2">{curl}</pre>
       </details>
       {err && <p className="text-[11px] text-rug-lite">{err}</p>}
 
       <div className="mt-1 flex items-center gap-2">
         <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-wall-mid">
-          ที่เข้ามาล่าสุด
+          {t('ที่เข้ามาล่าสุด')}
           {running && <LoaderCircle className="size-3 animate-spin text-brass" />}
         </span>
         <span className="flex-1" />
         {canEdit && (
-          <Button size="sm" variant="outline" onClick={fireTest} disabled={testing || running} title={`ส่งข้อมูลตัวอย่างเข้าแผนกนี้ผ่านเส้นทางเดียวกับ webhook จริง${srcName.trim() ? ` ในนามแหล่ง "${srcName.trim()}"` : ''} แล้วดูผลด้านล่าง (ส่งออกไปช่องที่รับแหล่งนี้)`}>
-            {testing ? <LoaderCircle className="animate-spin" /> : <Send />} ยิงทดสอบ
+          <Button size="sm" variant="outline" onClick={fireTest} disabled={testing || running} title={srcName.trim() ? t('ส่งข้อมูลตัวอย่างเข้าแผนกนี้ผ่านเส้นทางเดียวกับ webhook จริง ในนามแหล่ง "{name}" แล้วดูผลด้านล่าง (ส่งออกไปช่องที่รับแหล่งนี้)', { name: srcName.trim() }) : t('ส่งข้อมูลตัวอย่างเข้าแผนกนี้ผ่านเส้นทางเดียวกับ webhook จริง แล้วดูผลด้านล่าง (ส่งออกไปช่องที่รับแหล่งนี้)')}>
+            {testing ? <LoaderCircle className="animate-spin" /> : <Send />} {t('ยิงทดสอบ')}
           </Button>
         )}
       </div>
-      {rows.length === 0 ? <Hint className="text-[10px]">ยังไม่มีอะไรยิงเข้ามา</Hint> : (
+      {rows.length === 0 ? <Hint className="text-[10px]">{t('ยังไม่มีอะไรยิงเข้ามา')}</Hint> : (
         <ul className="flex flex-col gap-1">
           {rows.map((r) => (
             <li key={r.id} className="rounded-box border border-ink-600 bg-ink-700 px-2 py-1 text-[11px]">
               <div className="flex items-center gap-2">
                 <Badge variant={r.status === 'done' ? 'good' : r.status === 'error' ? 'bad' : r.status === 'running' ? 'brass' : 'default'}>{r.status}</Badge>
-                <span className="truncate text-parchment">{r.title || '(ไม่มีหัวข้อ)'}</span>
+                <span className="truncate text-parchment">{r.title || t('(ไม่มีหัวข้อ)')}</span>
                 <span className="text-dim">{r.source}</span>
                 <span className="ml-auto shrink-0 text-dim">{new Date(r.created_at).toLocaleString('th-TH')}</span>
               </div>
               {r.answer && <p className="mt-0.5 line-clamp-3 whitespace-pre-wrap text-parchment-2">{r.answer}</p>}
               {r.error && <p className="mt-0.5 text-rug-lite">{r.error}</p>}
               {r.delivered?.length > 0 && (
-                <p className="mt-0.5 text-[10px] text-dim">ส่งออก: {r.delivered.map((d) => `${d.kind}${d.ok ? ' ✓' : ` ✗ ${d.error ?? ''}`}`).join(' · ')}</p>
+                <p className="mt-0.5 text-[10px] text-dim">{t('ส่งออก:')} {r.delivered.map((d) => `${d.kind}${d.ok ? ' ✓' : ` ✗ ${d.error ?? ''}`}`).join(' · ')}</p>
               )}
             </li>
           ))}
@@ -724,14 +725,14 @@ export function ChannelSection({ officeId, deptId, canEdit, compact = false, onC
   const test = async (id: string) => {
     setBusy(`test:${id}`); setErr(null); setMsg(null);
     try {
-      const t = await accessToken();
+      const tok = await accessToken();
       const res = await fetch('/api/office/channel/test', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...(t ? { 'x-sb-token': t } : {}) },
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...(tok ? { 'x-sb-token': tok } : {}) },
         body: JSON.stringify({ officeId, channelId: id }),
       });
       const data = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-      setMsg('ส่งข้อความทดสอบแล้ว - ไปดูในแชท');
+      setMsg(t('ส่งข้อความทดสอบแล้ว - ไปดูในแชท'));
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(null); }
   };
 
@@ -742,22 +743,22 @@ export function ChannelSection({ officeId, deptId, canEdit, compact = false, onC
       {!shared && !compact && (
         <>
           <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-wall-mid">
-            ช่องกลางของออฟฟิศ
-            <InfoTip>ช่องที่ตั้งไว้ครั้งเดียวที่ปุ่ม "เชื่อมต่อ" (แถบบน) → ช่องส่งออกกลาง - ติ๊กเพื่อให้รายงานของแผนกนี้ไปช่องนั้นด้วย ไม่ต้องวาง URL ซ้ำทุกแผนก · แก้ URL/ทดสอบทำที่หน้าเชื่อมต่อ</InfoTip>
+            {t('ช่องกลางของออฟฟิศ')}
+            <InfoTip>{t('ช่องที่ตั้งไว้ครั้งเดียวที่ปุ่ม "เชื่อมต่อ" (แถบบน) → ช่องส่งออกกลาง - ติ๊กเพื่อให้รายงานของแผนกนี้ไปช่องนั้นด้วย ไม่ต้องวาง URL ซ้ำทุกแผนก · แก้ URL/ทดสอบทำที่หน้าเชื่อมต่อ')}</InfoTip>
           </div>
-          {sharedRows.length === 0 ? <Hint className="text-[10px]">ยังไม่มีช่องกลาง - ตั้งได้ที่ปุ่ม "เชื่อมต่อ" บนแถบบน</Hint> : (
+          {sharedRows.length === 0 ? <Hint className="text-[10px]">{t('ยังไม่มีช่องกลาง - ตั้งได้ที่ปุ่ม "เชื่อมต่อ" บนแถบบน')}</Hint> : (
             <ul className="flex flex-col gap-1">
               {sharedRows.map((c) => {
                 const on = usedBy(c).includes(deptId);
                 return (
                   <li key={c.id} className={`flex items-center gap-2 rounded-box border bg-ink-700 px-2 py-1 text-[11px] ${on ? 'border-carpet' : 'border-ink-600'}`}>
                     <button type="button" onClick={() => canEdit && void toggleShared(c)} disabled={!canEdit || busy !== null}
-                      className={`size-4 shrink-0 rounded-box border ${on ? 'border-carpet bg-carpet-dark' : 'border-ink-500 bg-ink-800'}`} aria-label="ใช้กับแผนกนี้">{on ? '✓' : ''}</button>
+                      className={`size-4 shrink-0 rounded-box border ${on ? 'border-carpet bg-carpet-dark' : 'border-ink-500 bg-ink-800'}`} aria-label={t('ใช้กับแผนกนี้')}>{on ? '✓' : ''}</button>
                     <Badge variant={c.enabled ? 'good' : 'default'}>{c.kind}</Badge>
                     <span className="truncate text-parchment">{c.label}</span>
                     <span className="truncate text-dim">{c.kind === 'line' ? `→ ${c.config.to}` : c.config.url?.replace(/^https?:\/\//, '').slice(0, 32)}</span>
                     <span className="flex-1" />
-                    <span className="shrink-0 text-[10px] text-dim">{on ? 'แผนกนี้ใช้อยู่' : 'ไม่ได้ใช้'}</span>
+                    <span className="shrink-0 text-[10px] text-dim">{on ? t('แผนกนี้ใช้อยู่') : t('ไม่ได้ใช้')}</span>
                   </li>
                 );
               })}
@@ -766,16 +767,16 @@ export function ChannelSection({ officeId, deptId, canEdit, compact = false, onC
         </>
       )}
       <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-wall-mid">
-        {shared ? 'ช่องส่งออกทั้งหมด' : 'ส่งออก - ช่องของแผนกนี้'}
+        {shared ? t('ช่องส่งออกทั้งหมด') : t('ส่งออก - ช่องของแผนกนี้')}
         <InfoTip>
           {shared
-            ? <>ที่เก็บ Teams/Slack/Discord/LINE/webhook ทั้งออฟฟิศ<br /></>
-            : <>Teams/Slack/Discord/LINE/webhook ที่แผนกนี้จะโพสต์รายงานไป - ช่องใหม่รับ "ทุกแหล่งของแผนกนี้" ก่อน แล้วไปติ๊กจำกัดที่แถวแหล่งด้านบนได้<br /></>}
-          Teams: Workflows → "Post to a channel when a webhook request is received" แล้วเอา URL มาวาง<br />
-          LINE: ต้องมี OA และ userId/groupId ปลายทาง (groupId ได้จาก join event ของ webhook)
+            ? <>{t('ที่เก็บ Teams/Slack/Discord/LINE/webhook ทั้งออฟฟิศ')}<br /></>
+            : <>{t('Teams/Slack/Discord/LINE/webhook ที่แผนกนี้จะโพสต์รายงานไป - ช่องใหม่รับ "ทุกแหล่งของแผนกนี้" ก่อน แล้วไปติ๊กจำกัดที่แถวแหล่งด้านบนได้')}<br /></>}
+          {t('Teams: Workflows → "Post to a channel when a webhook request is received" แล้วเอา URL มาวาง')}<br />
+          {t('LINE: ต้องมี OA และ userId/groupId ปลายทาง (groupId ได้จาก join event ของ webhook)')}
         </InfoTip>
       </div>
-      {rows.length === 0 ? <Hint className="text-[10px]">{shared ? 'ยังไม่มีช่องกลาง' : 'ยังไม่มีช่องเฉพาะแผนก'}</Hint> : (
+      {rows.length === 0 ? <Hint className="text-[10px]">{shared ? t('ยังไม่มีช่องกลาง') : t('ยังไม่มีช่องเฉพาะแผนก')}</Hint> : (
         <ul className="flex flex-col gap-1">
           {rows.map((c) => (
             <li key={c.id} className={`flex flex-col gap-1 rounded-box border bg-ink-700 px-2 py-1 text-[11px] ${editing?.id === c.id ? 'border-brass' : 'border-ink-600'}`}>
@@ -785,17 +786,17 @@ export function ChannelSection({ officeId, deptId, canEdit, compact = false, onC
               <span className="truncate text-parchment">{c.label}</span>
               <span className="truncate text-dim">{c.kind === 'line' ? `→ ${c.config.to}` : c.config.url?.replace(/^https?:\/\//, '').slice(0, 40)}</span>
               {compact
-                ? <Badge className="shrink-0 whitespace-nowrap" title={(c.config.routes ?? '') || 'ยังไม่มีแหล่งไหนส่งมาช่องนี้'}>{(c.config.routes ?? '').split(/[,\n]/).filter((x) => x.trim()).length || 'ยังไม่ผูก'}{(c.config.routes ?? '').trim() ? ' เส้นทาง' : ''}</Badge>
-                : <Badge className="max-w-40 shrink-0 truncate whitespace-nowrap" title={c.config.sources ? `รับจาก: ${c.config.sources}` : 'รับทุกแหล่ง'}>{c.config.sources ? `จาก ${c.config.sources}` : 'ทุกแหล่ง'}</Badge>}
+                ? <Badge className="shrink-0 whitespace-nowrap" title={(c.config.routes ?? '') || t('ยังไม่มีแหล่งไหนส่งมาช่องนี้')}>{(c.config.routes ?? '').split(/[,\n]/).filter((x) => x.trim()).length || t('ยังไม่ผูก')}{(c.config.routes ?? '').trim() ? ` ${t('เส้นทาง')}` : ''}</Badge>
+                : <Badge className="max-w-40 shrink-0 truncate whitespace-nowrap" title={c.config.sources ? t('รับจาก: {sources}', { sources: c.config.sources }) : t('รับทุกแหล่ง')}>{c.config.sources ? t('จาก {sources}', { sources: c.config.sources }) : t('ทุกแหล่ง')}</Badge>}
               <span className="flex-1" />
-              <Button size="sm" variant="outline" onClick={() => test(c.id)} disabled={busy !== null || !c.enabled} title="ส่งข้อความทดสอบไปที่ช่องนี้">
-                {busy === `test:${c.id}` ? <LoaderCircle className="animate-spin" /> : <Send />} ทดสอบ
+              <Button size="sm" variant="outline" onClick={() => test(c.id)} disabled={busy !== null || !c.enabled} title={t('ส่งข้อความทดสอบไปที่ช่องนี้')}>
+                {busy === `test:${c.id}` ? <LoaderCircle className="animate-spin" /> : <Send />} {t('ทดสอบ')}
               </Button>
               {canEdit && (
                 <>
-                  <Button size="sm" variant="ghost" onClick={() => startEdit(c)} disabled={busy !== null} title="แก้ไขชื่อ/URL">แก้ไข</Button>
-                  <Button size="sm" variant="ghost" onClick={() => toggle(c)} disabled={busy !== null}>{c.enabled ? 'ปิด' : 'เปิด'}</Button>
-                  <Button size="sm" variant="ghost" onClick={() => remove(c.id)} disabled={busy !== null} title="ลบ"><Trash2 /></Button>
+                  <Button size="sm" variant="ghost" onClick={() => startEdit(c)} disabled={busy !== null} title={t('แก้ไขชื่อ/URL')}>{t('แก้ไข')}</Button>
+                  <Button size="sm" variant="ghost" onClick={() => toggle(c)} disabled={busy !== null}>{c.enabled ? t('ปิด') : t('เปิด')}</Button>
+                  <Button size="sm" variant="ghost" onClick={() => remove(c.id)} disabled={busy !== null} title={t('ลบ')}><Trash2 /></Button>
                 </>
               )}
               </div>
@@ -807,40 +808,40 @@ export function ChannelSection({ officeId, deptId, canEdit, compact = false, onC
       {canEdit && (
         <div className="flex flex-col gap-1.5 rounded-box border border-dashed border-ink-500 p-2">
           <div className="grid grid-cols-[1fr_1fr] gap-2">
-            <Field label="ชนิด">
+            <Field label={t('ชนิด')}>
               <Select value={kind} onValueChange={(v) => setKind(v as ChannelKind)}>
                 <SelectTrigger className="h-8 text-[11px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {useMemoKinds.map((k) => <SelectItem key={k} value={k}>{CHANNEL_LABEL[k]}</SelectItem>)}
+                  {useMemoKinds.map((k) => <SelectItem key={k} value={k}>{t(CHANNEL_LABEL[k])}</SelectItem>)}
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="ชื่อเรียก">
-              <Input className="h-8" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="เช่น ทีม DevOps" maxLength={60} />
+            <Field label={t('ชื่อเรียก')}>
+              <Input className="h-8" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('เช่น ทีม DevOps')} maxLength={60} />
             </Field>
           </div>
           {needUrl ? (
             <>
-              <Field label="Webhook URL" info={kind === 'webhook' ? 'ปลายทางที่จะรับ POST JSON { event, deptId, title, text, meetingId, inboxId, source, link, at }' : 'URL นี้คือ secret ในตัว (ใครมีก็โพสต์เข้าห้องได้) จึงเห็นได้เฉพาะเจ้าของ/exec - ไม่ต้องใส่คีย์อื่นเพิ่ม'}>
+              <Field label="Webhook URL" info={kind === 'webhook' ? t('ปลายทางที่จะรับ POST JSON { event, deptId, title, text, meetingId, inboxId, source, link, at }') : t('URL นี้คือ secret ในตัว (ใครมีก็โพสต์เข้าห้องได้) จึงเห็นได้เฉพาะเจ้าของ/exec - ไม่ต้องใส่คีย์อื่นเพิ่ม')}>
                 <Input className="h-8" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://..." />
               </Field>
               {kind === 'webhook' && (
-                <Field label="secret" info="ไม่บังคับ - ถ้าใส่ จะแนบไปใน header X-Office-Secret ทุกครั้ง ปลายทางใช้เช็คว่ามาจากออฟฟิศจริง ตั้งค่าเดียวกันไว้ทั้งสองฝั่ง">
-                  <Input className="h-8" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="สุ่มอะไรก็ได้ แล้วเอาไปตั้งที่ปลายทางให้ตรงกัน" />
+                <Field label="secret" info={t('ไม่บังคับ - ถ้าใส่ จะแนบไปใน header X-Office-Secret ทุกครั้ง ปลายทางใช้เช็คว่ามาจากออฟฟิศจริง ตั้งค่าเดียวกันไว้ทั้งสองฝั่ง')}>
+                  <Input className="h-8" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={t('สุ่มอะไรก็ได้ แล้วเอาไปตั้งที่ปลายทางให้ตรงกัน')} />
                 </Field>
               )}
             </>
           ) : (
             <div className="grid grid-cols-[1fr_1fr] gap-2">
-              <Field label="ปลายทาง" info="userId (U...) หรือ groupId (C...) ที่ OA จะ push ข้อความไป - OA ต้องอยู่ในกลุ่มนั้น"><Input className="h-8" value={to} onChange={(e) => setTo(e.target.value)} placeholder="Cxxxxxxxx / Uxxxxxxxx" /></Field>
-              <Field label="channel access token" info="secret ของ Messaging API - ว่างไว้ = ใช้ LINE_CHANNEL_ACCESS_TOKEN ที่ตั้งบนเซิร์ฟเวอร์"><Input className="h-8" value={token} onChange={(e) => setToken(e.target.value)} type="password" /></Field>
+              <Field label={t('ปลายทาง')} info={t('userId (U...) หรือ groupId (C...) ที่ OA จะ push ข้อความไป - OA ต้องอยู่ในกลุ่มนั้น')}><Input className="h-8" value={to} onChange={(e) => setTo(e.target.value)} placeholder="Cxxxxxxxx / Uxxxxxxxx" /></Field>
+              <Field label="channel access token" info={t('secret ของ Messaging API - ว่างไว้ = ใช้ LINE_CHANNEL_ACCESS_TOKEN ที่ตั้งบนเซิร์ฟเวอร์')}><Input className="h-8" value={token} onChange={(e) => setToken(e.target.value)} type="password" /></Field>
             </div>
           )}
-          {!compact && <Field label="รับรายงานจากแหล่งไหน" info="แหล่ง = token ขาเข้าที่ตั้งชื่อไว้ / LINE OA ที่ผูกกับแผนก (บทสนทนาลูกค้าจะถูกส่งต่อมาในชื่อ OA) / ค่า source ที่ระบบข้างนอกส่งมา - เลือกได้หลายอัน ช่องนี้จะได้เฉพาะรายงานจากแหล่งที่ติ๊ก · ทุกแหล่ง = ไม่กรอง (รวมแชท LINE ด้วย)">
+          {!compact && <Field label={t('รับรายงานจากแหล่งไหน')} info={t('แหล่ง = token ขาเข้าที่ตั้งชื่อไว้ / LINE OA ที่ผูกกับแผนก (บทสนทนาลูกค้าจะถูกส่งต่อมาในชื่อ OA) / ค่า source ที่ระบบข้างนอกส่งมา - เลือกได้หลายอัน ช่องนี้จะได้เฉพาะรายงานจากแหล่งที่ติ๊ก · ทุกแหล่ง = ไม่กรอง (รวมแชท LINE ด้วย)')}>
             <div className="flex flex-wrap items-center gap-1">
               <button type="button" onClick={() => setSources('')}
                 className={`rounded-box border px-2 py-0.5 text-[11px] ${chosen.length === 0 ? 'border-carpet bg-[#22401f] text-carpet-lite' : 'border-ink-500 bg-ink-800 text-dim hover:border-brass'}`}>
-                ทุกแหล่ง
+                {t('ทุกแหล่ง')}
               </button>
               {knownSources.map((s) => (
                 <button key={s} type="button" onClick={() => toggleSource(s)}
@@ -849,18 +850,18 @@ export function ChannelSection({ officeId, deptId, canEdit, compact = false, onC
                 </button>
               ))}
               {chosen.filter((s) => !knownSources.includes(s)).map((s) => (
-                <button key={s} type="button" onClick={() => toggleSource(s)} title="แหล่งที่ตั้งไว้แต่ยังไม่มี token/ข้อมูลเข้า"
+                <button key={s} type="button" onClick={() => toggleSource(s)} title={t('แหล่งที่ตั้งไว้แต่ยังไม่มี token/ข้อมูลเข้า')}
                   className="rounded-box border border-brass/60 bg-[#22401f] px-2 py-0.5 text-[11px] text-carpet-lite">{s} ×</button>
               ))}
-              {knownSources.length === 0 && <span className="text-[10px] text-dim">ยังไม่มีแหล่ง - ไปสร้าง token หรือผูก LINE OA ในแท็บ "Webhook เข้า" ก่อน</span>}
+              {knownSources.length === 0 && <span className="text-[10px] text-dim">{t('ยังไม่มีแหล่ง - ไปสร้าง token หรือผูก LINE OA ในแท็บ "Webhook เข้า" ก่อน')}</span>}
             </div>
           </Field>}
           <div className="flex items-center gap-2">
             <Button size="sm" variant="primary" onClick={add} disabled={busy !== null || !valid}>
-              {busy === 'add' ? <LoaderCircle className="animate-spin" /> : editing ? <Check /> : <Plus />} {editing ? 'บันทึกการแก้ไข + ทดสอบ' : 'เพิ่มช่อง + ทดสอบ'}
+              {busy === 'add' ? <LoaderCircle className="animate-spin" /> : editing ? <Check /> : <Plus />} {editing ? t('บันทึกการแก้ไข + ทดสอบ') : t('เพิ่มช่อง + ทดสอบ')}
             </Button>
-            {editing && <Button size="sm" variant="outline" onClick={resetForm} disabled={busy !== null}>ยกเลิก</Button>}
-            <span className="text-[10px] text-dim">{editing ? `กำลังแก้ "${editing.label}"` : 'บันทึกทันที และส่งข้อความทดสอบไปที่ช่องนี้ให้เลย'}</span>
+            {editing && <Button size="sm" variant="outline" onClick={resetForm} disabled={busy !== null}>{t('ยกเลิก')}</Button>}
+            <span className="text-[10px] text-dim">{editing ? t('กำลังแก้ "{name}"', { name: editing.label }) : t('บันทึกทันที และส่งข้อความทดสอบไปที่ช่องนี้ให้เลย')}</span>
           </div>
         </div>
       )}
@@ -894,11 +895,11 @@ export function DepartmentsList({ officeId, roster, canEdit, onPick }: {
     <>
         <div className="flex items-center gap-2">
           <span className="flex flex-1 items-center gap-1.5 text-[11px] text-dim">
-            {DEPT_BY_ID.size} แผนก
-            <InfoTip>แต่ละแผนกมี URL รับข้อมูลเข้าของตัวเอง (<code>{origin}/api/office/inbox/&lt;id&gt;</code>) และช่องส่งออกไป Teams/Slack/Discord/LINE ได้หลายช่อง - กด "ตั้งค่า" เพื่อแก้สกิล/webhook ของแผนกนั้น</InfoTip>
+            {t('{n} แผนก', { n: DEPT_BY_ID.size })}
+            <InfoTip>{t('แต่ละแผนกมี URL รับข้อมูลเข้าของตัวเอง')} (<code>{origin}/api/office/inbox/&lt;id&gt;</code>) {t('และช่องส่งออกไป Teams/Slack/Discord/LINE ได้หลายช่อง - กด "ตั้งค่า" เพื่อแก้สกิล/webhook ของแผนกนั้น')}</InfoTip>
           </span>
-          <Button size="sm" variant="primary" onClick={() => onPick(null)} disabled={!canEdit} title={canEdit ? 'ตั้งแผนกใหม่ ชื่ออะไรก็ได้' : 'เจ้าของหรือ exec เท่านั้น'}>
-            <Plus /> แผนกใหม่
+          <Button size="sm" variant="primary" onClick={() => onPick(null)} disabled={!canEdit} title={canEdit ? t('ตั้งแผนกใหม่ ชื่ออะไรก็ได้') : t('เจ้าของหรือ exec เท่านั้น')}>
+            <Plus /> {t('แผนกใหม่')}
           </Button>
         </div>
         <ul className="flex max-h-[60vh] flex-col gap-1.5 overflow-y-auto pr-1">
@@ -909,15 +910,15 @@ export function DepartmentsList({ officeId, roster, canEdit, onPick }: {
               <li key={d.id} className="flex items-center gap-2 rounded-box border-2 border-ink-600 border-l-4 bg-ink-700 px-2 py-1.5" style={{ borderLeftColor: d.color }}>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 text-[12px] font-semibold text-parchment">
-                    {d.nameTh}
+                    {t(d.nameTh)}
                     <code className="text-[10px] font-normal text-dim">{d.id}</code>
-                    {d.custom && <Badge variant="brass">{PRESET_BY_ID.has(d.id) ? 'ทับ preset' : 'สร้างเอง'}</Badge>}
+                    {d.custom && <Badge variant="brass">{PRESET_BY_ID.has(d.id) ? t('ทับ preset') : t('สร้างเอง')}</Badge>}
                   </div>
-                  <div className="truncate text-[10px] text-dim">{d.description || (d.custom ? 'สกิลในออฟฟิศ' : `skills/${d.skill}.md`)}</div>
+                  <div className="truncate text-[10px] text-dim">{d.description || (d.custom ? t('สกิลในออฟฟิศ') : `skills/${d.skill}.md`)}</div>
                 </div>
-                <span className="shrink-0 text-[10px] text-dim">{n} คน</span>
-                <span className="shrink-0 text-[10px] text-dim" title="ช่องส่งออกที่เปิดอยู่">{ch ? `${ch} ช่องส่งออก` : '-'}</span>
-                <Button size="sm" variant="outline" onClick={() => onPick(d.id)}>ตั้งค่า</Button>
+                <span className="shrink-0 text-[10px] text-dim">{t('{n} คน', { n })}</span>
+                <span className="shrink-0 text-[10px] text-dim" title={t('ช่องส่งออกที่เปิดอยู่')}>{ch ? t('{n} ช่องส่งออก', { n: ch }) : '-'}</span>
+                <Button size="sm" variant="outline" onClick={() => onPick(d.id)}>{t('ตั้งค่า')}</Button>
               </li>
             );
           })}
@@ -931,7 +932,7 @@ export function DepartmentsHub({ open, onClose, officeId, roster, canEdit, onPic
 }) {
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent icon={<Building2 />} title="แผนก" description="ทุกแผนกของออฟฟิศ" wide>
+      <DialogContent icon={<Building2 />} title={t('แผนก')} description={t('ทุกแผนกของออฟฟิศ')} wide>
         <DepartmentsList officeId={officeId} roster={roster} canEdit={canEdit} onPick={onPick} />
       </DialogContent>
     </Dialog>

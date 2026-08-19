@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Hint } from '@/components/ui/panel';
 import { fmt } from '@/components/ui/rich-text';
 import Portrait from '@/components/Portrait';
+import { t } from '@/lib/i18n';
 
 /* ============================================================
    สมุดบันทึกของเลขาฯ - แท็บในแผงขวา (ไม่ใช่ dialog แล้ว)
@@ -118,14 +119,14 @@ export default function SecretaryTab({
       <div className="shrink-0 rounded-box border-2 border-ink-600 bg-ink-700 p-1.5">
         <div className="flex items-center gap-1">
           <Button
-            size="icon" variant="ghost" className="size-6" title="เดือนก่อน"
+            size="icon" variant="ghost" className="size-6" title={t('เดือนก่อน')}
             onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))}
           >
             <ChevronLeft />
           </Button>
           <button
             className="flex-1 text-center text-[12px] font-semibold text-parchment hover:text-brass"
-            title="กลับมาเดือนนี้"
+            title={t('กลับมาเดือนนี้')}
             onClick={() => {
               const d = new Date();
               setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
@@ -135,25 +136,25 @@ export default function SecretaryTab({
             {fmtMonth.format(cursor)}
           </button>
           <Button
-            size="icon" variant="ghost" className="size-6" title="เดือนถัดไป"
+            size="icon" variant="ghost" className="size-6" title={t('เดือนถัดไป')}
             onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1))}
           >
             <ChevronRight />
           </Button>
           <Button
             size="icon" variant={calOpen ? 'primary' : 'ghost'} className="size-6"
-            title={calOpen ? 'พับปฏิทิน' : 'กางปฏิทิน - เลือกวัน'}
+            title={calOpen ? t('พับปฏิทิน') : t('กางปฏิทิน - เลือกวัน')}
             onClick={() => setCalOpen((v) => !v)}
           >
             <CalendarDays />
           </Button>
-          <Button size="icon" variant="ghost" className="size-6" onClick={onRefresh} disabled={loading} title="โหลดใหม่">
+          <Button size="icon" variant="ghost" className="size-6" onClick={onRefresh} disabled={loading} title={t('โหลดใหม่')}>
             <RefreshCw className={loading ? 'animate-spin' : undefined} />
           </Button>
         </div>
         {calOpen && (
         <div className="mt-1 grid grid-cols-7 gap-0.5 text-center text-[9px] text-dim">
-          {WEEKDAYS.map((w) => <div key={w} className="py-0.5">{w}</div>)}
+          {WEEKDAYS.map((w) => <div key={w} className="py-0.5">{t(w)}</div>)}
           {grid.map((d) => {
             const k = dayKey(d);
             const n = byDay.get(k)?.length ?? 0;
@@ -169,7 +170,7 @@ export default function SecretaryTab({
                 key={k}
                 onClick={() => setPickedDay(on ? null : k)}
                 disabled={!n}
-                title={n ? `${fmtDay.format(d)} - ${n} เรื่อง` : undefined}
+                title={n ? t('{day} - {n} เรื่อง', { day: fmtDay.format(d), n }) : undefined}
                 className={`relative flex h-6 flex-col items-center justify-center rounded-[3px] border text-[10px] disabled:cursor-default ${tone} ${inMonth ? '' : 'opacity-40'} ${k === todayKey ? 'font-bold underline' : ''}`}
               >
                 {d.getDate()}
@@ -184,10 +185,10 @@ export default function SecretaryTab({
         </div>
         )}
         <div className="mt-1 flex items-center justify-between text-[10px] text-dim">
-          <span>เดือนนี้ {monthTotal} เรื่อง{pickedDay ? ` · กรองวันที่ ${pickedDay.slice(-2)}` : ''}</span>
+          <span>{t('เดือนนี้ {n} เรื่อง', { n: monthTotal })}{pickedDay ? t(' · กรองวันที่ {day}', { day: pickedDay.slice(-2) }) : ''}</span>
           {pickedDay && (
             <button className="text-brass hover:underline" onClick={() => setPickedDay(null)}>
-              ดูทั้งเดือน
+              {t('ดูทั้งเดือน')}
             </button>
           )}
         </div>
@@ -199,7 +200,7 @@ export default function SecretaryTab({
         <Input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="ค้นทุกเดือน จากคำถาม / ข้อสรุป / แผนก"
+          placeholder={t('ค้นทุกเดือน จากคำถาม / ข้อสรุป / แผนก')}
           className="h-8 pl-7 text-[11px]"
         />
       </div>
@@ -213,17 +214,17 @@ export default function SecretaryTab({
       {/* ---------- รายการ ---------- */}
       {loading && !meetings.length ? (
         <div className="flex items-center justify-center gap-2 py-6 text-[12px] text-dim">
-          <LoaderCircle className="size-4 animate-spin" /> กำลังเปิดสมุดบันทึก
+          <LoaderCircle className="size-4 animate-spin" /> {t('กำลังเปิดสมุดบันทึก')}
         </div>
       ) : !rows.length ? (
         <Hint className="py-4 text-center">
           {q
-            ? 'ไม่พบบันทึกที่ตรงกับคำค้น'
+            ? t('ไม่พบบันทึกที่ตรงกับคำค้น')
             : pickedDay
-              ? 'วันนี้ไม่มีประชุม'
+              ? t('วันนี้ไม่มีประชุม')
               : meetings.length
-                ? 'เดือนนี้ยังไม่มีประชุม'
-                : 'ยังไม่มีการประชุม - ถามคำถามแรกแล้วเลขาฯ จะจดให้เอง'}
+                ? t('เดือนนี้ยังไม่มีประชุม')
+                : t('ยังไม่มีการประชุม - ถามคำถามแรกแล้วเลขาฯ จะจดให้เอง')}
         </Hint>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pr-1">
@@ -247,13 +248,13 @@ export default function SecretaryTab({
                       <span className="text-[10px] text-dim">
                         {pickedDay ? fmtTime.format(when) : `${fmtDay.format(when)} ${fmtTime.format(when)}`}
                       </span>
-                      {mode && <Badge variant="brass">{mode.th}</Badge>}
+                      {mode && <Badge variant="brass">{t(mode.th)}</Badge>}
                       {m.dept_ids.map((id) => {
                         const d = DEPT_BY_ID.get(id);
                         return d ? (
                           <span key={id} className="flex items-center gap-1 text-[10px] text-dim">
                             <i className="size-2 rounded-[2px]" style={{ background: d.color }} />
-                            {d.shortTh}
+                            {t(d.shortTh)}
                           </span>
                         ) : null;
                       })}
@@ -280,21 +281,21 @@ export default function SecretaryTab({
                   <div className="mt-1.5 border-t border-ink-600 pt-1.5">
                     {m.minutes && (
                       <div className="mb-1.5 rounded-box border border-wood-dark bg-wood-deep/40 px-2 py-1.5">
-                        <div className="mb-0.5 text-[10px] font-semibold text-brass-lite">รายงานการประชุม (เลขาฯ จด)</div>
+                        <div className="mb-0.5 text-[10px] font-semibold text-brass-lite">{t('รายงานการประชุม (เลขาฯ จด)')}</div>
                         <div className="text-[12px] leading-relaxed text-parchment-2">{fmt(m.minutes)}</div>
                       </div>
                     )}
-                    {m.minutes && <div className="mb-0.5 text-[10px] font-semibold text-dim">คำสรุปของประธาน</div>}
+                    {m.minutes && <div className="mb-0.5 text-[10px] font-semibold text-dim">{t('คำสรุปของประธาน')}</div>}
                     <div className="text-[12px] leading-relaxed text-parchment-2">
-                      {m.summary ? fmt(m.summary) : <Hint>ไม่มีข้อสรุปบันทึกไว้</Hint>}
+                      {m.summary ? fmt(m.summary) : <Hint>{t('ไม่มีข้อสรุปบันทึกไว้')}</Hint>}
                     </div>
                     {m.audience === 'customer' && (
                       <div className="mt-1.5 rounded-box border border-brass/50 bg-wood-deep/40 px-2 py-1.5">
                         <div className="mb-0.5 text-[10px] font-semibold text-brass">
-                          {m.asked_by_label ? `${m.asked_by_label} ถาม` : `ลูกค้าถาม${m.source ? ` (${m.source.toUpperCase()})` : ''}`} - ตอบลูกค้าว่า (สิ่งที่ลูกค้าเห็น)
+                          {m.asked_by_label ? t('{name} ถาม', { name: m.asked_by_label }) : `${t('ลูกค้าถาม')}${m.source ? ` (${m.source.toUpperCase()})` : ''}`} - {t('ตอบลูกค้าว่า (สิ่งที่ลูกค้าเห็น)')}
                         </div>
                         <div className="text-[12px] leading-relaxed text-parchment-2">
-                          {m.customer_reply ? fmt(m.customer_reply) : <Hint>ยังไม่ได้ตอบ</Hint>}
+                          {m.customer_reply ? fmt(m.customer_reply) : <Hint>{t('ยังไม่ได้ตอบ')}</Hint>}
                         </div>
                       </div>
                     )}
@@ -302,8 +303,8 @@ export default function SecretaryTab({
                       <details className="mt-1.5">
                         <summary className="cursor-pointer text-[11px] text-dim hover:text-parchment">
                           {m.mode === 'relay'
-                            ? `บันทึกการเดินสาย (${ops.length} แผนก)`
-                            : `บันทึกการถกกัน (${ops.length} ความเห็น)`}
+                            ? t('บันทึกการเดินสาย ({n} แผนก)', { n: ops.length })
+                            : t('บันทึกการถกกัน ({n} ความเห็น)', { n: ops.length })}
                         </summary>
                         <div className="mt-1 flex flex-col gap-1">
                           {ops.map((o, i) => {
@@ -312,14 +313,14 @@ export default function SecretaryTab({
                               <div key={`${o.agentId}-${i}`}>
                                 {c && (
                                   <div className="mb-1 rounded-box border border-dashed border-wood-dark bg-wood-deep/40 px-2 py-1 text-[11px] text-parchment-2">
-                                    <b className="text-brass-lite">{c.fromName} ถาม {c.toName}:</b> {c.text}
+                                    <b className="text-brass-lite">{t('{from} ถาม {to}:', { from: c.fromName, to: c.toName })}</b> {c.text}
                                   </div>
                                 )}
                                 <div className="rounded-box border border-ink-600 bg-ink-800 px-2 py-1 text-[11px]">
                                   <div className="mb-0.5 flex items-center gap-1.5">
                                     <b className="font-semibold text-wall-mid">{o.agentName}</b>
                                     <Badge>{o.agentRole}</Badge>
-                                    {o.round === 2 && <Badge variant="brass">รอบค้าน</Badge>}
+                                    {o.round === 2 && <Badge variant="brass">{t('รอบค้าน')}</Badge>}
                                   </div>
                                   <div className="text-parchment-2">{fmt(o.text)}</div>
                                 </div>
@@ -332,15 +333,15 @@ export default function SecretaryTab({
                     <div className="mt-1.5 flex justify-end">
                       {confirm === m.id ? (
                         <span className="flex items-center gap-1.5">
-                          <span className="text-[11px] text-brass-lite">ลบทิ้งถาวร?</span>
-                          <Button size="sm" variant="ghost" onClick={() => setConfirm(null)}>ไม่ลบ</Button>
+                          <span className="text-[11px] text-brass-lite">{t('ลบทิ้งถาวร?')}</span>
+                          <Button size="sm" variant="ghost" onClick={() => setConfirm(null)}>{t('ไม่ลบ')}</Button>
                           <Button size="sm" variant="danger" onClick={() => { setConfirm(null); onDelete(m.id); }}>
-                            <Trash2 /> ลบ
+                            <Trash2 /> {t('ลบ')}
                           </Button>
                         </span>
                       ) : (
                         <Button size="sm" variant="ghost" onClick={() => setConfirm(m.id)}>
-                          <Trash2 /> ลบบันทึกนี้
+                          <Trash2 /> {t('ลบบันทึกนี้')}
                         </Button>
                       )}
                     </div>

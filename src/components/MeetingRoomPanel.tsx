@@ -9,6 +9,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Hint } from '@/components/ui/panel';
 import { fmt } from '@/components/ui/rich-text';
 import MeetingStatus, { type Activity } from '@/components/MeetingStatus';
+import { t } from '@/lib/i18n';
 
 /* ============================================================
    ห้องประชุม - มุมมองเต็มจอของการประชุมที่กำลังเกิด (หรือเพิ่งจบ)
@@ -43,18 +44,18 @@ export default function MeetingRoomPanel({
 
   // โต๊ะกลม: แบ่งเป็นรอบ 1 / รอบ 2  สายพาน: ไล่ตามขั้น (คำถาม -> คำตอบ)
   const rounds: { title: string; items: Opinion[] }[] = isRelay
-    ? [{ title: 'การเดินสาย', items: ops }]
+    ? [{ title: t('การเดินสาย'), items: ops }]
     : [
-        { title: 'รอบแรก - แต่ละแผนกให้ความเห็น', items: ops.filter((o) => o.round === 1) },
-        { title: 'รอบสอง - ค้านข้ามแผนก', items: ops.filter((o) => o.round === 2) },
+        { title: t('รอบแรก - แต่ละแผนกให้ความเห็น'), items: ops.filter((o) => o.round === 1) },
+        { title: t('รอบสอง - ค้านข้ามแผนก'), items: ops.filter((o) => o.round === 2) },
       ].filter((r) => r.items.length);
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent
         icon={<MessagesSquare />}
-        title="ห้องประชุม"
-        description={question || 'ยังไม่มีการประชุม'}
+        title={t('ห้องประชุม')}
+        description={question || t('ยังไม่มีการประชุม')}
         wide
       >
         <MeetingStatus startedAt={startedAt} phase={phase} activities={activities} />
@@ -62,13 +63,13 @@ export default function MeetingRoomPanel({
         <div className="flex max-h-[52vh] min-h-0 flex-col gap-2 overflow-y-auto rounded-box border border-ink-600 bg-ink-900 p-2">
           {message?.mode && (
             <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-dim">
-              <Badge variant="brass">{MEETING_MODES.find((x) => x.id === message.mode)?.th}</Badge>
+              <Badge variant="brass">{t(MEETING_MODES.find((x) => x.id === message.mode)?.th ?? '')}</Badge>
               {message.deptIds?.map((id) => {
                 const d = DEPT_BY_ID.get(id);
                 return d ? (
                   <span key={id} className="flex items-center gap-1">
                     <i className="size-2 rounded-[2px]" style={{ background: d.color }} />
-                    {d.shortTh}
+                    {t(d.shortTh)}
                   </span>
                 ) : null;
               })}
@@ -77,7 +78,7 @@ export default function MeetingRoomPanel({
 
           {!ops.length && !cs.length && (
             <Hint className="py-4 text-center">
-              {startedAt ? 'ยังไม่มีใครพูด - รอคำตอบแรกจากห้องประชุม' : 'ยังไม่มีการประชุม - พิมพ์คำถามในช่องแชทเพื่อเริ่ม'}
+              {startedAt ? t('ยังไม่มีใครพูด - รอคำตอบแรกจากห้องประชุม') : t('ยังไม่มีการประชุม - พิมพ์คำถามในช่องแชทเพื่อเริ่ม')}
             </Hint>
           )}
 
@@ -91,7 +92,7 @@ export default function MeetingRoomPanel({
                   <div key={`${o.agentId}-${o.round}-${o.step ?? i}`}>
                     {c && (
                       <div className="mb-1 rounded-box border border-dashed border-wood-dark bg-wood-deep/40 px-2 py-1 text-[11px] text-parchment-2">
-                        <b className="text-brass-lite">{c.fromName} ถาม {c.toName}:</b> {c.text}
+                        <b className="text-brass-lite">{t('{from} ถาม {to}:', { from: c.fromName, to: c.toName })}</b> {c.text}
                       </div>
                     )}
                     <div className="rounded-box border border-ink-600 bg-ink-800 px-2 py-1.5 text-[12px]">
@@ -101,10 +102,10 @@ export default function MeetingRoomPanel({
                         {od && (
                           <span className="flex items-center gap-1 text-[10px] text-dim">
                             <i className="size-2 rounded-[2px]" style={{ background: od.color }} />
-                            {od.shortTh}
+                            {t(od.shortTh)}
                           </span>
                         )}
-                        {o.round === 2 && !isRelay && <Badge variant="brass">ค้าน</Badge>}
+                        {o.round === 2 && !isRelay && <Badge variant="brass">{t('ค้าน')}</Badge>}
                         {o.model && <span className="ml-auto text-[10px] text-dim/80">{o.model}</span>}
                       </div>
                       <div className="text-parchment-2">{fmt(o.text)}</div>
@@ -118,7 +119,7 @@ export default function MeetingRoomPanel({
           {finished && (
             <section className="flex flex-col gap-1">
               <h4 className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-brass">
-                <Crown className="size-3" /> คำสรุปของประธาน{message?.authorName ? ` - ${message.authorName}` : ''}
+                <Crown className="size-3" /> {t('คำสรุปของประธาน')}{message?.authorName ? ` - ${message.authorName}` : ''}
                 {message?.model && <span className="ml-auto font-normal normal-case tracking-normal text-dim/80">{message.model}</span>}
               </h4>
               <div className="rounded-box border-2 border-brass/50 bg-ink-800 px-2 py-1.5 text-[12px] text-parchment">
@@ -129,7 +130,7 @@ export default function MeetingRoomPanel({
 
           {message?.customerReply && (
             <section className="flex flex-col gap-1">
-              <h4 className="text-[10px] font-semibold uppercase tracking-wide text-brass">ตอบลูกค้าว่า (กรองแล้ว - ลูกค้าเห็นแค่นี้)</h4>
+              <h4 className="text-[10px] font-semibold uppercase tracking-wide text-brass">{t('ตอบลูกค้าว่า (กรองแล้ว - ลูกค้าเห็นแค่นี้)')}</h4>
               <div className="rounded-box border border-brass/50 bg-wood-deep/40 px-2 py-1.5 text-[12px] text-parchment-2">
                 {fmt(message.customerReply)}
               </div>
@@ -139,7 +140,7 @@ export default function MeetingRoomPanel({
           {message?.minutes && (
             <section className="flex flex-col gap-1">
               <h4 className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-brass-lite">
-                <NotebookPen className="size-3" /> รายงานการประชุม (เลขาฯ จด)
+                <NotebookPen className="size-3" /> {t('รายงานการประชุม (เลขาฯ จด)')}
               </h4>
               <div className="rounded-box border border-wood-dark bg-wood-deep/40 px-2 py-1.5 text-[12px] text-parchment-2">
                 {fmt(message.minutes)}

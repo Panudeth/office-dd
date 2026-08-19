@@ -15,6 +15,7 @@ import { InfoTip } from '@/components/ui/infotip';
 import { Textarea } from '@/components/ui/input';
 import { Hint, Panel, PanelBody, PanelHeader } from '@/components/ui/panel';
 import { fmt } from '@/components/ui/rich-text';
+import { t } from '@/lib/i18n';
 
 /**
  * นับว่ารอบ 2 มีการค้านจริงกี่ข้อ ใช้ตรวจว่าทีมถกจริงหรือแค่พยักหน้าตามกัน
@@ -97,12 +98,12 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
   return (
     <Panel className="min-h-0 flex-1">
       {/* ไม่มีตัวเลือกแผนกตรงนี้แล้ว - เลขาฯ เสนอให้ในระเบียบวาระ แล้วแก้ได้ทีเดียวตรงนั้น */}
-      <PanelHeader icon={<MessagesSquare />} title="ถามทีม" />
+      <PanelHeader icon={<MessagesSquare />} title={t('ถามทีม')} />
 
       <PanelBody>
         <div className="flex flex-1 flex-col gap-2 overflow-y-auto pr-1">
           {hidden > 0 && (
-            <div className="text-center text-[10px] text-dim">ซ่อนข้อความเก่า {hidden} รายการ - ดูย้อนหลังได้ในสมุดเลขาฯ</div>
+            <div className="text-center text-[10px] text-dim">{t('ซ่อนข้อความเก่า {n} รายการ - ดูย้อนหลังได้ในสมุดเลขาฯ', { n: hidden })}</div>
           )}
           {messages.map((m) => {
             const dept = m.departmentId ? DEPT_BY_ID.get(m.departmentId) : undefined;
@@ -126,16 +127,16 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
                       className="text-[11px] font-bold"
                       style={{ color: dept?.color ?? 'var(--color-wall-mid)' }}
                     >
-                      {m.authorName ?? 'ระบบ'}
-                      {dept && <span className="text-dim"> / {dept.nameTh}</span>}
+                      {m.authorName ?? t('ระบบ')}
+                      {dept && <span className="text-dim"> / {t(dept.nameTh)}</span>}
                     </span>
                     {m.mode && (
                       <Badge variant="brass">
-                        {MEETING_MODES.find((x) => x.id === m.mode)?.th}
+                        {t(MEETING_MODES.find((x) => x.id === m.mode)?.th ?? '')}
                       </Badge>
                     )}
                     {m.model && (
-                      <span className="text-[10px] text-dim" title="โมเดลของคนสรุปคำตอบนี้">
+                      <span className="text-[10px] text-dim" title={t('โมเดลของคนสรุปคำตอบนี้')}>
                         · {m.model}
                       </span>
                     )}
@@ -147,10 +148,10 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
                         <span
                           key={id}
                           className="flex items-center gap-1 text-[10px] text-dim"
-                          title={d.nameTh}
+                          title={t(d.nameTh)}
                         >
                           <i className="size-2 rounded-[2px]" style={{ background: d.color }} />
-                          {d.shortTh}
+                          {t(d.shortTh)}
                         </span>
                       );
                     })}
@@ -160,7 +161,7 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
                 <div>
                   {m.pending ? (
                     <span className="caret text-brass">
-                      {phase ?? 'กำลังเรียกทีมเข้าห้องประชุม'}
+                      {phase ?? t('กำลังเรียกทีมเข้าห้องประชุม')}
                     </span>
                   ) : (
                     fmt(m.text)
@@ -168,7 +169,7 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
                 </div>
                 {m.customerReply && (
                   <div className="mt-1.5 rounded-box border border-brass/50 bg-wood-deep/40 px-2 py-1.5">
-                    <div className="mb-0.5 text-[10px] font-semibold text-brass">ตอบลูกค้าว่า (กรองแล้ว - ลูกค้าเห็นแค่นี้)</div>
+                    <div className="mb-0.5 text-[10px] font-semibold text-brass">{t('ตอบลูกค้าว่า (กรองแล้ว - ลูกค้าเห็นแค่นี้)')}</div>
                     <div className="text-[12px] text-parchment-2">{fmt(m.customerReply)}</div>
                   </div>
                 )}
@@ -179,11 +180,11 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
                       open={!!open[`p${m.id}`]}
                       onToggle={() => toggle(`p${m.id}`)}
                       icon={<ReceiptText />}
-                      label={`skill ที่ส่งไปจริง (${m.proof.files.length} ไฟล์)`}
+                      label={t('skill ที่ส่งไปจริง ({n} ไฟล์)', { n: m.proof.files.length })}
                       tail={
                         <Badge variant={m.proof.files.some((f) => f.missing) ? 'bad' : 'good'}>
                           {m.proof.files.some((f) => f.missing)
-                            ? 'มีไฟล์ที่หาไม่เจอ'
+                            ? t('มีไฟล์ที่หาไม่เจอ')
                             : `${m.proof.files
                                 .reduce((n, f) => n + f.bytes, 0)
                                 .toLocaleString()} bytes`}
@@ -193,13 +194,13 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
                     {open[`p${m.id}`] && (
                       <div className="mt-1">
                         <Hint className="mb-1.5">
-                          ประชุมนี้อ่านสกิลของแต่ละแผนกแยกไฟล์กัน คนของแผนกไหนอ่านของแผนกนั้น
+                          {t('ประชุมนี้อ่านสกิลของแต่ละแผนกแยกไฟล์กัน คนของแผนกไหนอ่านของแผนกนั้น')}
                           <br />
                           {m.proof.files.map((f) => (
                             <span key={f.deptId} className="mt-0.5 block">
                               {f.deptName}: <code>{f.file}</code>{' '}
                               {f.missing ? (
-                                <b className="text-brass">ไม่พบไฟล์ ใช้ข้อความสำรอง</b>
+                                <b className="text-brass">{t('ไม่พบไฟล์ ใช้ข้อความสำรอง')}</b>
                               ) : (
                                 `${f.bytes.toLocaleString()} bytes`
                               )}
@@ -208,17 +209,17 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
                         </Hint>
                         <Hint className="mb-1.5">
                           <span className="flex flex-wrap items-center gap-1.5">
-                            system prompt ที่ส่งไปที่ <code>{m.proof.provider}</code> <code>{m.proof.model}</code> ในนามของ{' '}
+                            {t('system prompt ที่ส่งไปที่')} <code>{m.proof.provider}</code> <code>{m.proof.model}</code> {t('ในนามของ')}{' '}
                             <b className="text-parchment">{m.proof.agentName}</b>
                             <InfoTip>
-                              ด้านล่างคือ system prompt ตัวจริงที่ถูกส่งไป ประกอบจากสกิลของแผนก บวกบทบาท บวกมุมมองของแผนก
+                              {t('ด้านล่างคือ system prompt ตัวจริงที่ถูกส่งไป ประกอบจากสกิลของแผนก บวกบทบาท บวกมุมมองของแผนก')}
                               <br />
-                              skill ถูกอ่าน<b className="text-parchment">ตอนถามคำถามนี้</b> ไม่ใช่ตอนกดจ้าง
+                              {t('skill ถูกอ่าน')}<b className="text-parchment">{t('ตอนถามคำถามนี้')}</b> {t('ไม่ใช่ตอนกดจ้าง')}
                             </InfoTip>
                           </span>
                           {m.proof.agentModels && new Set(m.proof.agentModels.map((x) => x.model)).size > 1 && (
                             <span className="block">
-                              ประชุมนี้ใช้หลายโมเดล:{' '}
+                              {t('ประชุมนี้ใช้หลายโมเดล:')}{' '}
                               {m.proof.agentModels.map((x, i) => (
                                 <span key={x.agentId}>
                                   {i > 0 && ' · '}
@@ -229,12 +230,12 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
                           )}
                           {m.proof.company && (
                             <span className="block">
-                              ข้อมูลบริษัทที่แนบไป:{' '}
-                              {m.proof.company.profileChars > 0 ? `โปรไฟล์ ${m.proof.company.profileChars.toLocaleString()} ตัวอักษร` : 'ไม่มีโปรไฟล์'}
-                              {m.proof.company.noteChars > 0 && ` · โน้ตแผนก ${m.proof.company.noteChars.toLocaleString()} ตัวอักษร`}
-                              {m.proof.company.chunkCount > 0 && ` · เอกสาร ${m.proof.company.chunkCount} ชิ้น`}
+                              {t('ข้อมูลบริษัทที่แนบไป:')}{' '}
+                              {m.proof.company.profileChars > 0 ? t('โปรไฟล์ {n} ตัวอักษร', { n: m.proof.company.profileChars.toLocaleString() }) : t('ไม่มีโปรไฟล์')}
+                              {m.proof.company.noteChars > 0 && t(' · โน้ตแผนก {n} ตัวอักษร', { n: m.proof.company.noteChars.toLocaleString() })}
+                              {m.proof.company.chunkCount > 0 && t(' · เอกสาร {n} ชิ้น', { n: m.proof.company.chunkCount })}
                               {m.proof.company.profileChars === 0 && (
-                                <b className="text-brass"> - ยังไม่ได้กรอกข้อมูลบริษัท</b>
+                                <b className="text-brass"> - {t('ยังไม่ได้กรอกข้อมูลบริษัท')}</b>
                               )}
                             </span>
                           )}
@@ -255,15 +256,15 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
                       icon={<Swords />}
                       label={
                         relay
-                          ? `บันทึกการเดินสาย (${m.transcript.length} แผนก)`
-                          : `บันทึกการถกกัน (${m.transcript.length} ความเห็น)`
+                          ? t('บันทึกการเดินสาย ({n} แผนก)', { n: m.transcript.length })
+                          : t('บันทึกการถกกัน ({n} ความเห็น)', { n: m.transcript.length })
                       }
                       tail={
                         relay ? (
-                          <Badge variant="brass">ส่งต่อ {m.transcript.length} ทอด</Badge>
+                          <Badge variant="brass">{t('ส่งต่อ {n} ทอด', { n: m.transcript.length })}</Badge>
                         ) : (
                           <Badge variant={objections > 0 ? 'brass' : 'default'}>
-                            {objections > 0 ? `ค้านกัน ${objections} ข้อ` : 'ไม่มีใครค้าน'}
+                            {objections > 0 ? t('ค้านกัน {n} ข้อ', { n: objections }) : t('ไม่มีใครค้าน')}
                           </Badge>
                         )
                       }
@@ -278,13 +279,13 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
                               return (
                                 <div key={`${o.agentId}-${i}`}>
                                   <h4 className="mb-1 text-[11px] font-semibold uppercase text-brass">
-                                    ทอดที่ {o.step ?? i + 1}
-                                    {od && ` - ${od.nameTh}`}
+                                    {t('ทอดที่ {n}', { n: o.step ?? i + 1 })}
+                                    {od && ` - ${t(od.nameTh)}`}
                                   </h4>
                                   {c && (
                                     <div className="mb-1 rounded-box border border-dashed border-wood-dark bg-wood-deep/40 px-2 py-1.5 text-[12px] text-parchment-2">
                                       <div className="mb-0.5 text-[11px] font-semibold text-brass-lite">
-                                        {c.fromName} เดินไปถาม {c.toName}
+                                        {t('{from} เดินไปถาม {to}', { from: c.fromName, to: c.toName })}
                                       </div>
                                       <div>{fmt(c.text)}</div>
                                     </div>
@@ -296,10 +297,10 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
                                       </b>
                                       <Badge>{o.agentRole}</Badge>
                                       {od && (
-                                        <span className="text-[10px] text-dim">{od.shortTh}</span>
+                                        <span className="text-[10px] text-dim">{t(od.shortTh)}</span>
                                       )}
                                       {o.model && (
-                                        <span className="ml-auto truncate text-[10px] text-dim/80" title="โมเดลที่ใช้ตอบ">{o.model}</span>
+                                        <span className="ml-auto truncate text-[10px] text-dim/80" title={t('โมเดลที่ใช้ตอบ')}>{o.model}</span>
                                       )}
                                     </div>
                                     <div>{fmt(o.text)}</div>
@@ -314,8 +315,8 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
                                 <div key={r}>
                                   <h4 className="mb-1 text-[11px] font-semibold uppercase text-brass">
                                     {r === 1
-                                      ? 'รอบ 1 ต่างคนต่างพูดจากหน้าที่ตัวเอง'
-                                      : 'รอบ 2 บังคับให้ค้าน'}
+                                      ? t('รอบ 1 ต่างคนต่างพูดจากหน้าที่ตัวเอง')
+                                      : t('รอบ 2 บังคับให้ค้าน')}
                                   </h4>
                                   {rows.map((o, i) => {
                                     const od = o.deptId ? DEPT_BY_ID.get(o.deptId) : undefined;
@@ -337,11 +338,11 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
                                                 className="size-2 rounded-[2px]"
                                                 style={{ background: od.color }}
                                               />
-                                              {od.shortTh}
+                                              {t(od.shortTh)}
                                             </span>
                                           )}
                                           {o.model && (
-                                            <span className="ml-auto truncate text-[10px] text-dim/80" title="โมเดลที่ใช้ตอบ">{o.model}</span>
+                                            <span className="ml-auto truncate text-[10px] text-dim/80" title={t('โมเดลที่ใช้ตอบ')}>{o.model}</span>
                                           )}
                                         </div>
                                         <div>{fmt(o.text)}</div>
@@ -364,20 +365,20 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
         <form className="flex flex-col gap-1" onSubmit={submit}>
           {/* ถามใคร: ประชุม (เลขาฯ จัดวาระ) หรือถามหัวหน้าแผนกโดยตรง (เร็ว คำขอเดียว ข้ามหน้าวาระ) */}
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-dim">ถาม</span>
+            <span className="text-[10px] text-dim">{t('ถาม')}</span>
             <Select value={directDept || '_meeting'} onValueChange={(v) => setDirectDept(v === '_meeting' ? '' : v)} disabled={busy}>
               <SelectTrigger className={`h-7 w-56 text-[11px] ${directOn ? 'border-brass/60 text-parchment' : 'text-dim'}`}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="_meeting">ประชุม - เลขาฯ จัดวาระให้</SelectItem>
+                <SelectItem value="_meeting">{t('ประชุม - เลขาฯ จัดวาระให้')}</SelectItem>
                 {DEPARTMENTS.filter((d) => hiredDeptIds.includes(d.id)).map((d) => (
-                  <SelectItem key={d.id} value={d.id}>ถาม{d.nameTh}โดยตรง</SelectItem>
+                  <SelectItem key={d.id} value={d.id}>{t('ถาม{name}โดยตรง', { name: t(d.nameTh) })}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
             {directOn && (
-              <span className="truncate text-[10px] text-dim">หัวหน้าแผนกตอบคนเดียว ไม่ประชุม - เร็ว</span>
+              <span className="truncate text-[10px] text-dim">{t('หัวหน้าแผนกตอบคนเดียว ไม่ประชุม - เร็ว')}</span>
             )}
           </div>
           <div className="flex items-end gap-1.5">
@@ -387,13 +388,13 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) submit(e);
               }}
-              placeholder={busy ? 'ทีมกำลังประชุมอยู่' : directOn ? `ถาม${DEPT_BY_ID.get(directDept)?.nameTh ?? ''} แล้วกด Enter` : 'พิมพ์คำถาม แล้วกด Enter'}
+              placeholder={busy ? t('ทีมกำลังประชุมอยู่') : directOn ? t('ถาม{name} แล้วกด Enter', { name: t(DEPT_BY_ID.get(directDept)?.nameTh ?? '') }) : t('พิมพ์คำถาม แล้วกด Enter')}
               rows={2}
               disabled={busy}
               className="h-auto"
             />
             <Button type="submit" variant="primary" size="lg" disabled={busy || !draft.trim()}>
-              <SendHorizontal /> ถาม
+              <SendHorizontal /> {t('ถาม')}
             </Button>
           </div>
         </form>

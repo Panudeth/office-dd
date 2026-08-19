@@ -27,7 +27,7 @@ const d: Record<string, string> = {
   'ยังไม่มี': 'None yet',
   'ไม่มี': 'None',
   'ทั้งหมด': 'All',
-  'แผนก': 'Department',
+  'แผนก': 'Departments',
   'พนักงาน': 'Staff',
   'เชื่อมต่อ': 'Connect',
   'การเชื่อมต่อ': 'Connections',

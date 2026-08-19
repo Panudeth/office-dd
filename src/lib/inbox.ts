@@ -25,6 +25,8 @@ export interface InboxInput {
   intent: 'note' | 'task';
   ask: string;
   mode: MeetingMode;
+  /** ภาษาที่ให้ตอบ/สรุป - 'th' ดีฟอลต์ | 'en' */
+  lang?: 'th' | 'en';
   data: unknown;
   dataText: string;
   idemKey: string | null;
@@ -151,7 +153,7 @@ export async function processInbox(input: InboxInput, inboxId: string): Promise<
        'อ่านข้อมูลนี้ตาม playbook ของแผนก แล้วสรุปให้ผู้บริหาร: เกิดอะไรขึ้น สำคัญแค่ไหน ต้องทำอะไรต่อ ใครควรถูกแจ้ง';
 
   const result = await runHeadless({
-    officeId: input.officeId, question, deptIds: [input.deptId], mode: input.mode, source: 'api',
+    officeId: input.officeId, question, deptIds: [input.deptId], mode: input.mode, source: 'api', lang: input.lang,
     askedByLabel: input.source ? `${input.source} (inbox)` : 'inbox',
     inbox: { title: input.title, source: input.source, dataText: input.dataText },
   });

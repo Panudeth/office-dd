@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { Office } from '@/lib/supabase';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import IntegrationsSection from '@/components/IntegrationsSection';
+import { t } from '@/lib/i18n';
 
 /** หน้าต่าง "เชื่อมต่อ" - แยกจากหน้าออฟฟิศ เพราะเป็นเรื่องของนักพัฒนา/ระบบภายนอก ไม่ใช่การเลือกออฟฟิศ */
 export default function IntegrationsPanel({ open, onClose, office, onPolicy, initialTab = 'depts', depts, inline = false }: {
@@ -24,9 +25,9 @@ export default function IntegrationsPanel({ open, onClose, office, onPolicy, ini
         {office ? (
           <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-col">
             <TabsList className="rounded-t-box border border-b-0 border-wood-deep">
-              <TabsTrigger value="depts"><Building2 /> แผนก</TabsTrigger>
-              <TabsTrigger value="in"><Inbox /> Webhook เข้าของออฟฟิศ (token / LINE OA)</TabsTrigger>
-              <TabsTrigger value="settings"><Settings2 /> โมเดล / นโยบาย</TabsTrigger>
+              <TabsTrigger value="depts"><Building2 /> {t('แผนก')}</TabsTrigger>
+              <TabsTrigger value="in"><Inbox /> {t('Webhook เข้าของออฟฟิศ (token / LINE OA)')}</TabsTrigger>
+              <TabsTrigger value="settings"><Settings2 /> {t('โมเดล / นโยบาย')}</TabsTrigger>
             </TabsList>
             <TabsContent value="depts" className="min-h-0">
               <div className={`flex flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5 ${inline ? '' : 'max-h-[62vh]'}`}>
@@ -42,14 +43,14 @@ export default function IntegrationsPanel({ open, onClose, office, onPolicy, ini
             ))}
           </Tabs>
         ) : (
-          <p className="text-[11px] text-dim">เลือกออฟฟิศก่อน (โหมดในเครื่องไม่มี webhook/การเชื่อมต่อ)</p>
+          <p className="text-[11px] text-dim">{t('เลือกออฟฟิศก่อน (โหมดในเครื่องไม่มี webhook/การเชื่อมต่อ)')}</p>
         )}
     </>
   );
   if (inline) return open ? body : null;
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent icon={<Plug />} title="แผนก & การเชื่อมต่อ" description={office ? `ออฟฟิศ "${office.name}"` : 'เลือกออฟฟิศก่อน'} wide>
+      <DialogContent icon={<Plug />} title={t('แผนก & การเชื่อมต่อ')} description={office ? t('ออฟฟิศ "{name}"', { name: office.name }) : t('เลือกออฟฟิศก่อน')} wide>
         {body}
       </DialogContent>
     </Dialog>

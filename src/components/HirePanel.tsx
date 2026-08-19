@@ -18,6 +18,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import Portrait from '@/components/Portrait';
+import { t } from '@/lib/i18n';
 
 /** ตัวเลือกโมเดลต่อคน - id ของชุดคีย์ใน KeyPanel + ป้ายสั้น ๆ */
 export interface LlmOption {
@@ -95,8 +96,8 @@ type StaffView = 'card' | 'list';
 export default function HirePanel({
   roster, seatsLeft, roomLeft, onHire, onFire, onFocus, disabled, lock, onUnlock,
   tab, onTab: setTab, secretary, meetingCount, layoutPanel, connectPanel,
-  llmOptions = [], llmOf, llmDefaultLabel = 'ค่าเริ่มต้น', onLlm,
-  roleLlm, onRoleLlm, llmActiveLabel = 'คีย์ของเซิร์ฟเวอร์', llmHeadLabel = llmDefaultLabel,
+  llmOptions = [], llmOf, llmDefaultLabel = t('ค่าเริ่มต้น'), onLlm,
+  roleLlm, onRoleLlm, llmActiveLabel = t('คีย์ของเซิร์ฟเวอร์'), llmHeadLabel = llmDefaultLabel,
   onEditDept, deptCanEdit = false,
 }: Props) {
   const off = disabled || !!lock;
@@ -141,25 +142,25 @@ export default function HirePanel({
       <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
         <TabsList>
           <TabsTrigger value="staff">
-            <Users /> พนักงาน {roster.length}
+            <Users /> {t('พนักงาน')} {roster.length}
           </TabsTrigger>
           <TabsTrigger value="hire">
-            <UserPlus /> จ้างเพิ่ม
+            <UserPlus /> {t('จ้างเพิ่ม')}
           </TabsTrigger>
           <TabsTrigger value="notes">
-            <NotebookPen /> สมุดเลขาฯ{meetingCount > 0 ? ` ${meetingCount}` : ''}
+            <NotebookPen /> {t('สมุดเลขาฯ')}{meetingCount > 0 ? ` ${meetingCount}` : ''}
           </TabsTrigger>
-          <TabsTrigger value="layout" title="จัดโต๊ะ เก้าอี้ ของตกแต่ง">
-            <Wrench /> จัดออฟฟิศ
+          <TabsTrigger value="layout" title={t('จัดโต๊ะ เก้าอี้ ของตกแต่ง')}>
+            <Wrench /> {t('จัดออฟฟิศ')}
           </TabsTrigger>
-          <TabsTrigger value="connect" title="แผนก / webhook เข้า-ออก / MCP / LINE / นโยบายโมเดล">
-            <Plug /> แผนก & เชื่อมต่อ
+          <TabsTrigger value="connect" title={t('แผนก / webhook เข้า-ออก / MCP / LINE / นโยบายโมเดล')}>
+            <Plug /> {t('แผนก & เชื่อมต่อ')}
           </TabsTrigger>
           <Badge
             variant={seatsLeft > 0 ? 'default' : 'bad'}
             className="ml-auto self-center"
           >
-            โต๊ะว่าง {seatsLeft}
+            {t('โต๊ะว่าง')} {seatsLeft}
           </Badge>
         </TabsList>
 
@@ -177,23 +178,23 @@ export default function HirePanel({
                     {
                       k: 'chair' as const,
                       icon: <Crown className="size-3.5 text-brass" />,
-                      name: 'หัวหน้าแผนกทุกคน',
-                      sub: 'คนแรกที่จ้างในแต่ละแผนก - ใช้ทุกรอบ และเป็นประธานที่ประชุมได้',
-                      def: `ค่าเริ่มต้น · ${llmDefaultLabel}`,
+                      name: t('หัวหน้าแผนกทุกคน'),
+                      sub: t('คนแรกที่จ้างในแต่ละแผนก - ใช้ทุกรอบ และเป็นประธานที่ประชุมได้'),
+                      def: t('ค่าเริ่มต้น · {label}', { label: llmDefaultLabel }),
                     },
                     {
                       k: 'member' as const,
                       icon: <Users className="size-3.5 text-dim" />,
-                      name: 'ลูกทีมที่เหลือ',
-                      sub: 'ค่าเริ่มต้นของคนที่ไม่ได้ตั้งรายคน',
-                      def: `ค่าเริ่มต้น · ${llmActiveLabel}`,
+                      name: t('ลูกทีมที่เหลือ'),
+                      sub: t('ค่าเริ่มต้นของคนที่ไม่ได้ตั้งรายคน'),
+                      def: t('ค่าเริ่มต้น · {label}', { label: llmActiveLabel }),
                     },
                     {
                       k: 'secretary' as const,
                       icon: <Portrait palette={SECRETARY_PAL} size={1} className="block shrink-0" />,
                       name: SECRETARY_NAME,
-                      sub: 'เลขาฯ จดรายงานการประชุมหลังจบ',
-                      def: 'ตามค่าลูกทีม',
+                      sub: t('เลขาฯ จดรายงานการประชุมหลังจบ'),
+                      def: t('ตามค่าลูกทีม'),
                     },
                   ]
                 ).map(({ k, icon, name, sub, def }) => {
@@ -214,14 +215,14 @@ export default function HirePanel({
                       >
                         <SelectTrigger
                           className={`h-6 w-40 shrink-0 gap-1 px-1.5 text-[10px] ${opt || isOff ? 'border-brass/60 text-parchment' : 'text-dim'}`}
-                          title={opt ? `${name} ใช้ ${opt.label}` : def}
+                          title={opt ? t('{name} ใช้ {label}', { name, label: opt.label }) : def}
                         >
                           <Cpu className="size-3 shrink-0" />
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="_default">{def}</SelectItem>
-                          {k === 'secretary' && <SelectItem value="off">ไม่จดรายงาน</SelectItem>}
+                          {k === 'secretary' && <SelectItem value="off">{t('ไม่จดรายงาน')}</SelectItem>}
                           {llmOptions.map((o) => (
                             <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>
                           ))}
@@ -235,25 +236,25 @@ export default function HirePanel({
 
             {!roster.length ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 py-6 text-center">
-                <Hint>ยังไม่มีพนักงานในบริษัท</Hint>
+                <Hint>{t('ยังไม่มีพนักงานในบริษัท')}</Hint>
                 <Button size="sm" variant="primary" onClick={() => setTab('hire')}>
-                  <UserPlus /> ไปหน้าจ้างพนักงาน
+                  <UserPlus /> {t('ไปหน้าจ้างพนักงาน')}
                 </Button>
               </div>
             ) : (
               <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
                 {/* สลับมุมมอง - การ์ดเห็นหน้าชัด รายการเห็นทีเดียวหลายคนและตั้งโมเดลง่าย */}
                 <div className="flex items-center gap-1">
-                  <span className="text-[10px] text-dim">มุมมอง</span>
+                  <span className="text-[10px] text-dim">{t('มุมมอง')}</span>
                   <Button
                     size="icon" variant={view === 'card' ? 'primary' : 'ghost'} className="size-6"
-                    title="การ์ด" onClick={() => setView('card')}
+                    title={t('การ์ด')} onClick={() => setView('card')}
                   >
                     <LayoutGrid className="size-3" />
                   </Button>
                   <Button
                     size="icon" variant={view === 'list' ? 'primary' : 'ghost'} className="size-6"
-                    title="รายการ" onClick={() => setView('list')}
+                    title={t('รายการ')} onClick={() => setView('list')}
                   >
                     <List className="size-3" />
                   </Button>
@@ -264,15 +265,15 @@ export default function HirePanel({
                     <div className="mb-1 flex items-center gap-1.5">
                       <i className="size-2.5 rounded-[2px]" style={{ background: dept.color }} />
                       <span className="text-[11px] font-semibold text-parchment">
-                        {dept.nameTh}
+                        {t(dept.nameTh)}
                       </span>
-                      <span className="text-[11px] text-dim">{team.length} คน</span>
+                      <span className="text-[11px] text-dim">{t('{n} คน', { n: team.length })}</span>
                       {team.length === 1 && (
                         <span
                           className="ml-auto flex items-center gap-1 text-[10px] text-brass-lite"
-                          title="มีคนเดียวจะไม่มีใครค้าน ต้องครบ 3 คนถึงถกกันได้"
+                          title={t('มีคนเดียวจะไม่มีใครค้าน ต้องครบ 3 คนถึงถกกันได้')}
                         >
-                          <AlertTriangle className="size-3" /> ยังไม่มีใครค้าน
+                          <AlertTriangle className="size-3" /> {t('ยังไม่มีใครค้าน')}
                         </span>
                       )}
                     </div>
@@ -297,13 +298,13 @@ export default function HirePanel({
                           >
                             <SelectTrigger
                               className={`h-6 gap-1 px-1.5 text-[10px] ${view === 'card' ? 'w-full' : 'w-40 shrink-0'} ${pickedOpt ? 'border-brass/60 text-parchment' : 'text-dim'}`}
-                              title={pickedOpt ? `คนนี้ใช้ ${pickedOpt.label}` : `ใช้ค่าเริ่มต้น (${isHead ? llmHeadLabel : llmDefaultLabel})`}
+                              title={pickedOpt ? t('คนนี้ใช้ {label}', { label: pickedOpt.label }) : t('ใช้ค่าเริ่มต้น ({label})', { label: isHead ? llmHeadLabel : llmDefaultLabel })}
                             >
                               <Cpu className="size-3 shrink-0" />
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="_default">{isHead ? 'ตามหัวหน้าแผนก' : 'ตามลูกทีม'} · {isHead ? llmHeadLabel : llmDefaultLabel}</SelectItem>
+                              <SelectItem value="_default">{isHead ? t('ตามหัวหน้าแผนก') : t('ตามลูกทีม')} · {isHead ? llmHeadLabel : llmDefaultLabel}</SelectItem>
                               {llmOptions.map((o) => (
                                 <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>
                               ))}
@@ -319,15 +320,15 @@ export default function HirePanel({
                             >
                               <button
                                 onClick={() => onFocus(m.id)}
-                                title={`เลื่อนกล้องไปหา ${m.name}`}
+                                title={t('เลื่อนกล้องไปหา {name}', { name: m.name })}
                                 className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:text-brass"
                               >
                                 <Portrait palette={m.palette} size={1} className="block shrink-0" />
-                                {isHead && <Crown className="size-3 shrink-0 text-brass" aria-label="หัวหน้าแผนก" />}
+                                {isHead && <Crown className="size-3 shrink-0 text-brass" aria-label={t('หัวหน้าแผนก')} />}
                                 <span className="truncate text-[11px] font-semibold text-parchment">{m.name}</span>
                                 <span className="hidden truncate text-[10px] text-dim sm:inline">{m.title}</span>
                                 <span className={`ml-auto shrink-0 text-[10px] ${working ? 'text-brass' : 'text-carpet-lite'}`}>
-                                  {STATE_TH[m.state]}
+                                  {t(STATE_TH[m.state])}
                                 </span>
                               </button>
                               {select}
@@ -342,7 +343,7 @@ export default function HirePanel({
                           >
                             <button
                               onClick={() => onFocus(m.id)}
-                              title={`เลื่อนกล้องไปหา ${m.name}`}
+                              title={t('เลื่อนกล้องไปหา {name}', { name: m.name })}
                               className="flex items-center gap-1.5 rounded-box p-1 text-left hover:bg-ink-600"
                             >
                               {/* รูปนี้วาดด้วยโค้ดเดียวกับตัวบนแผนที่ สีจึงตรงกันเสมอ */}
@@ -354,7 +355,7 @@ export default function HirePanel({
                               </span>
                               <span className="min-w-0 flex-1">
                                 <span className="flex items-center gap-1 text-[11px] font-semibold text-parchment">
-                                  {isHead && <Crown className="size-3 shrink-0 text-brass" aria-label="หัวหน้าแผนก" />}
+                                  {isHead && <Crown className="size-3 shrink-0 text-brass" aria-label={t('หัวหน้าแผนก')} />}
                                   <span className="truncate">{m.name}</span>
                                 </span>
                                 <span className="block truncate text-[10px] text-dim">
@@ -365,7 +366,7 @@ export default function HirePanel({
                                     working ? 'text-brass' : 'text-carpet-lite'
                                   }`}
                                 >
-                                  {STATE_TH[m.state]}
+                                  {t(STATE_TH[m.state])}
                                 </span>
                               </span>
                             </button>
@@ -388,17 +389,17 @@ export default function HirePanel({
             {lockNote}
 
             <Hint className="flex items-center gap-1.5">
-              จ้าง 1 คน = agent 1 ตัว · ครบ 3 คนถึงถกเต็มรูปแบบ
-              <InfoTip>คนที่ 1-4 ของแผนกได้บทบาทผู้เสนอ ผู้ค้าน ผู้ตรวจสอบ ผู้ดูความเป็นไปได้ตามลำดับ แต่ละบทบาทถูกประเมินคนละเกณฑ์จึงเถียงกันจริง · สกิลถูกอ่านตอนถามคำถาม ไม่ใช่ตอนกดจ้าง</InfoTip>
+              {t('จ้าง 1 คน = agent 1 ตัว · ครบ 3 คนถึงถกเต็มรูปแบบ')}
+              <InfoTip>{t('คนที่ 1-4 ของแผนกได้บทบาทผู้เสนอ ผู้ค้าน ผู้ตรวจสอบ ผู้ดูความเป็นไปได้ตามลำดับ แต่ละบทบาทถูกประเมินคนละเกณฑ์จึงเถียงกันจริง · สกิลถูกอ่านตอนถามคำถาม ไม่ใช่ตอนกดจ้าง')}</InfoTip>
             </Hint>
 
             {onEditDept && (
               <div className="flex items-center gap-2">
                 <Button size="sm" variant="outline" className="h-7" onClick={() => onEditDept(null)} disabled={!deptCanEdit}
-                  title={deptCanEdit ? 'ตั้งแผนกใหม่ - ชื่ออะไรก็ได้ ให้ AI ร่างสกิลให้ แล้วผูก webhook เข้า/ออกได้' : 'เจ้าของหรือ exec ของออฟฟิศเท่านั้น'}>
-                  <Plus /> แผนกใหม่
+                  title={deptCanEdit ? t('ตั้งแผนกใหม่ - ชื่ออะไรก็ได้ ให้ AI ร่างสกิลให้ แล้วผูก webhook เข้า/ออกได้') : t('เจ้าของหรือ exec ของออฟฟิศเท่านั้น')}>
+                  <Plus /> {t('แผนกใหม่')}
                 </Button>
-                <InfoTip>ตั้งแผนกชื่ออะไรก็ได้ เช่น IT Support รับ bug จาก logger แล้วแจ้ง Teams - ให้ AI ร่างสกิลให้ แล้วผูก webhook เข้า/ช่องส่งออกในหน้าเดียวกัน (หรือกด "แผนก & Webhook" บนแถบบน)</InfoTip>
+                <InfoTip>{t('ตั้งแผนกชื่ออะไรก็ได้ เช่น IT Support รับ bug จาก logger แล้วแจ้ง Teams - ให้ AI ร่างสกิลให้ แล้วผูก webhook เข้า/ช่องส่งออกในหน้าเดียวกัน (หรือกด "แผนก & Webhook" บนแถบบน)')}</InfoTip>
               </div>
             )}
 
@@ -412,9 +413,9 @@ export default function HirePanel({
                     style={{ borderLeftColor: d.color }}
                   >
                     <div className="flex items-center gap-2">
-                      <span className="text-[13px] font-semibold text-parchment">{d.nameTh}</span>
+                      <span className="text-[13px] font-semibold text-parchment">{t(d.nameTh)}</span>
                       {onEditDept && (
-                        <button type="button" onClick={() => onEditDept(d.id)} title="ตั้งค่าแผนก: สกิล / webhook เข้า / ส่งออก"
+                        <button type="button" onClick={() => onEditDept(d.id)} title={t('ตั้งค่าแผนก: สกิล / webhook เข้า / ส่งออก')}
                           className="rounded-box border border-transparent p-0.5 text-dim hover:border-ink-500 hover:text-parchment">
                           <Settings2 className="size-3.5" />
                         </button>
@@ -429,8 +430,8 @@ export default function HirePanel({
 
                     <p className="mb-1.5 mt-0.5 line-clamp-2 text-[11px] text-dim" title={d.description}>
                       {d.custom
-                        ? (d.description || 'แผนกของออฟฟิศ - สกิลเก็บในออฟฟิศ')
-                        : <>ใช้สกิล <code>skills/{d.skill}.md</code></>}
+                        ? (d.description || t('แผนกของออฟฟิศ - สกิลเก็บในออฟฟิศ'))
+                        : <>{t('ใช้สกิล')} <code>skills/{d.skill}.md</code></>}
                     </p>
 
                     <div className="flex gap-1.5">
@@ -438,27 +439,27 @@ export default function HirePanel({
                         size="sm"
                         onClick={() => onHire(d.id, 1)}
                         disabled={off || (roomLeft[d.id] ?? 0) < 1}
-                        title={lock?.text ?? ((roomLeft[d.id] ?? 0) < 1 ? 'ไม่มีที่ว่างให้วางโต๊ะเพิ่ม - ไปแท็บจัดออฟฟิศ ลบ/ย้ายของหรือขยายพื้นที่ก่อน' : undefined)}
+                        title={lock?.text ?? ((roomLeft[d.id] ?? 0) < 1 ? t('ไม่มีที่ว่างให้วางโต๊ะเพิ่ม - ไปแท็บจัดออฟฟิศ ลบ/ย้ายของหรือขยายพื้นที่ก่อน') : undefined)}
                                               >
-                        <UserPlus /> จ้าง
+                        <UserPlus /> {t('จ้าง')}
                       </Button>
                       <Button
                         size="sm"
                         onClick={() => onHire(d.id, 3)}
                         disabled={off || (roomLeft[d.id] ?? 0) < 3}
-                        title={lock?.text ?? ((roomLeft[d.id] ?? 0) < 3 ? `เหลือที่ว่าง ${roomLeft[d.id] ?? 0} ที่` : undefined)}
+                        title={lock?.text ?? ((roomLeft[d.id] ?? 0) < 3 ? t('เหลือที่ว่าง {n} ที่', { n: roomLeft[d.id] ?? 0 }) : undefined)}
                                               >
-                        <Users /> ทีม 3 คน
+                        <Users /> {t('ทีม 3 คน')}
                       </Button>
                       <Button
                         size="sm"
                         variant="ghost"
                         onClick={() => onFire(d.id)}
                         disabled={off || team.length === 0}
-                        title={lock?.text ?? 'เลิกจ้างคนล่าสุดของแผนกนี้'}
+                        title={lock?.text ?? t('เลิกจ้างคนล่าสุดของแผนกนี้')}
                       >
                         <Minus />
-                        <span className="sr-only">เลิกจ้าง</span>
+                        <span className="sr-only">{t('เลิกจ้าง')}</span>
                       </Button>
                     </div>
 
@@ -468,7 +469,7 @@ export default function HirePanel({
                           <button
                             key={m.id}
                             onClick={() => onFocus(m.id)}
-                            title={`เลื่อนกล้องไปหา ${m.name}`}
+                            title={t('เลื่อนกล้องไปหา {name}', { name: m.name })}
                             className="flex items-center gap-1 rounded-box border border-ink-500 bg-ink-800 py-0.5 pl-0.5 pr-1.5 text-[11px] hover:border-brass"
                           >
                             <Portrait palette={m.palette} size={1} className="block shrink-0" />

@@ -71,10 +71,11 @@ const publicHandler = createMcpHandler(
           question: z.string().min(1).describe('คำถามของลูกค้า'),
           customer: z.string().optional().describe('ชื่อ/รหัสลูกค้า (ถ้ามี) - ใช้ในบันทึกเท่านั้น'),
           meeting_id: z.string().optional().describe('meetingId ที่ได้จากรอบก่อน (status running) - ส่งมาเพื่อรับคำตอบ ไม่ต้องส่ง question ใหม่'),
+          lang: z.enum(['th', 'en']).optional().describe('ภาษาคำตอบ - th (ค่าเริ่มต้น) | en'),
           wait_seconds: z.number().int().min(5).max(280).optional(),
         }),
       },
-      async ({ question, customer, meeting_id, wait_seconds }, ctx) => {
+      async ({ question, customer, meeting_id, wait_seconds, lang }, ctx) => {
         const officeId = officeOf(ctx);
         const c = sbAdmin();
         if (meeting_id && c) {
@@ -88,7 +89,7 @@ const publicHandler = createMcpHandler(
           return { ...text(m.customer_reply), structuredContent: { status: 'done', answer: m.customer_reply, meetingId: meeting_id } };
         }
         const run = runHeadless({
-          officeId, question, audience: 'customer', source: 'mcp',
+          officeId, question, audience: 'customer', source: 'mcp', lang,
           askedByLabel: customer ? `ลูกค้า ${customer} (ผ่าน MCP)` : 'ลูกค้า (ผ่าน MCP)',
         });
         const waited = wait_seconds ?? 50;
@@ -149,15 +150,16 @@ const handler = createMcpHandler(
           department: z.string().min(1).describe('id แผนก - ดูรายการจาก list_departments (รวมแผนกที่ออฟฟิศสร้างเอง)'),
           question: z.string().min(1).describe('คำถาม (ภาษาไทยหรืออังกฤษ)'),
           asked_by: z.string().optional().describe('ใครถาม เช่น ชื่อ agent หรือระบบ - โชว์ในบันทึก'),
+          lang: z.enum(['th', 'en']).optional().describe('ภาษาคำตอบ - th (ค่าเริ่มต้น) | en'),
           wait_seconds: z.number().int().min(5).max(280).optional()
             .describe('รอคำตอบนานสุดกี่วินาที (ค่าเริ่มต้น 50) - ไม่ทันจะได้ meetingId ไปเรียก get_meeting ทีหลัง'),
         }),
       },
-      async ({ department, question, asked_by, wait_seconds }, ctx) => {
+      async ({ department, question, asked_by, wait_seconds, lang }, ctx) => {
         const officeId = officeOf(ctx);
         const run = runHeadless({
           officeId, question, deptIds: [department], mode: 'direct',
-          source: 'mcp', askedByLabel: asked_by ? `${asked_by} (ผ่าน MCP)` : 'ผ่าน MCP',
+          source: 'mcp', lang, askedByLabel: asked_by ? `${asked_by} (ผ่าน MCP)` : 'ผ่าน MCP',
         });
         const waited = wait_seconds ?? 50;
         const r = await withWait(run, waited);
@@ -182,15 +184,16 @@ const handler = createMcpHandler(
           departments: z.array(z.string().min(1)).optional().describe('id แผนกที่ให้เข้าประชุม (ดู list_departments) - ว่าง = เลขาฯ เลือกให้'),
           mode: z.enum(['roundtable', 'relay']).optional().describe('roundtable (ค่าเริ่มต้น) หรือ relay'),
           asked_by: z.string().optional(),
+          lang: z.enum(['th', 'en']).optional().describe('ภาษาคำตอบ - th (ค่าเริ่มต้น) | en'),
           wait_seconds: z.number().int().min(5).max(280).optional()
             .describe('รอนานสุดกี่วินาที (ค่าเริ่มต้น 50) - ประชุมเต็มมักไม่ทัน ให้เรียก get_meeting ตามทีหลัง'),
         }),
       },
-      async ({ question, departments, mode, asked_by, wait_seconds }, ctx) => {
+      async ({ question, departments, mode, asked_by, wait_seconds, lang }, ctx) => {
         const officeId = officeOf(ctx);
         const run = runHeadless({
           officeId, question, deptIds: departments, mode: mode ?? 'roundtable',
-          source: 'mcp', askedByLabel: asked_by ? `${asked_by} (ผ่าน MCP)` : 'ผ่าน MCP',
+          source: 'mcp', lang, askedByLabel: asked_by ? `${asked_by} (ผ่าน MCP)` : 'ผ่าน MCP',
         });
         const waited = wait_seconds ?? 50;
         const r = await withWait(run, waited);

@@ -5,6 +5,7 @@ import { resolveCreds } from '@/lib/llm';
 import { persistMeeting } from '@/lib/meeting-store';
 import { checkOfficePolicy } from '@/lib/office-policy';
 import type { AskEvent, AskRequest } from '@/lib/protocol';
+import { withLang } from '@/lib/lang';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -64,7 +65,7 @@ export async function POST(req: NextRequest) {
       try {
         await runMeetingEngine({
           question, mode, ownerDeptId: body.ownerDeptId, chairId: body.chairId,
-          agents: body.agents, company: body.company, creds, assign: body.llm,
+          agents: body.agents, company: withLang(body.company, body.lang), creds, assign: body.llm,
           departments: sanitizeDeptDefs(body.departments),
         }, send);
       } finally {

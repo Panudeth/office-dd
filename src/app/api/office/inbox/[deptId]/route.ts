@@ -13,14 +13,14 @@ export const maxDuration = 300;
      POST /api/office/inbox/<deptId>
      Authorization: Bearer <office token>  (scope inbox ที่ผูกแผนกนี้ หรือ internal)
      body (ทุกช่องไม่บังคับ):
-       { title, source, intent: 'note'|'task', ask, mode: 'direct'|'roundtable'|'relay',
+       { title, source, intent: 'note'|'task', ask, mode: 'direct'|'roundtable'|'relay', lang: 'th'|'en',
          data: <อะไรก็ได้>, text, deliver: false | ['teams', ...], idempotencyKey, wait: <วินาที> }
      ถ้า body ไม่มีคีย์พวกนี้เลย ถือว่า body ทั้งก้อนคือ data (ระบบข้างนอกยิงตรง ๆ ได้ ไม่ต้องห่อ)
      ตอบ 202 { inboxId, status:'running' } ทันที (งานเดินต่อฝั่งเซิร์ฟเวอร์) - ใส่ wait=N จะรอไม่เกิน N วิ แล้วคืนผลถ้าเสร็จ
      GET  /api/office/inbox/<deptId>?id=<inboxId>   ดูสถานะ/คำตอบ
    ============================================================ */
 
-const WRAPPER_KEYS = ['title', 'source', 'intent', 'ask', 'mode', 'data', 'text', 'deliver', 'idempotencyKey', 'wait'];
+const WRAPPER_KEYS = ['title', 'source', 'intent', 'ask', 'mode', 'lang', 'data', 'text', 'deliver', 'idempotencyKey', 'wait'];
 
 async function auth(req: NextRequest, deptId: string) {
   const bearer = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? null;
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ deptId: st
   }
 
   const input: InboxInput = {
-    officeId: a.officeId, deptId, title: str(b.title, 200), source, intent, ask: str(b.ask, 4000), mode,
+    officeId: a.officeId, deptId, title: str(b.title, 200), source, intent, ask: str(b.ask, 4000), mode, lang: b.lang === 'en' ? 'en' : 'th',
     data: data ?? null, dataText, idemKey, deliver, origin: req.nextUrl.origin,
   };
   let inboxId: string;

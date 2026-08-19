@@ -14,6 +14,7 @@ import { Field, Input } from '@/components/ui/input';
 import { Hint } from '@/components/ui/panel';
 import { LineInboundSection } from '@/components/DepartmentPanel';
 import { DEPARTMENTS } from '@/lib/departments';
+import { t } from '@/lib/i18n';
 
 /* ============================================================
    การเชื่อมต่อภายนอก - token ของออฟฟิศสำหรับ MCP / API / LINE
@@ -137,14 +138,14 @@ export default function IntegrationsSection({ office, onPolicy, part = 'in' }: {
 
   return (
     <Field
-      label={part === 'in' ? <span className="flex items-center gap-1.5"><Plug className="size-3.5" /> บัตรผ่านขาเข้าของออฟฟิศ - ใครยิงเข้ามาได้บ้าง</span> : undefined}
-      info={part === 'in' ? 'ที่นี่ = สร้าง "บัตรผ่าน" ให้ระบบข้างนอกยิงเข้าออฟฟิศ ทำครั้งเดียว ใช้ได้หลายแผนก (ต่างจากในหน้าแผนกที่แค่ติ๊กว่าแผนกนั้นรับจากบัตรไหน) · webhook เข้า = ระบบยิงข้อมูลให้แผนกที่เลือก · internal = agent ของเราเอง ถามทุกแผนก/ประชุม/อ่านสมุด (MCP/API) · public = ช่องทางลูกค้า ได้เฉพาะคำตอบที่กรองแล้ว · LINE OA = ลูกค้าทัก LINE แล้วแผนกที่เลือกตอบ · token โชว์ครั้งเดียว เก็บเหมือนรหัสผ่าน' : undefined}
+      label={part === 'in' ? <span className="flex items-center gap-1.5"><Plug className="size-3.5" /> {t('บัตรผ่านขาเข้าของออฟฟิศ - ใครยิงเข้ามาได้บ้าง')}</span> : undefined}
+      info={part === 'in' ? t('ที่นี่ = สร้าง "บัตรผ่าน" ให้ระบบข้างนอกยิงเข้าออฟฟิศ ทำครั้งเดียว ใช้ได้หลายแผนก (ต่างจากในหน้าแผนกที่แค่ติ๊กว่าแผนกนั้นรับจากบัตรไหน) · webhook เข้า = ระบบยิงข้อมูลให้แผนกที่เลือก · internal = agent ของเราเอง ถามทุกแผนก/ประชุม/อ่านสมุด (MCP/API) · public = ช่องทางลูกค้า ได้เฉพาะคำตอบที่กรองแล้ว · LINE OA = ลูกค้าทัก LINE แล้วแผนกที่เลือกตอบ · token โชว์ครั้งเดียว เก็บเหมือนรหัสผ่าน') : undefined}
     >
       <div className="flex flex-col gap-1.5">
         {part !== 'in' ? null : rows === null ? (
-          <Hint className="flex items-center gap-1.5"><LoaderCircle className="size-3 animate-spin" /> กำลังโหลด</Hint>
+          <Hint className="flex items-center gap-1.5"><LoaderCircle className="size-3 animate-spin" /> {t('กำลังโหลด')}</Hint>
         ) : rows.length === 0 ? (
-          <Hint>ยังไม่มี token</Hint>
+          <Hint>{t('ยังไม่มี token')}</Hint>
         ) : (
           <ul className="flex flex-col gap-1">
             {rows.map((r) => (
@@ -152,27 +153,27 @@ export default function IntegrationsSection({ office, onPolicy, part = 'in' }: {
                 <KeyRound className="size-3.5 shrink-0 text-dim" />
                 <span className="min-w-0 flex-1 truncate text-parchment">{r.name}</span>
                 <Badge variant={r.scope === 'public' ? 'brass' : r.scope === 'inbox' ? 'default' : 'good'}>
-                  {r.scope === 'public' ? 'public - ลูกค้า' : r.scope === 'inbox' ? 'webhook เข้า' : 'internal - ทีมเรา'}
+                  {r.scope === 'public' ? t('public - ลูกค้า') : r.scope === 'inbox' ? t('webhook เข้า') : t('internal - ทีมเรา')}
                 </Badge>
                 {r.scope === 'inbox' && (
                   <span className="flex flex-wrap items-center gap-1">
-                    <span className="text-[10px] text-dim">→ แผนก:</span>
+                    <span className="text-[10px] text-dim">{t('→ แผนก:')}</span>
                     {DEPARTMENTS.map((d) => {
                       const on = (r.dept_ids ?? []).includes(d.id);
                       return (
-                        <button key={d.id} type="button" disabled={busy} title={d.nameTh}
+                        <button key={d.id} type="button" disabled={busy} title={t(d.nameTh)}
                           onClick={() => void patchToken(r.id, { deptIds: on ? (r.dept_ids ?? []).filter((x) => x !== d.id) : [...(r.dept_ids ?? []), d.id] })}
                           className={`rounded-box border px-1.5 py-px text-[10px] ${on ? 'border-carpet bg-[#22401f] text-carpet-lite' : 'border-ink-500 bg-ink-800 text-dim hover:border-brass'}`}>
-                          {on ? '✓ ' : ''}{d.shortTh}
+                          {on ? '✓ ' : ''}{t(d.shortTh)}
                         </button>
                       );
                     })}
                   </span>
                 )}
                 <span className="shrink-0 text-[10px] text-dim">
-                  {r.last_used_at ? `ใช้ล่าสุด ${new Date(r.last_used_at).toLocaleString('th-TH')}` : 'ยังไม่เคยใช้'}
+                  {r.last_used_at ? t('ใช้ล่าสุด {time}', { time: new Date(r.last_used_at).toLocaleString('th-TH') }) : t('ยังไม่เคยใช้')}
                 </span>
-                <Button size="icon" variant="ghost" className="size-6" title="เพิกถอน" disabled={busy} onClick={() => revoke(r.id)}>
+                <Button size="icon" variant="ghost" className="size-6" title={t('เพิกถอน')} disabled={busy} onClick={() => revoke(r.id)}>
                   <Trash2 className="size-3" />
                 </Button>
               </li>
@@ -182,50 +183,50 @@ export default function IntegrationsSection({ office, onPolicy, part = 'in' }: {
 
         {part === 'in' && (<>
         <div className="flex gap-1.5">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={scope === 'inbox' ? 'ชื่อระบบที่จะยิงเข้า เช่น gcp-billing' : 'ชื่อ token เช่น Claude Code / LINE bot'} maxLength={60} />
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={scope === 'inbox' ? t('ชื่อระบบที่จะยิงเข้า เช่น gcp-billing') : t('ชื่อ token เช่น Claude Code / LINE bot')} maxLength={60} />
           <Select value={scope} onValueChange={(v) => setScope(v === 'public' ? 'public' : v === 'inbox' ? 'inbox' : 'internal')}>
             <SelectTrigger className="h-9 w-48 shrink-0 text-[11px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="inbox">webhook เข้า - ระบบยิงข้อมูลให้แผนก</SelectItem>
-              <SelectItem value="internal">internal - agent ของเรา (MCP/API)</SelectItem>
-              <SelectItem value="public">public - ช่องทางลูกค้า</SelectItem>
+              <SelectItem value="inbox">{t('webhook เข้า - ระบบยิงข้อมูลให้แผนก')}</SelectItem>
+              <SelectItem value="internal">{t('internal - agent ของเรา (MCP/API)')}</SelectItem>
+              <SelectItem value="public">{t('public - ช่องทางลูกค้า')}</SelectItem>
             </SelectContent>
           </Select>
           <Button variant="primary" className="shrink-0" size="sm" disabled={busy || (scope === 'inbox' && (!name.trim() || !inboxDepts.length))} onClick={create}
-            title={scope === 'inbox' && !name.trim() ? 'พิมพ์ชื่อระบบก่อน' : scope === 'inbox' && !inboxDepts.length ? 'เลือกแผนกที่จะรับอย่างน้อย 1' : undefined}>
-            {busy ? <LoaderCircle className="animate-spin" /> : <Plus />} สร้าง token
+            title={scope === 'inbox' && !name.trim() ? t('พิมพ์ชื่อระบบก่อน') : scope === 'inbox' && !inboxDepts.length ? t('เลือกแผนกที่จะรับอย่างน้อย 1') : undefined}>
+            {busy ? <LoaderCircle className="animate-spin" /> : <Plus />} {t('สร้าง token')}
           </Button>
         </div>
 
         {scope === 'inbox' && (
           <div className="flex flex-wrap items-center gap-1 text-[11px]">
-            <span className="text-dim">แผนกที่รับ:</span>
+            <span className="text-dim">{t('แผนกที่รับ:')}</span>
             {DEPARTMENTS.map((d) => {
               const on = inboxDepts.includes(d.id);
               return (
                 <button key={d.id} type="button" onClick={() => setInboxDepts((l) => (on ? l.filter((x) => x !== d.id) : [...l, d.id]))}
-                  className={`rounded-box border px-2 py-0.5 ${on ? 'border-carpet bg-[#22401f] text-carpet-lite' : 'border-ink-500 bg-ink-800 text-dim hover:border-brass'}`}>{on ? '✓ ' : ''}{d.shortTh}</button>
+                  className={`rounded-box border px-2 py-0.5 ${on ? 'border-carpet bg-[#22401f] text-carpet-lite' : 'border-ink-500 bg-ink-800 text-dim hover:border-brass'}`}>{on ? '✓ ' : ''}{t(d.shortTh)}</button>
               );
             })}
-            <InfoTip>ระบบนี้ยิงเข้าแผนกไหนได้บ้าง - เปลี่ยนทีหลังได้ทั้งที่นี่และในหน้าแผนก (แท็บ "ขาเข้า" ติ๊กรับ) · URL ที่ระบบต้องยิง: <code>{origin}/api/office/inbox/&lt;deptId&gt;</code></InfoTip>
-            {(!name.trim() || !inboxDepts.length) && <span className="text-[10px] text-brass">{!name.trim() ? 'พิมพ์ชื่อระบบ' : 'เลือกแผนกที่รับอย่างน้อย 1'} แล้วปุ่ม "สร้าง token" จะกดได้</span>}
+            <InfoTip>{t('ระบบนี้ยิงเข้าแผนกไหนได้บ้าง - เปลี่ยนทีหลังได้ทั้งที่นี่และในหน้าแผนก (แท็บ "ขาเข้า" ติ๊กรับ) · URL ที่ระบบต้องยิง:')} <code>{origin}/api/office/inbox/&lt;deptId&gt;</code></InfoTip>
+            {(!name.trim() || !inboxDepts.length) && <span className="text-[10px] text-brass">{t('{what} แล้วปุ่ม "สร้าง token" จะกดได้', { what: !name.trim() ? t('พิมพ์ชื่อระบบ') : t('เลือกแผนกที่รับอย่างน้อย 1') })}</span>}
           </div>
         )}
         {err && <p className="rounded-box border border-rug-dark bg-[#3f2018] px-2 py-1 text-[11px] text-rug-lite">{err}</p>}
         {fresh && (
           <div className="rounded-box border-2 border-brass/60 bg-ink-900 p-2">
-            <div className="mb-1 text-[11px] font-semibold text-brass">token ใหม่ - คัดลอกตอนนี้ จะไม่โชว์อีก</div>
+            <div className="mb-1 text-[11px] font-semibold text-brass">{t('token ใหม่ - คัดลอกตอนนี้ จะไม่โชว์อีก')}</div>
             <div className="flex items-center gap-1.5">
               <code className="min-w-0 flex-1 truncate rounded-box bg-ink-800 px-1.5 py-1 font-mono text-[11px] text-parchment">{fresh}</code>
               <Button size="sm" variant="outline" onClick={() => copy(fresh, 'tok')}>
-                {copied === 'tok' ? <Check /> : <Copy />} คัดลอก
+                {copied === 'tok' ? <Check /> : <Copy />} {t('คัดลอก')}
               </Button>
             </div>
           </div>
         )}
 
         <details className="rounded-box border border-ink-600 bg-ink-700 p-2 text-[11px]">
-          <summary className="cursor-pointer text-dim hover:text-parchment">วิธีต่อ MCP (Claude Code / pugbase / อื่น ๆ)</summary>
+          <summary className="cursor-pointer text-dim hover:text-parchment">{t('วิธีต่อ MCP (Claude Code / pugbase / อื่น ๆ)')}</summary>
           <div className="mt-1.5 flex flex-col gap-1.5">
             <div className="flex items-center gap-1.5">
               <span className="text-dim">URL</span>
@@ -234,16 +235,16 @@ export default function IntegrationsSection({ office, onPolicy, part = 'in' }: {
             </div>
             <div className="text-dim">Claude Code: <code>claude mcp add --transport http visual-company {mcpUrl} --header &quot;Authorization: Bearer &lt;token&gt;&quot;</code></div>
             <pre className="overflow-x-auto rounded-box bg-ink-900 p-1.5 font-mono text-[10px] text-wall-top">{mcpConfig}</pre>
-            <div className="text-dim">tools (internal): <code>list_departments</code> · <code>ask_department</code> (เร็ว) · <code>hold_meeting</code> (ประชุม) · <code>get_meeting</code> · <code>list_meetings</code></div>
-            <div className="text-dim">tools (public): <code>ask_customer_service</code> เท่านั้น - PR ตอบจากข้อมูลสาธารณะ ถ้าต้องปรึกษาทีมจะเปิดประชุมภายในเองแล้วกรองคำตอบให้</div>
+            <div className="text-dim">tools (internal): <code>list_departments</code> · <code>ask_department</code> ({t('เร็ว')}) · <code>hold_meeting</code> ({t('ประชุม')}) · <code>get_meeting</code> · <code>list_meetings</code></div>
+            <div className="text-dim">tools (public): <code>ask_customer_service</code> {t('เท่านั้น - PR ตอบจากข้อมูลสาธารณะ ถ้าต้องปรึกษาทีมจะเปิดประชุมภายในเองแล้วกรองคำตอบให้')}</div>
           </div>
         </details>
 
         <details className="rounded-box border border-ink-600 bg-ink-700 p-2 text-[11px]">
-          <summary className="cursor-pointer text-dim hover:text-parchment">วิธีต่อ API ตรง / LINE</summary>
+          <summary className="cursor-pointer text-dim hover:text-parchment">{t('วิธีต่อ API ตรง / LINE')}</summary>
           <div className="mt-1.5 flex flex-col gap-1 text-dim">
             <div>API: <code>POST {origin}/api/office/ask</code> header <code>Authorization: Bearer &lt;token&gt;</code> body <code>{'{ "question": "...", "deptIds": ["legal"], "mode": "direct" }'}</code></div>
-            <div>LINE: ตั้งจากหน้าเว็บ - <b>แผนก &amp; Webhook</b> → เลือกแผนกที่ตอบลูกค้า → แท็บ <b>Webhook เข้า</b> → <b>เพิ่ม LINE OA</b> (ได้ URL <code>{origin}/api/line/webhook/&lt;id&gt;</code> ไปวางใน LINE console) - ลูกค้าเห็นเฉพาะข้อมูลที่ติดว่าเปิดเผยได้</div>
+            <div>LINE: {t('ตั้งจากหน้าเว็บ -')} <b>{t('แผนก & Webhook')}</b> → {t('เลือกแผนกที่ตอบลูกค้า')} → {t('แท็บ')} <b>{t('Webhook เข้า')}</b> → <b>{t('เพิ่ม LINE OA')}</b> ({t('ได้ URL')} <code>{origin}/api/line/webhook/&lt;id&gt;</code> {t('ไปวางใน LINE console')}) - {t('ลูกค้าเห็นเฉพาะข้อมูลที่ติดว่าเปิดเผยได้')}</div>
           </div>
         </details>
 
@@ -258,57 +259,55 @@ export default function IntegrationsSection({ office, onPolicy, part = 'in' }: {
         <div className="rounded-box border border-ink-600 bg-ink-700 p-2 text-[11px]">
           <div className="flex items-center gap-1.5">
             <Lock className="size-3.5 shrink-0 text-dim" />
-            <span className="text-parchment">นโยบายโมเดลของออฟฟิศ</span>
+            <span className="text-parchment">{t('นโยบายโมเดลของออฟฟิศ')}</span>
             <InfoTip>
-              <b>ทุกผู้ให้บริการ</b> = ใช้คีย์ Claude/Gemini/OpenAI-compatible ได้ตามที่ตั้งใน "คีย์ของฉัน"<br />
-              <b>เฉพาะโมเดลในเครื่อง/LAN</b> = เซิร์ฟเวอร์ปฏิเสธทุกคำขอที่ชุดคีย์ไม่ได้ชี้ไป localhost / IP วง LAN / .local (Ollama, LM Studio)
-              ครอบทั้งประชุมจากหน้าเว็บ MCP/API/LINE webhook เข้า และการฝังเอกสาร - ข้อมูลบริษัทไม่ออกจากเครื่องแม้ใครจะใส่คีย์ข้างนอกมา<br />
-              เจ้าของออฟฟิศเท่านั้นที่เปลี่ยนได้
+              <b>{t('ทุกผู้ให้บริการ')}</b> {t('= ใช้คีย์ Claude/Gemini/OpenAI-compatible ได้ตามที่ตั้งใน "คีย์ของฉัน"')}<br />
+              <b>{t('เฉพาะโมเดลในเครื่อง/LAN')}</b> {t('= เซิร์ฟเวอร์ปฏิเสธทุกคำขอที่ชุดคีย์ไม่ได้ชี้ไป localhost / IP วง LAN / .local (Ollama, LM Studio) ครอบทั้งประชุมจากหน้าเว็บ MCP/API/LINE webhook เข้า และการฝังเอกสาร - ข้อมูลบริษัทไม่ออกจากเครื่องแม้ใครจะใส่คีย์ข้างนอกมา')}<br />
+              {t('เจ้าของออฟฟิศเท่านั้นที่เปลี่ยนได้')}
             </InfoTip>
             <span className="flex-1" />
             {(['any', 'local'] as const).map((p) => (
               <Button key={p} size="sm" variant={policy === p ? 'primary' : 'outline'} className="h-6 px-2 text-[10px]" disabled={policyBusy} onClick={() => policy !== p && void changePolicy(p)}>
-                {p === 'any' ? 'ทุกผู้ให้บริการ' : 'เฉพาะโมเดลในเครื่อง/LAN'}
+                {p === 'any' ? t('ทุกผู้ให้บริการ') : t('เฉพาะโมเดลในเครื่อง/LAN')}
               </Button>
             ))}
           </div>
-          {policy === 'local' && <p className="mt-1 text-[10px] text-carpet-lite">เปิดอยู่ - คำขอที่ใช้คีย์ข้างนอกจะถูกปฏิเสธพร้อมข้อความบอกให้เปลี่ยนชุดคีย์</p>}
+          {policy === 'local' && <p className="mt-1 text-[10px] text-carpet-lite">{t('เปิดอยู่ - คำขอที่ใช้คีย์ข้างนอกจะถูกปฏิเสธพร้อมข้อความบอกให้เปลี่ยนชุดคีย์')}</p>}
           {policyErr && <p className="mt-1 text-[10px] text-rug-lite">{policyErr}</p>}
         </div>
 
         <div className="rounded-box border border-ink-600 bg-ink-700 p-2 text-[11px]">
           <div className="flex items-center gap-1.5">
             <Cpu className="size-3.5 shrink-0 text-dim" />
-            <span className="text-parchment">โมเดลที่ MCP / API / LINE ใช้</span>
+            <span className="text-parchment">{t('โมเดลที่ MCP / API / LINE ใช้')}</span>
             <span className="flex-1" />
-            <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px]" disabled={busy} onClick={() => void loadLlm()}>รีเฟรช</Button>
+            <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px]" disabled={busy} onClick={() => void loadLlm()}>{t('รีเฟรช')}</Button>
           </div>
           {llmStatus === undefined ? (
-            <Hint className="mt-1">กำลังโหลด</Hint>
+            <Hint className="mt-1">{t('กำลังโหลด')}</Hint>
           ) : llmStatus?.configured ? (
             <div className="mt-1 flex flex-col gap-1 text-dim">
               <div className="flex flex-wrap items-center gap-1.5">
-                ใช้ชุดคีย์ที่ sync จาก &quot;คีย์ของฉัน&quot;
-                {llmStatus.updatedAt && <> · อัปเดต {new Date(llmStatus.updatedAt).toLocaleString('th-TH')}</>}
-                <InfoTip>ใช้ชุดคีย์/โมเดลรายคนตามที่ตั้งใน &quot;คีย์ของฉัน&quot; และแผงพนักงาน sync อัตโนมัติจากเบราว์เซอร์ของเจ้าของ/exec และเข้ารหัสก่อนบันทึกลงฐานข้อมูล</InfoTip>
+                {t('ใช้ชุดคีย์ที่ sync จาก "คีย์ของฉัน"')}
+                {llmStatus.updatedAt && <> · {t('อัปเดต {time}', { time: new Date(llmStatus.updatedAt).toLocaleString('th-TH') })}</>}
+                <InfoTip>{t('ใช้ชุดคีย์/โมเดลรายคนตามที่ตั้งใน "คีย์ของฉัน" และแผงพนักงาน sync อัตโนมัติจากเบราว์เซอร์ของเจ้าของ/exec และเข้ารหัสก่อนบันทึกลงฐานข้อมูล')}</InfoTip>
               </div>
               <div className="flex flex-wrap gap-1">
                 {llmStatus.connections.map((c) => (
-                  <Badge key={c.id} variant="good">{c.label || c.provider}{c.model ? ` · ${c.model}` : ''}{!c.hasKey && c.provider !== 'openai' ? ' (ไม่มีคีย์)' : ''}</Badge>
+                  <Badge key={c.id} variant="good">{c.label || c.provider}{c.model ? ` · ${c.model}` : ''}{!c.hasKey && c.provider !== 'openai' ? ` (${t('ไม่มีคีย์')})` : ''}</Badge>
                 ))}
               </div>
               <div>
                 <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-brass-lite" disabled={busy} onClick={() => void clearLlm()}>
-                  <Trash2 className="size-3" /> ลบออกจากเซิร์ฟเวอร์ (กลับไปใช้ .env)
+                  <Trash2 className="size-3" /> {t('ลบออกจากเซิร์ฟเวอร์ (กลับไปใช้ .env)')}
                 </Button>
               </div>
             </div>
           ) : (
             <Hint className="mt-1 flex items-center gap-1.5">
-              ยังไม่มีชุดคีย์บนเซิร์ฟเวอร์ - ใช้ค่าจาก <code>.env</code>
+              {t('ยังไม่มีชุดคีย์บนเซิร์ฟเวอร์ - ใช้ค่าจาก')} <code>.env</code>
               <InfoTip side="top">
-                ตอนนี้ MCP/API/LINE ใช้ค่าจาก <code>.env</code> (LLM_PROVIDER, OPENAI_BASE_URL, OPENAI_MODEL)
-                เพิ่มชุดคีย์ใน &quot;คีย์ของฉัน&quot; แล้วระบบจะ sync ให้อัตโนมัติ (เฉพาะเจ้าของ/exec)
+                {t('ตอนนี้ MCP/API/LINE ใช้ค่าจาก')} <code>.env</code> {t('(LLM_PROVIDER, OPENAI_BASE_URL, OPENAI_MODEL) เพิ่มชุดคีย์ใน "คีย์ของฉัน" แล้วระบบจะ sync ให้อัตโนมัติ (เฉพาะเจ้าของ/exec)')}
               </InfoTip>
             </Hint>
           )}
