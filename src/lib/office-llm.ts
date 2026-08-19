@@ -37,7 +37,8 @@ function masterKey(): Buffer | null {
   return createHash('sha256').update(`visual-company.office_llm|${secret}`).digest();
 }
 
-function encrypt(plain: string): string {
+/** เข้ารหัสความลับก่อนลง DB (AES-256-GCM กุญแจจาก secret ของเซิร์ฟเวอร์) - ใช้ร่วมกับ token LINE ฯลฯ */
+export function encrypt(plain: string): string {
   const key = masterKey();
   if (!key || !plain) return plain;
   const iv = randomBytes(12);
@@ -46,7 +47,7 @@ function encrypt(plain: string): string {
   return `${ENC_PREFIX}${iv.toString('base64')}:${cipher.getAuthTag().toString('base64')}:${ct.toString('base64')}`;
 }
 
-function decrypt(stored: string): string {
+export function decrypt(stored: string): string {
   if (!stored.startsWith(ENC_PREFIX)) return stored;
   const key = masterKey();
   if (!key) return '';

@@ -53,6 +53,8 @@ export interface Office {
   name: string;
   owner_id: string;
   created_at: string;
+  /** นโยบายโมเดล: any (ค่าเริ่มต้น) / local = เฉพาะโมเดลในเครื่อง/LAN - ฐานเก่าไม่มีคอลัมน์ = any */
+  llm_policy?: 'any' | 'local';
 }
 
 export interface EmployeeRow {
@@ -247,10 +249,14 @@ export async function healthCheck(): Promise<{ ok: boolean; text: string }> {
 export async function listOffices(): Promise<Office[]> {
   const c = sb();
   if (!c) return [];
-  const { data, error } = await c
+  let { data, error } = await c
     .from('office')
-    .select('id,name,owner_id,created_at')
+    .select('id,name,owner_id,created_at,llm_policy')
     .order('created_at', { ascending: true });
+  if (error && /llm_policy/i.test(error.message)) {
+    const r = await c.from('office').select('id,name,owner_id,created_at').order('created_at', { ascending: true });
+    data = r.data as typeof data; error = r.error;
+  }
   if (error) throw new Error(sbError(error));
   return (data ?? []) as Office[];
 }
@@ -442,24 +448,40 @@ export async function saveProfile(
 }
 
 export async function loadDeptNotes(officeId: string): Promise<Record<string, string>> {
+  return (await loadDeptNotesFull(officeId)).internal;
+}
+
+/** โน้ตแผนกทั้งสองชั้น - internal (คนในเห็น) และ public (ตอบลูกค้าได้) - ฐานเก่าที่ยังไม่มี public_body ได้ public ว่าง */
+export async function loadDeptNotesFull(officeId: string): Promise<{ internal: Record<string, string>; public: Record<string, string> }> {
   const c = sb();
-  if (!c) return {};
-  const { data, error } = await c
-    .from('office_dept_note')
-    .select('dept_id,body')
-    .eq('office_id', officeId);
+  if (!c) return { internal: {}, public: {} };
+  let { data, error } = await c.from('office_dept_note').select('dept_id,body,public_body').eq('office_id', officeId);
+  if (error && /public_body/i.test(error.message)) {
+    const r = await c.from('office_dept_note').select('dept_id,body').eq('office_id', officeId);
+    data = r.data as typeof data; error = r.error;
+  }
   if (error) throw new Error(sbError(error));
-  return Object.fromEntries(((data ?? []) as { dept_id: string; body: string }[]).map((r) => [r.dept_id, r.body]));
+  const rows = (data ?? []) as { dept_id: string; body: string; public_body?: string }[];
+  return {
+    internal: Object.fromEntries(rows.map((r) => [r.dept_id, r.body ?? ''])),
+    public: Object.fromEntries(rows.map((r) => [r.dept_id, r.public_body ?? ''])),
+  };
 }
 
 export async function saveDeptNote(
-  officeId: string, deptId: string, body: string, userId: string | null,
+  officeId: string, deptId: string, body: string, userId: string | null, publicBody?: string,
 ): Promise<void> {
   const c = sb();
   if (!c) return;
-  const { error } = await c
-    .from('office_dept_note')
-    .upsert({ office_id: officeId, dept_id: deptId, body, updated_by: userId, updated_at: new Date().toISOString() });
+  const row: Record<string, unknown> = { office_id: officeId, dept_id: deptId, body, updated_by: userId, updated_at: new Date().toISOString() };
+  if (publicBody !== undefined) row.public_body = publicBody;
+  let { error } = await c.from('office_dept_note').upsert(row);
+  if (error && /public_body/i.test(error.message)) {
+    // ฐานยังไม่ได้รัน schema รอบล่าสุด - บันทึกเฉพาะชั้นภายในไปก่อน แล้วบอกให้รู้
+    delete row.public_body;
+    ({ error } = await c.from('office_dept_note').upsert(row));
+    if (!error && publicBody) throw new Error('บันทึกโน้ตภายในแล้ว แต่ "ข้อมูลที่ตอบลูกค้าได้" ยังไม่ได้บันทึก - รัน supabase/schema.sql รอบล่าสุดก่อน');
+  }
   if (error) throw new Error(sbError(error));
 }
 
@@ -775,4 +797,12 @@ export async function listInbox(officeId: string, limit = 50): Promise<InboxRow[
     throw new Error(sbError(error));
   }
   return (data ?? []) as InboxRow[];
+}
+
+/** ตั้งนโยบายโมเดลของออฟฟิศ - เจ้าของเท่านั้น (RLS office_update) */
+export async function setOfficeLlmPolicy(officeId: string, policy: 'any' | 'local'): Promise<void> {
+  const c = sb();
+  if (!c) return;
+  const { error } = await c.from('office').update({ llm_policy: policy }).eq('id', officeId);
+  if (error) throw new Error(/llm_policy/i.test(error.message) ? 'ฐานข้อมูลยังไม่มีคอลัมน์ llm_policy - รัน supabase/schema.sql รอบล่าสุดก่อน' : sbError(error));
 }

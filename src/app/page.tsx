@@ -25,7 +25,7 @@ import KeyPanel, {
 import OfficePanel from '@/components/OfficePanel';
 import {
   accountAvatar, accountName, deleteEmployee, deleteMeeting, listMeetings, listOffices,
-  listProducts, loadDeptNotes, loadEmployees, loadProfile, matchChunks, readOAuthReturn, rememberOffice,
+  listProducts, loadDeptNotesFull, loadEmployees, loadProfile, matchChunks, readOAuthReturn, rememberOffice,
   rememberedOfficeId, sb, saveEmployee, saveMeeting, sbError, supabaseConfigured, updateMeetingMinutes,
   accessToken, loadLayout, saveLayout, updateEmployeeSeat,
   canEditOffice, deleteDepartment, loadDepartments, saveDepartment,
@@ -155,6 +155,7 @@ export default function Page() {
   const [profile, setProfile] = useState<Record<string, string>>({});
   const [products, setProducts] = useState<Product[]>([]);
   const [deptNotes, setDeptNotes] = useState<Record<string, string>>({});
+  const [deptPublicNotes, setDeptPublicNotes] = useState<Record<string, string>>({});
   const [companyOpen, setCompanyOpen] = useState(false);
   const [meetingsLoading, setMeetingsLoading] = useState(false);
   /** สถานะสดของการประชุม - ใครกำลังคิดอะไร นานแค่ไหน (แผง MeetingStatus เหนือแชท) */
@@ -351,7 +352,7 @@ export default function Page() {
     // ห้ามลากโปรไฟล์กับโน้ตแผนกที่โหลดได้ปกติล้มไปด้วย ไม่งั้นผู้ใช้เห็นฟอร์มว่างแล้วคิดว่าข้อมูลหาย
     const fail = (e: unknown) => { setSaveErr(sbError(e)); };
     loadProfile(officeId).then(setProfile).catch(fail);
-    loadDeptNotes(officeId).then(setDeptNotes).catch(fail);
+    loadDeptNotesFull(officeId).then((n) => { setDeptNotes(n.internal); setDeptPublicNotes(n.public); }).catch(fail);
     listProducts(officeId).then(setProducts).catch((e) => { setProducts([]); fail(e); });
   }, [officeId]);
   useEffect(() => { refreshCompany(); }, [refreshCompany]);
@@ -364,13 +365,17 @@ export default function Page() {
   const buildCompanyContext = useCallback(async (question: string, deptIds: string[]): Promise<CompanyContext | undefined> => {
     if (!officeId) return undefined;
     const notes: Record<string, string> = {};
-    for (const id of deptIds) if (deptNotes[id]) notes[id] = deptNotes[id];
+    const publicNotes: Record<string, string> = {};
+    for (const id of deptIds) {
+      if (deptNotes[id]) notes[id] = deptNotes[id];
+      if (deptPublicNotes[id]) publicNotes[id] = deptPublicNotes[id];
+    }
     let chunks: CompanyContext['chunks'];
     try {
       const res = await fetch('/api/embed', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders(llm) },
-        body: JSON.stringify({ texts: [question] }),
+        body: JSON.stringify({ texts: [question], officeId }),
       });
       if (res.ok) {
         const data = (await res.json()) as { vectors: number[][]; model: string };
@@ -381,8 +386,8 @@ export default function Page() {
     } catch {
       chunks = undefined;
     }
-    return { profile, products, notes, chunks };
-  }, [officeId, profile, products, deptNotes, llm]);
+    return { profile, products, notes, publicNotes, chunks };
+  }, [officeId, profile, products, deptNotes, deptPublicNotes, llm]);
 
   const secBlocked = !supabaseConfigured
     ? 'โหมดในเครื่องยังไม่มีที่เก็บบันทึก - ตั้งค่า Supabase ก่อนถึงจะจดประวัติได้'
@@ -686,7 +691,7 @@ export default function Page() {
       const res = await fetch('/api/agenda', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders(llm) },
-        body: JSON.stringify({ question, hiredDeptIds, profile, departments: customDefs() }),
+        body: JSON.stringify({ question, hiredDeptIds, profile, departments: customDefs(), officeId: officeId ?? undefined }),
       });
       const data = (await res.json()) as Agenda & { error?: string };
       if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
@@ -1721,13 +1726,14 @@ export default function Page() {
         profile={profile}
         products={products}
         deptNotes={deptNotes}
+        deptPublicNotes={deptPublicNotes}
         onChanged={refreshCompany}
         llmHeaders={authHeaders(llm)}
         llmLabel={llm?.label ?? 'คีย์ของเซิร์ฟเวอร์'}
         blocked={secBlocked}
       />
 
-      <IntegrationsPanel open={integrationsOpen} onClose={() => setIntegrationsOpen(false)} office={office} />
+      <IntegrationsPanel open={integrationsOpen} onClose={() => setIntegrationsOpen(false)} office={office} onPolicy={(p) => setOffice((o) => (o ? { ...o, llm_policy: p } : o))} />
       <OperatorPanel
         open={operatorOpen}
         onClose={() => setOperatorOpen(false)}
@@ -1762,9 +1768,11 @@ export default function Page() {
         headcount={deptPanel.id ? roster.filter((r) => r.deptId === deptPanel.id).length : 0}
         onSave={saveDept}
         onDelete={deleteDept}
+        onBack={() => { setDeptPanel((d) => ({ ...d, open: false })); setDeptHubOpen(true); }}
       />
       <KeyPanel
         open={keyOpen}
+        localOnly={office?.llm_policy === 'local'}
         store={llmStore}
         onClose={() => setKeyOpen(false)}
         onChange={setLlmStoreSaved}

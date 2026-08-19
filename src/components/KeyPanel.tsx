@@ -286,6 +286,8 @@ interface Props {
   onChange: (s: LlmStore) => void;
   /** พนักงานปัจจุบัน - เอาไว้ตั้งโมเดลรายคนจากหน้านี้ได้เลย ไม่ต้องไปหาในแผงพนักงาน */
   roster?: EmployeeSnapshot[];
+  /** ออฟฟิศตั้งนโยบาย "เฉพาะโมเดลในเครื่อง/LAN" - เตือนถ้าชุดที่ใช้อยู่ชี้ออกข้างนอก (เซิร์ฟเวอร์จะปฏิเสธ) */
+  localOnly?: boolean;
 }
 
 /** เว็บนี้เปิดจากเครื่องเดียวกับที่ Ollama รันอยู่ไหม - ถ้าไม่ใช่ localhost:11434 จะชี้ไปที่เซิร์ฟเวอร์ของเว็บ ไม่ใช่เครื่องผู้ใช้ */
@@ -301,7 +303,9 @@ const blank = (): LlmConnection => ({
   baseUrl: OPENAI_PRESETS[0].url,
 });
 
-export default function KeyPanel({ open, store, onClose, onChange, roster = [] }: Props) {
+export default function KeyPanel({ open, store, onClose, onChange, roster = [], localOnly = false }: Props) {
+  const isLocalConn = (c: LlmConnection | null | undefined) => !!c && c.provider === 'openai' && (isLocalBase(c.baseUrl ?? '') || isLanBase(c.baseUrl ?? ''));
+  const offending = localOnly ? store.items.filter((c) => !isLocalConn(c) && (c.id === store.active || Object.values(store.roles ?? {}).includes(c.id) || Object.values(store.byEmployee ?? {}).includes(c.id))) : [];
   const [draft, setDraft] = useState<LlmConnection | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [reveal, setReveal] = useState(false);
@@ -413,6 +417,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [] }
 
   const meta = draft ? META[draft.provider] : META.gemini;
   const activeConn = activeOf(store);
+  const activeIsLocal = isLocalConn(activeConn);
 
   /**
    * ปลายทางในเครื่องไม่ต้องใช้คีย์ จึงโหลดรายชื่อโมเดลให้เองทันทีที่เลือก
@@ -449,6 +454,14 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [] }
       >
         {!draft ? (
           <>
+            {localOnly && (
+              <p className={`rounded-box border px-2 py-1 text-[11px] ${offending.length || !activeIsLocal ? 'border-rug-dark bg-[#3f2018] text-rug-lite' : 'border-carpet-dark bg-[#22401f] text-carpet-lite'}`}>
+                ออฟฟิศนี้ใช้ได้เฉพาะโมเดลในเครื่อง/LAN (Ollama, LM Studio){' '}
+                {offending.length
+                  ? `- ชุด "${offending.map((c) => c.label).join('", "')}" ชี้ออกข้างนอก เซิร์ฟเวอร์จะปฏิเสธ เลือกชุดที่เป็น localhost/LAN แทน`
+                  : !activeConn ? '- ยังไม่ได้เลือกชุดคีย์ จะใช้ค่าของเซิร์ฟเวอร์ (ต้องเป็นในเครื่องเช่นกัน)' : '- ชุดที่ใช้อยู่ผ่านนโยบาย'}
+              </p>
+            )}
             <Field label="การเชื่อมต่อที่บันทึกไว้">
               {!store.items.length ? (
                 <Hint>ยังไม่มี - กดเพิ่มด้านล่าง ถ้าไม่มีเลยจะใช้คีย์ของเซิร์ฟเวอร์แทน</Hint>

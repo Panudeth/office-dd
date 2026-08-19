@@ -224,12 +224,14 @@ classifier ปฏิเสธคำถามจะได้มีโมเดล
 |---|---|---|
 | **MCP** | `POST /api/mcp` + `Authorization: Bearer <token>` (Streamable HTTP) - Claude Code: `claude mcp add --transport http visual-company https://<โดเมน>/api/mcp --header "Authorization: Bearer <token>"` | internal: `list_departments`, `ask_department` (เร็ว), `hold_meeting` (ช้า), `get_meeting`, `list_meetings` · public: `ask_customer_service` เท่านั้น · โมเดลช้า -> ได้ `status: running` + meetingId แล้วเรียกซ้ำ |
 | **API** | `POST /api/office/ask` `{ question, deptIds?, mode?, publicOnly? }` | token public ได้เฉพาะ `answer` ที่กรองแล้ว |
-| **LINE** | ตั้ง `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_OFFICE_ID` แล้วชี้ Webhook ไป `/api/line/webhook` | ลูกค้าเสมอ - ตอบทันที "รับเรื่องแล้ว" แล้ว push คำตอบตาม |
+| **LINE** | **ตั้งจากหน้าเว็บ**: แผนก → Webhook เข้า → LINE Official Account (ใส่ channel secret + access token) → ได้ URL `/api/line/webhook/<id>` ไปวางใน LINE console · (แบบเก่า `.env` + `/api/line/webhook` ยังใช้ได้) | ลูกค้าเสมอ - ตอบทันที "รับเรื่องแล้ว" แล้ว push คำตอบตาม · ผูกได้หลาย OA หลายแผนก |
 
 โมเดลที่ช่องทางเหล่านี้ใช้: **ตามที่ตั้งในหน้าเว็บ** ("คีย์ของฉัน" + โมเดลรายคนในแผงพนักงาน) - เจ้าของ/exec บันทึกในเบราว์เซอร์แล้วระบบ sync ขึ้นตาราง `office_llm` (คีย์เข้ารหัส AES-256-GCM ด้วย secret ของเซิร์ฟเวอร์) ให้ `runHeadless` โหลดไปใช้ ออฟฟิศที่ยังไม่เคย sync จะถอยไปใช้ `.env` (`LLM_PROVIDER`, `OPENAI_BASE_URL`, `OPENAI_MODEL`) ดูสถานะ/ลบได้ในหน้าออฟฟิศ ส่วน "การเชื่อมต่อภายนอก"
 
 
-### ตั้งค่า LINE Official Account (ลูกค้าทัก LINE -> PR ตอบ)
+### ตั้งค่า LINE Official Account (ลูกค้าทัก LINE -> แผนกรับลูกค้าตอบ)
+
+> ทางลัด (แนะนำ): หน้าเว็บ → **แผนก & Webhook** → เลือกแผนกที่จะตอบลูกค้า → แท็บ **Webhook เข้า** → **เพิ่ม LINE OA** → ใส่ Channel secret + access token → ก็อป Webhook URL ไปวางใน LINE console (ข้อ 6) - secret ถูกเข้ารหัสในฐานข้อมูล ไม่ต้องแตะ `.env` และผูกได้หลาย OA/หลายแผนก · ข้อ 4 ด้านล่างคือแบบ `.env` ของเดิม
 
 1. **สร้าง channel** ที่ [developers.line.biz/console](https://developers.line.biz/console/) -> Create a new provider (ชื่อบริษัท) -> Create a Messaging API channel (ต้องผูกกับ LINE Official Account - คอนโซลจะพาไปสร้างให้ที่ manager.line.biz ถ้ายังไม่มี)
 2. **เอาค่า 2 ตัว**: แท็บ *Basic settings* -> **Channel secret** และแท็บ *Messaging API* -> **Channel access token (long-lived)** กด Issue
@@ -259,11 +261,14 @@ PR เอาผลมา **เขียนใหม่ให้ลูกค้�
 |---|---|---|
 | โปรไฟล์ | ฟิลด์ที่ติดป้าย "ลูกค้าเห็น" (ชื่อ ทำอะไร ลูกค้าคือใคร ภาพรวมสินค้า โทน ช่องทางติดต่อ) | รายได้ ขนาด นิติบุคคล เส้นแดง เป้าหมาย ปัญหา |
 | สินค้า | ชื่อ รายละเอียด ราคา | หมายเหตุ (ต้นทุน/มาร์จิน/สถานะ) |
-| โน้ตแผนก | เฉพาะของแผนกรับลูกค้า (PR = สคริปต์ operator) | ทุกแผนก |
+| โน้ตแผนก | เฉพาะช่อง **"ข้อมูลที่ตอบลูกค้าได้"** ของแผนกที่ตอบ (ข้อมูลบริษัท → แผนก → ช่องล่าง) | โน้ตภายใน + ที่ตอบลูกค้าได้ ทุกแผนก |
 | เอกสาร | เฉพาะที่ติด "สาธารณะ" ตอนอัปโหลด | ทั้งหมด (ค่าเริ่มต้น) |
 | สมุด/บทถก | ไม่เห็น | ทั้งหมด |
 
 **ถามแผนกโดยตรง** จากหน้าเว็บก็ได้ - dropdown เหนือช่องแชท เลือกแผนก แล้วหัวหน้าแผนกตอบคนเดียว (คำขอ LLM ครั้งเดียว) ไม่ต้องผ่านหน้าวาระ
+
+**นโยบาย "เฉพาะโมเดลในเครื่อง/LAN"** (ปุ่ม เชื่อมต่อ → นโยบายโมเดลของออฟฟิศ - เจ้าของเท่านั้น): เปิดแล้วเซิร์ฟเวอร์ปฏิเสธทุกคำขอที่ชุดคีย์ไม่ได้ชี้ไป localhost/LAN/.local (Ollama, LM Studio) - ครอบประชุมจากหน้าเว็บ, MCP/API/LINE, webhook เข้า, และการฝังเอกสาร ข้อมูลบริษัทไม่ออกจากเครื่องแม้ใครจะใส่คีย์ข้างนอกมา (`office.llm_policy` - รัน schema.sql รอบล่าสุด)
+ช่องทางลูกค้ามี rate limit: 8 ข้อความ/นาที ต่อคน · 60/นาที และ 600/ชั่วโมง ต่อออฟฟิศ
 
 **ความปลอดภัย**: token ออฟฟิศเก็บเป็น hash, ใครถือ token ถามได้และอ่านบันทึกได้ (เพิกถอนได้จากหน้าเดียวกัน)
 LINE ใช้ `publicOnly` - เห็นเฉพาะที่เปิดเผยได้ แต่ LLM ก็ยังโดน prompt injection ได้ อย่าใส่ความลับในโปรไฟล์/สินค้า/โน้ต PR
@@ -327,6 +332,21 @@ office ไม่รู้จัก vendor: adapter ทั้งหมดอย�
 5. เดือนถัดไป agent จะเห็นบิลเดือนก่อนในเอกสารของแผนกเอง
 
 เคส "IT Support รับ bug จาก logger แล้วแจ้ง Teams" ใช้โครงเดียวกัน - ต่างแค่ playbook กับ URL ที่ logger ยิงมา
+
+### บิล GCP -> แผนก (ละเอียด): เปิด Billing export แล้วรัน `scripts/gcp-billing-inbox.mjs`
+
+1. **สร้าง dataset** ใน BigQuery: console.cloud.google.com/bigquery → โปรเจกต์ที่จะเก็บ → Create dataset → id เช่น `billing` (region ใกล้ตัว เช่น asia-southeast1) - ปิด table expiration
+2. **เปิด export**: console.cloud.google.com/billing → เลือก Billing account → **Billing export** → แท็บ *BigQuery export* → **Standard usage cost** → Edit settings → เลือกโปรเจกต์ + dataset `billing` → Save
+   (ต้องเป็น Billing Account Administrator/Costs Manager และมีสิทธิ์สร้างตารางใน dataset · เปิด BigQuery API ของโปรเจกต์นั้นด้วย)
+3. รอ ~24 ชม. จะมีตาราง `gcp_billing_export_v1_XXXXXX_XXXXXX_XXXXXX` (ข้อมูลเริ่มนับตั้งแต่วันที่เปิด ไม่ย้อนหลัง)
+4. **สิทธิ์อ่าน**: บัญชี/service account ที่จะรันสคริปต์ต้องมี `BigQuery Data Viewer` บน dataset + `BigQuery Job User` บนโปรเจกต์ที่ใช้ query
+5. ในออฟฟิศ: สร้างแผนก (เช่น "บัญชี Cloud") → จ้าง 1 คน → แท็บ *Webhook เข้า* สร้าง token ชื่อ **`gcp-billing`** → แท็บ *ส่งออก* เพิ่ม Teams แล้วติ๊กแหล่ง `gcp-billing`
+6. รันสคริปต์ (ในเครื่องต้อง `gcloud auth login` ก่อน):
+   ```
+   GCP_PROJECT=my-proj BQ_TABLE=my-proj.billing.gcp_billing_export_v1_XXXX    OFFICE_INBOX_URL=https://<โดเมน>/api/office/inbox/<deptId> OFFICE_INBOX_TOKEN=vc_...    node scripts/gcp-billing-inbox.mjs
+   ```
+   สคริปต์ query ยอดสุทธิ (cost + credits) แยกบริการ/โปรเจกต์ เดือนนี้เทียบเดือนก่อน หา "พุ่งเกิน ALERT_PCT (20%)" แล้ว POST เข้า inbox พร้อม `ask` ให้แผนกสรุป - มี idempotencyKey ต่อวัน ยิงซ้ำในวันเดียวกันไม่เปิดงานซ้ำ
+7. **ตั้งเวลา**: GitHub Actions cron (`schedule: - cron: '0 2 * * *'` + auth ด้วย `google-github-actions/auth` แบบ Workload Identity แล้ว `run: node scripts/gcp-billing-inbox.mjs`) หรือ Cloud Scheduler → Cloud Run Job ที่มีสคริปต์นี้ · เดือนถัดไป agent จะเห็นบิลเดือนก่อนในเอกสารของแผนกเอง
 
 ## โครงไฟล์
 

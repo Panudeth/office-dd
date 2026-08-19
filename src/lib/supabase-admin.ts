@@ -64,7 +64,7 @@ export type TokenScope = 'internal' | 'public' | 'inbox';
  */
 export async function officeFromToken(
   token: string | null | undefined,
-): Promise<{ officeId: string; scope: TokenScope; deptIds: string[] } | null> {
+): Promise<{ officeId: string; scope: TokenScope; deptIds: string[]; name: string } | null> {
   const c = sbAdmin();
   if (!c || !token) return null;
   const hash = await sha256(token.trim());
@@ -72,15 +72,15 @@ export async function officeFromToken(
   // ห้ามข้าม scope ถ้าคอลัมน์มีอยู่ ไม่งั้น token ลูกค้าจะกลายเป็น internal
   let { data, error } = await c
     .from('office_token')
-    .select('id, office_id, scope, dept_ids')
+    .select('id, office_id, scope, dept_ids, name')
     .eq('token_hash', hash)
     .maybeSingle();
   if (!data && error && /dept_ids/i.test(error.message)) {
-    const r = await c.from('office_token').select('id, office_id, scope').eq('token_hash', hash).maybeSingle();
+    const r = await c.from('office_token').select('id, office_id, scope, name').eq('token_hash', hash).maybeSingle();
     data = r.data as typeof data; error = r.error;
   }
   if (!data && error && /scope/i.test(error.message)) {
-    const legacy = await c.from('office_token').select('id, office_id').eq('token_hash', hash).maybeSingle();
+    const legacy = await c.from('office_token').select('id, office_id, name').eq('token_hash', hash).maybeSingle();
     data = legacy.data as typeof data;
     error = legacy.error ?? error;
   }
@@ -93,7 +93,7 @@ export async function officeFromToken(
   const scope: TokenScope = sc === 'public' ? 'public' : sc === 'inbox' ? 'inbox' : 'internal';
   const rawDepts = (data as { dept_ids?: unknown }).dept_ids;
   const deptIds = Array.isArray(rawDepts) ? rawDepts.filter((d): d is string => typeof d === 'string') : [];
-  return { officeId: data.office_id as string, scope, deptIds };
+  return { officeId: data.office_id as string, scope, deptIds, name: String((data as { name?: unknown }).name ?? '') };
 }
 
 /** เฉพาะ office id - ใช้ที่ที่ไม่สนใจ scope */

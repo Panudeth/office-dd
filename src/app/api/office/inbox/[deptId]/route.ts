@@ -28,7 +28,7 @@ async function auth(req: NextRequest, deptId: string) {
   if (!t) return { error: 'token ไม่ถูกต้อง', status: 401 } as const;
   if (t.scope === 'public') return { error: 'token ลูกค้าใช้กับ inbox ไม่ได้', status: 403 } as const;
   if (t.scope === 'inbox' && !t.deptIds.includes(deptId)) return { error: `token นี้ไม่ได้ผูกกับแผนก ${deptId}`, status: 403 } as const;
-  return { officeId: t.officeId } as const;
+  return { officeId: t.officeId, tokenName: t.name } as const;
 }
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ deptId: string }> }) {
@@ -70,7 +70,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ deptId: st
   const b = wrapped ? obj! : {};
   const data = wrapped ? b.data : raw;
   const str = (v: unknown, n: number) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
-  const source = str(b.source, 120) || str(req.headers.get('x-source'), 120) || str(req.headers.get('user-agent'), 60);
+  // แหล่งข้อมูล: body.source > header X-Source > ชื่อ token (ตั้งตอนสร้าง เช่น "gcp-billing") > user-agent
+  const source = str(b.source, 120) || str(req.headers.get('x-source'), 120) || str(a.tokenName, 120) || str(req.headers.get('user-agent'), 60);
   const intent = b.intent === 'note' ? 'note' : 'task';
   const mode = b.mode === 'roundtable' ? 'roundtable' : b.mode === 'relay' ? 'relay' : 'direct';
   const dataText = dataToText(data, typeof b.text === 'string' ? b.text : undefined);

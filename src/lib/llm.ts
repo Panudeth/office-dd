@@ -78,6 +78,12 @@ export interface ByokInput {
  * ชุดคีย์ที่ผู้ใช้ส่งมาเอง - เฉพาะที่ครบพอจะยิงได้ ไม่ถอยไปใช้ .env
  * ใช้กับชุดที่ถูกผูกกับคน/บทบาท เพราะถ้าชุดนั้นพัง ควรถอยไปชุดถัดไปในลำดับ ไม่ใช่กระโดดไป env
  */
+/** ชุดคีย์นี้ชี้ไปโมเดลในเครื่อง/LAN ไหม (Ollama, LM Studio ผ่าน OpenAI-compatible) - ใช้กับนโยบาย "เฉพาะโมเดลในเครื่อง" */
+export function isLocalCreds(c: Creds | null | undefined): boolean {
+  if (!c) return false;
+  return c.provider === 'openai' && isLocalBase(c.baseUrl || DEFAULT_OPENAI_BASE);
+}
+
 export function byokCreds(byok: ByokInput): Creds | null {
   const wanted = isProvider(byok.provider) ? byok.provider : null;
   // ปกติต้องมีคีย์ถึงจะนับว่าผู้ใช้เอาของตัวเองมา ยกเว้น OpenAI-compatible ที่ชี้ปลายทางเอง

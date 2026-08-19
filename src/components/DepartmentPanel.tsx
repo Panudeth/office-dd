@@ -47,6 +47,8 @@ interface Props {
   headcount: number;
   onSave: (def: DepartmentDef) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  /** กลับไปหน้ารวมแผนก */
+  onBack?: () => void;
 }
 
 const CHANNEL_LABEL: Record<ChannelKind, string> = {
@@ -60,7 +62,7 @@ const COLORS = ['#9a5fc0', '#3fa06a', '#4a7fd0', '#e0a13f', '#e07aa8', '#5cbcc8'
 
 const emptyDef = (): DepartmentDef => ({ id: '', nameTh: '', shortTh: '', color: COLORS[6], description: '', keywords: [], lenses: {}, skillText: '', playbook: '' });
 
-export default function DepartmentPanel({ open, onClose, deptId, officeId, canEdit, llmHeaders, headcount, onSave, onDelete }: Props) {
+export default function DepartmentPanel({ open, onClose, deptId, officeId, canEdit, llmHeaders, headcount, onSave, onDelete, onBack }: Props) {
   const isNew = !deptId;
   const preset = deptId ? PRESET_BY_ID.get(deptId) : undefined;
   const [tab, setTab] = useState('main');
@@ -96,7 +98,7 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
     try {
       const res = await fetch('/api/department/draft', {
         method: 'POST', headers: { 'Content-Type': 'application/json', ...llmHeaders },
-        body: JSON.stringify({ name: def.nameTh, description: def.description, existingIds: [...DEPT_BY_ID.keys()], ...(isNew ? {} : { id: def.id }) }),
+        body: JSON.stringify({ name: def.nameTh, description: def.description, existingIds: [...DEPT_BY_ID.keys()], ...(isNew ? {} : { id: def.id }), officeId: officeId ?? undefined }),
       });
       const data = (await res.json()) as { draft?: DepartmentDef; error?: string };
       if (!res.ok || !data.draft) throw new Error(data.error ?? `HTTP ${res.status}`);
@@ -234,6 +236,7 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
                 <Textarea rows={5} value={def.playbook ?? ''} onChange={(e) => set('playbook', e.target.value)} disabled={!canEdit} maxLength={MAX_PLAYBOOK_CHARS}
                   placeholder={'1. อ่านข้อมูล จัดระดับความรุนแรง\n2. สรุป: เกิดอะไร กระทบใคร ต้องทำอะไรใน 24 ชม.\n3. ถ้า severity ≥ high ระบุ "แจ้งทีมทันที" ไว้บรรทัดแรก\n4. ตอบสั้น อ่านในแชทได้จบใน 10 บรรทัด'} />
               </Field>
+              {!isNew && officeId && <LineInboundSection officeId={officeId} deptId={def.id} canEdit={canEdit} />}
               {!isNew && officeId ? <InboxSection officeId={officeId} deptId={def.id} canEdit={canEdit} /> : (
                 <Hint>ใช้ได้เมื่อล็อกอินและเลือกออฟฟิศ <InfoTip>ต้องตั้ง Supabase และ SUPABASE_SECRET_KEY บนเซิร์ฟเวอร์ - webhook เข้าเก็บและประมวลผลฝั่งเซิร์ฟเวอร์</InfoTip></Hint>
               )}
@@ -254,6 +257,7 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
           <p className={`rounded-box border px-2 py-1 text-[11px] ${err ? 'border-rug-dark bg-[#3f2018] text-rug-lite' : 'border-carpet-dark bg-[#22401f] text-carpet-lite'}`}>{err ?? ok}</p>
         )}
         <div className="flex items-center gap-2 pt-1">
+          {onBack && <Button size="sm" variant="outline" onClick={onBack} title="กลับไปหน้ารวมแผนก">← แผนกทั้งหมด</Button>}
           {!isNew && canEdit && (
             <Button size="sm" variant="danger" onClick={remove} disabled={busy !== null || (!overrideOfPreset && headcount > 0)}
               title={!overrideOfPreset && headcount > 0 ? `มีพนักงาน ${headcount} คนอยู่ - เลิกจ้างก่อน` : overrideOfPreset ? 'ล้างค่าทับ กลับเป็นแผนกมาตรฐาน' : 'ลบแผนกนี้ (พร้อม channel/webhook ของมัน)'}>
@@ -271,6 +275,145 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
   );
 }
 
+
+/* ============================================================
+   ขาเข้าแบบ LINE Official Account - ลูกค้าทัก LINE แล้วแผนกนี้ตอบ (customer flow)
+   secret/token ส่งไปเก็บผ่าน API (เข้ารหัสฝั่งเซิร์ฟเวอร์) หน้าเว็บไม่เห็นค่าจริงอีก
+   ============================================================ */
+interface InboundMasked { id: string; dept_id: string; kind: string; label: string; enabled: boolean; created_at: string; hasSecret: boolean; hasToken: boolean; ack: string }
+
+function LineInboundSection({ officeId, deptId, canEdit }: { officeId: string; deptId: string; canEdit: boolean }) {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const [rows, setRows] = useState<InboundMasked[]>([]);
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<InboundMasked | null>(null);
+  const [label, setLabel] = useState('');
+  const [secret, setSecret] = useState('');
+  const [token, setToken] = useState('');
+  const [ack, setAck] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const hdr = async () => {
+    const t = await accessToken();
+    return { 'Content-Type': 'application/json', ...(t ? { 'x-sb-token': t } : {}) };
+  };
+  const load = async () => {
+    try {
+      const res = await fetch(`/api/office/inbound?officeId=${officeId}&deptId=${deptId}`, { headers: await hdr() });
+      const data = (await res.json()) as { inbound?: InboundMasked[]; error?: string };
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setRows(data.inbound ?? []);
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+  };
+  useEffect(() => { void load(); }, [officeId, deptId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const reset = () => { setEditing(null); setLabel(''); setSecret(''); setToken(''); setAck(''); setOpen(false); };
+  const startEdit = (r: InboundMasked) => { setEditing(r); setLabel(r.label); setSecret(''); setToken(''); setAck(r.ack); setOpen(true); setErr(null); };
+  const save = async () => {
+    setBusy('save'); setErr(null);
+    try {
+      const res = await fetch('/api/office/inbound', {
+        method: 'POST', headers: await hdr(),
+        body: JSON.stringify({ officeId, deptId, ...(editing ? { id: editing.id } : {}), label, secret, token, ack }),
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      reset();
+      await load();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(null); }
+  };
+  const toggle = async (r: InboundMasked) => {
+    setBusy(r.id); setErr(null);
+    try {
+      const res = await fetch('/api/office/inbound', { method: 'POST', headers: await hdr(), body: JSON.stringify({ officeId, deptId, id: r.id, label: r.label, enabled: !r.enabled }) });
+      if (!res.ok) throw new Error(((await res.json()) as { error?: string }).error ?? `HTTP ${res.status}`);
+      await load();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(null); }
+  };
+  const remove = async (id: string) => {
+    setBusy(id); setErr(null);
+    try {
+      const res = await fetch('/api/office/inbound', { method: 'DELETE', headers: await hdr(), body: JSON.stringify({ officeId, id }) });
+      if (!res.ok) throw new Error(((await res.json()) as { error?: string }).error ?? `HTTP ${res.status}`);
+      await load();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(null); }
+  };
+  const copy = async (k: string, text: string) => {
+    try { await navigator.clipboard.writeText(text); setCopied(k); setTimeout(() => setCopied(null), 1500); } catch { /* ไม่มี clipboard */ }
+  };
+  const canSave = !!(editing ? true : secret.trim() && token.trim());
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-box border border-ink-600 bg-ink-900/40 p-2">
+      <div className="flex items-center gap-2">
+        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-wall-mid">
+          LINE Official Account
+          <InfoTip>
+            ลูกค้าทัก LINE OA แล้ว<b>แผนกนี้</b>ตอบ (ตอบรับทันที แล้ว push คำตอบจริงตาม - ลูกค้าเห็นเฉพาะข้อมูลสาธารณะ)<br />
+            ค่าจาก LINE Developers → channel: <b>Basic settings → Channel secret</b> และ <b>Messaging API → Channel access token (long-lived)</b><br />
+            บันทึกแล้วจะได้ Webhook URL ไปวางใน Messaging API → Webhook URL → Verify → เปิด Use webhook · ปิด Auto-reply ของ OA ด้วย<br />
+            token เดียวกันถูกใช้กับช่องส่งออกแบบ LINE ของแผนกนี้ให้อัตโนมัติ
+          </InfoTip>
+        </span>
+        <span className="flex-1" />
+        {canEdit && !open && <Button size="sm" variant="outline" onClick={() => { reset(); setOpen(true); }}><Plus /> เพิ่ม LINE OA</Button>}
+      </div>
+      {rows.length === 0 && !open && <Hint className="text-[10px]">ยังไม่ได้ผูก LINE OA กับแผนกนี้</Hint>}
+      {rows.map((r) => {
+        const url = `${origin}/api/line/webhook/${r.id}`;
+        return (
+          <div key={r.id} className={`flex flex-col gap-1 rounded-box border bg-ink-700 px-2 py-1 text-[11px] ${editing?.id === r.id ? 'border-brass' : 'border-ink-600'}`}>
+            <div className="flex items-center gap-2">
+              <Badge variant={r.enabled ? 'good' : 'default'}>LINE</Badge>
+              <span className="text-parchment">{r.label}</span>
+              {(!r.hasSecret || !r.hasToken) && <Badge variant="bad">secret/token ไม่ครบ</Badge>}
+              <span className="flex-1" />
+              {canEdit && (
+                <>
+                  <Button size="sm" variant="ghost" onClick={() => startEdit(r)} disabled={busy !== null}>แก้ไข</Button>
+                  <Button size="sm" variant="ghost" onClick={() => toggle(r)} disabled={busy !== null}>{r.enabled ? 'ปิด' : 'เปิด'}</Button>
+                  <Button size="sm" variant="ghost" onClick={() => remove(r.id)} disabled={busy !== null} title="ลบ"><Trash2 /></Button>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="shrink-0 text-dim">Webhook URL</span>
+              <code className="min-w-0 flex-1 truncate rounded-box bg-ink-900 px-2 py-0.5 text-parchment-2">{url}</code>
+              <Button size="sm" variant="outline" onClick={() => copy(r.id, url)}>{copied === r.id ? <Check /> : <Copy />}</Button>
+            </div>
+          </div>
+        );
+      })}
+      {open && canEdit && (
+        <div className="flex flex-col gap-1.5 rounded-box border border-dashed border-ink-500 p-2">
+          <div className="grid grid-cols-[1fr_1fr] gap-2">
+            <Field label="ชื่อเรียก"><Input className="h-8" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="เช่น LINE ร้านหลัก" maxLength={80} /></Field>
+            <Field label="ข้อความตอบรับทันที" info="ส่งกลับทันทีที่ลูกค้าทัก ระหว่างรอคำตอบจริง - ว่าง = ใช้ข้อความมาตรฐาน">
+              <Input className="h-8" value={ack} onChange={(e) => setAck(e.target.value)} placeholder="รับเรื่องแล้วค่ะ กำลังหาข้อมูลให้ สักครู่นะคะ" maxLength={300} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-[1fr_1fr] gap-2">
+            <Field label="Channel secret" info="LINE Developers → channel → Basic settings → Channel secret" hint={editing ? 'ว่าง = คงค่าเดิม' : undefined}>
+              <Input className="h-8" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} />
+            </Field>
+            <Field label="Channel access token" info="LINE Developers → Messaging API → Channel access token (long-lived) → Issue" hint={editing ? 'ว่าง = คงค่าเดิม' : undefined}>
+              <Input className="h-8" type="password" value={token} onChange={(e) => setToken(e.target.value)} />
+            </Field>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="primary" onClick={save} disabled={busy !== null || !canSave}>{busy === 'save' ? <LoaderCircle className="animate-spin" /> : <Check />} {editing ? 'บันทึกการแก้ไข' : 'บันทึก'}</Button>
+            <Button size="sm" variant="outline" onClick={reset} disabled={busy !== null}>ยกเลิก</Button>
+            {!editing && <span className="text-[10px] text-dim">บันทึกแล้วจะได้ Webhook URL ไปวางใน LINE console</span>}
+          </div>
+        </div>
+      )}
+      {err && <p className="text-[11px] text-rug-lite">{err}</p>}
+    </div>
+  );
+}
+
 /* ============================================================
    Webhook เข้า: URL + token + รายการล่าสุด
    ============================================================ */
@@ -283,6 +426,8 @@ function InboxSection({ officeId, deptId, canEdit }: { officeId: string; deptId:
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [rows, setRows] = useState<InboxRow[]>([]);
+  /** ชื่อแหล่งข้อมูลของ token ที่จะสร้าง (เช่น gcp-billing) - ใช้เป็น source ของทุกอย่างที่ยิงผ่าน token นี้ */
+  const [srcName, setSrcName] = useState('');
 
   const hdr = async () => {
     const t = await accessToken();
@@ -298,16 +443,35 @@ function InboxSection({ officeId, deptId, canEdit }: { officeId: string; deptId:
     try { setRows((await listInbox(officeId, 100)).filter((r) => r.dept_id === deptId).slice(0, 20)); } catch { /* ตารางยังไม่มี */ }
   };
   useEffect(() => { void load(); }, [officeId, deptId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // มีรายการที่ยังทำงานอยู่ -> ตามดูทุก 3 วิ (โมเดลในเครื่องอาจใช้เวลาเป็นนาที)
+  const running = rows.some((r) => r.status === 'received' || r.status === 'running');
+  useEffect(() => {
+    if (!running) return;
+    const iv = window.setInterval(() => { void load(); }, 3000);
+    return () => window.clearInterval(iv);
+  }, [running]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [testing, setTesting] = useState(false);
+  const fireTest = async () => {
+    setTesting(true); setErr(null);
+    try {
+      // ยิงในนามแหล่งที่พิมพ์ไว้ (ถ้ามี) - จะได้ทดสอบว่าช่องส่งออกที่กรองแหล่งรับถูกไหม
+      const res = await fetch('/api/office/inbox/test', { method: 'POST', headers: await hdr(), body: JSON.stringify({ officeId, deptId, source: srcName.trim() || undefined }) });
+      const data = (await res.json()) as { inboxId?: string; error?: string };
+      if (!res.ok || !data.inboxId) throw new Error(data.error ?? `HTTP ${res.status}`);
+      await load();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setTesting(false); }
+  };
 
   const create = async () => {
     setBusy(true); setErr(null); setFresh(null);
     try {
       const res = await fetch('/api/office/token', {
-        method: 'POST', headers: await hdr(), body: JSON.stringify({ officeId, name: `inbox ${deptId}`, scope: 'inbox', deptIds: [deptId] }),
+        method: 'POST', headers: await hdr(), body: JSON.stringify({ officeId, name: srcName.trim() || `inbox ${deptId}`, scope: 'inbox', deptIds: [deptId] }),
       });
       const data = (await res.json()) as { token?: string; error?: string };
       if (!res.ok || !data.token) throw new Error(data.error ?? `HTTP ${res.status}`);
       setFresh(data.token);
+      setSrcName('');
       await load();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
@@ -343,12 +507,23 @@ function InboxSection({ officeId, deptId, canEdit }: { officeId: string; deptId:
       </div>
 
       <div className="flex items-center gap-2">
-        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-wall-mid">token <InfoTip>token นี้ยิงเข้าได้เฉพาะแผนกนี้ (scope inbox) โชว์ครั้งเดียวตอนสร้าง เซิร์ฟเวอร์เก็บแค่ hash - หายแล้วสร้างใหม่ ใช้ token internal จากหน้า "เชื่อมต่อ" แทนก็ได้</InfoTip></span>
-        {canEdit && <Button size="sm" onClick={create} disabled={busy}><KeyRound /> สร้าง token</Button>}
+        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-wall-mid">
+          token ต่อแหล่งข้อมูล
+          <InfoTip>ตั้งชื่อตามระบบที่จะเรียกเข้ามา (gcp-billing, sentry, n8n ...) แล้วสร้าง token ให้ระบบนั้นโดยเฉพาะ - สร้างได้หลายอัน<br />
+            ทุกอย่างที่ยิงผ่าน token ไหนจะติด source = ชื่อนั้นอัตโนมัติ (เห็นในรายการด้านล่าง ในสมุดเลขาฯ และใช้เลือกช่องส่งออก) เพิกถอนทีละอันได้โดยไม่กระทบระบบอื่น<br />
+            token ยิงเข้าได้เฉพาะแผนกนี้ โชว์ครั้งเดียว หายแล้วสร้างใหม่</InfoTip>
+        </span>
+        {canEdit && (
+          <>
+            <Input className="h-7 w-52 px-2 text-[11px]" value={srcName} onChange={(e) => setSrcName(e.target.value)} placeholder="ชื่อระบบที่จะเรียกเข้ามา เช่น gcp-billing" maxLength={60}
+              onKeyDown={(e) => { if (e.key === 'Enter' && srcName.trim()) void create(); }} />
+            <Button size="sm" onClick={create} disabled={busy || !srcName.trim()} title={srcName.trim() ? `สร้าง token ชื่อ "${srcName.trim()}"` : 'ตั้งชื่อก่อน'}><KeyRound /> สร้าง token</Button>
+          </>
+        )}
       </div>
       {fresh && (
         <div className="rounded-box border-2 border-brass/60 bg-wood-deep/50 p-2 text-[11px]">
-          <div className="mb-1 text-brass-lite">token ใหม่ - โชว์ครั้งเดียว</div>
+          <div className="mb-1 text-brass-lite">token ใหม่{tokens?.[0] ? ` สำหรับ "${tokens[0].name}"` : ''} - โชว์ครั้งเดียว</div>
           <div className="flex items-center gap-1.5">
             <code className="min-w-0 flex-1 truncate rounded-box bg-ink-900 px-2 py-1 text-parchment">{fresh}</code>
             <Button size="sm" variant="outline" onClick={() => copy('tok', fresh)}>{copied === 'tok' ? <Check /> : <Copy />}</Button>
@@ -357,6 +532,7 @@ function InboxSection({ officeId, deptId, canEdit }: { officeId: string; deptId:
       )}
       {tokens && tokens.length > 0 && (
         <ul className="flex flex-col gap-1">
+          <li className="text-[10px] text-dim">token ที่ใช้อยู่ {tokens.length} อัน (แต่ละอัน = 1 ระบบที่เรียกเข้ามา)</li>
           {tokens.map((t) => (
             <li key={t.id} className="flex items-center gap-2 rounded-box border border-ink-600 bg-ink-700 px-2 py-1 text-[11px]">
               <KeyRound className="size-3 text-dim" />
@@ -374,7 +550,18 @@ function InboxSection({ officeId, deptId, canEdit }: { officeId: string; deptId:
       </details>
       {err && <p className="text-[11px] text-rug-lite">{err}</p>}
 
-      <div className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-wall-mid">ที่เข้ามาล่าสุด</div>
+      <div className="mt-1 flex items-center gap-2">
+        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-wall-mid">
+          ที่เข้ามาล่าสุด
+          {running && <LoaderCircle className="size-3 animate-spin text-brass" />}
+        </span>
+        <span className="flex-1" />
+        {canEdit && (
+          <Button size="sm" variant="outline" onClick={fireTest} disabled={testing || running} title={`ส่งข้อมูลตัวอย่างเข้าแผนกนี้ผ่านเส้นทางเดียวกับ webhook จริง${srcName.trim() ? ` ในนามแหล่ง "${srcName.trim()}"` : ''} แล้วดูผลด้านล่าง (ส่งออกไปช่องที่รับแหล่งนี้)`}>
+            {testing ? <LoaderCircle className="animate-spin" /> : <Send />} ยิงทดสอบ
+          </Button>
+        )}
+      </div>
       {rows.length === 0 ? <Hint className="text-[10px]">ยังไม่มีอะไรยิงเข้ามา</Hint> : (
         <ul className="flex flex-col gap-1">
           {rows.map((r) => (
@@ -409,12 +596,45 @@ function ChannelSection({ officeId, deptId, canEdit }: { officeId: string; deptI
   const [to, setTo] = useState('');
   const [token, setToken] = useState('');
   const [secret, setSecret] = useState('');
+  /** รับรายงานจากแหล่งไหน (คั่นจุลภาค) - ว่าง = ทุกแหล่ง */
+  const [sources, setSources] = useState('');
+  /** ช่องที่กำลังแก้ - null = ฟอร์มเพิ่มใหม่ */
+  const [editing, setEditing] = useState<DeptChannel | null>(null);
+  const resetForm = () => { setEditing(null); setLabel(''); setUrl(''); setTo(''); setToken(''); setSecret(''); setSources(''); };
+  const startEdit = (c: DeptChannel) => {
+    setEditing(c); setKind(c.kind); setLabel(c.label);
+    setUrl(c.config.url ?? ''); setTo(c.config.to ?? ''); setToken(c.config.token ?? ''); setSecret(c.config.secret ?? ''); setSources(c.config.sources ?? '');
+    setErr(null); setMsg(null);
+  };
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   const load = async () => {
     try { setRows((await listChannels(officeId)).filter((c) => c.dept_id === deptId)); } catch (e) { setErr(sbError(e)); }
+    // แหล่งที่เลือกได้ = ชื่อ token ขาเข้าของแผนกนี้ + แหล่งที่เคยยิงเข้ามาจริง (ไม่ต้องพิมพ์เอง)
+    const found = new Set<string>();
+    try {
+      const t = await accessToken();
+      const res = await fetch(`/api/office/token?officeId=${officeId}`, { headers: t ? { 'x-sb-token': t } : {} });
+      const data = (await res.json()) as { tokens?: TokenRow[] };
+      for (const tk of data.tokens ?? []) if (tk.scope === 'inbox' && (tk.dept_ids ?? []).includes(deptId) && tk.name) found.add(tk.name.trim());
+    } catch { /* ไม่มีสิทธิ์/ยังไม่มี */ }
+    try { for (const r of await listInbox(officeId, 200)) if (r.dept_id === deptId && r.source) found.add(r.source.trim()); } catch { /* ตารางยังไม่มี */ }
+    // LINE OA ที่ผูกกับแผนกนี้ก็เป็นแหล่ง (บทสนทนาลูกค้าถูกส่งต่อในชื่อ OA)
+    try {
+      const t = await accessToken();
+      const res = await fetch(`/api/office/inbound?officeId=${officeId}&deptId=${deptId}`, { headers: t ? { 'x-sb-token': t } : {} });
+      const data = (await res.json()) as { inbound?: { label: string }[] };
+      for (const r of data.inbound ?? []) if (r.label) found.add(r.label.trim());
+    } catch { /* ไม่มีสิทธิ์/ยังไม่มี */ }
+    setKnownSources([...found].filter(Boolean).sort());
+  };
+  const [knownSources, setKnownSources] = useState<string[]>([]);
+  const chosen = sources.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+  const toggleSource = (name: string) => {
+    const next = chosen.includes(name) ? chosen.filter((s) => s !== name) : [...chosen, name];
+    setSources(next.join(', '));
   };
   useEffect(() => { void load(); }, [officeId, deptId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -424,12 +644,23 @@ function ChannelSection({ officeId, deptId, canEdit }: { officeId: string; deptI
   const add = async () => {
     setBusy('add'); setErr(null); setMsg(null);
     try {
-      const config: Record<string, string> = needUrl
-        ? { url: url.trim(), ...(kind === 'webhook' && secret.trim() ? { secret: secret.trim() } : {}) }
-        : { to: to.trim(), ...(token.trim() ? { token: token.trim() } : {}) };
-      await saveChannel(officeId, { dept_id: deptId, kind, label: label.trim() || CHANNEL_LABEL[kind].split(' ')[0], config, events: ['report'], enabled: true });
-      setLabel(''); setUrl(''); setTo(''); setToken(''); setSecret('');
+      const config: Record<string, string> = {
+        ...(needUrl
+          ? { url: url.trim(), ...(kind === 'webhook' && secret.trim() ? { secret: secret.trim() } : {}) }
+          : { to: to.trim(), ...(token.trim() ? { token: token.trim() } : {}) }),
+        ...(sources.trim() ? { sources: sources.split(/[,\n]/).map((s) => s.trim()).filter(Boolean).join(', ') } : {}),
+      };
+      const saved = await saveChannel(officeId, {
+        ...(editing ? { id: editing.id } : {}),
+        dept_id: deptId, kind, label: label.trim() || CHANNEL_LABEL[kind].split(' ')[0], config,
+        events: editing?.events ?? ['report'], enabled: editing?.enabled ?? true,
+      });
+      resetForm();
       await load();
+      setBusy(null);
+      // เพิ่มแล้วยิงทดสอบให้เลย - รู้ทันทีว่า URL ใช้ได้ไหม
+      await test(saved.id);
+      return;
     } catch (e) { setErr(sbError(e)); } finally { setBusy(null); }
   };
   const remove = async (id: string) => {
@@ -469,17 +700,19 @@ function ChannelSection({ officeId, deptId, canEdit }: { officeId: string; deptI
       {rows.length === 0 ? <Hint className="text-[10px]">ยังไม่มีช่องส่งออก</Hint> : (
         <ul className="flex flex-col gap-1">
           {rows.map((c) => (
-            <li key={c.id} className="flex items-center gap-2 rounded-box border border-ink-600 bg-ink-700 px-2 py-1 text-[11px]">
+            <li key={c.id} className={`flex items-center gap-2 rounded-box border bg-ink-700 px-2 py-1 text-[11px] ${editing?.id === c.id ? 'border-brass' : 'border-ink-600'}`}>
               <Webhook className="size-3 text-dim" />
               <Badge variant={c.enabled ? 'good' : 'default'}>{c.kind}</Badge>
               <span className="truncate text-parchment">{c.label}</span>
               <span className="truncate text-dim">{c.kind === 'line' ? `→ ${c.config.to}` : c.config.url?.replace(/^https?:\/\//, '').slice(0, 40)}</span>
+              <Badge className="max-w-40 shrink-0 truncate whitespace-nowrap" title={c.config.sources ? `รับจาก: ${c.config.sources}` : 'รับทุกแหล่ง'}>{c.config.sources ? `จาก ${c.config.sources}` : 'ทุกแหล่ง'}</Badge>
               <span className="flex-1" />
-              <Button size="sm" variant="outline" onClick={() => test(c.id)} disabled={busy !== null || !c.enabled} title="ส่งข้อความทดสอบ">
-                {busy === `test:${c.id}` ? <LoaderCircle className="animate-spin" /> : <Send />}
+              <Button size="sm" variant="outline" onClick={() => test(c.id)} disabled={busy !== null || !c.enabled} title="ส่งข้อความทดสอบไปที่ช่องนี้">
+                {busy === `test:${c.id}` ? <LoaderCircle className="animate-spin" /> : <Send />} ทดสอบ
               </Button>
               {canEdit && (
                 <>
+                  <Button size="sm" variant="ghost" onClick={() => startEdit(c)} disabled={busy !== null} title="แก้ไขชื่อ/URL">แก้ไข</Button>
                   <Button size="sm" variant="ghost" onClick={() => toggle(c)} disabled={busy !== null}>{c.enabled ? 'ปิด' : 'เปิด'}</Button>
                   <Button size="sm" variant="ghost" onClick={() => remove(c.id)} disabled={busy !== null} title="ลบ"><Trash2 /></Button>
                 </>
@@ -520,7 +753,32 @@ function ChannelSection({ officeId, deptId, canEdit }: { officeId: string; deptI
               <Field label="channel access token" info="secret ของ Messaging API - ว่างไว้ = ใช้ LINE_CHANNEL_ACCESS_TOKEN ที่ตั้งบนเซิร์ฟเวอร์"><Input className="h-8" value={token} onChange={(e) => setToken(e.target.value)} type="password" /></Field>
             </div>
           )}
-          <div><Button size="sm" onClick={add} disabled={busy !== null || !valid}>{busy === 'add' ? <LoaderCircle className="animate-spin" /> : <Plus />} เพิ่มช่อง</Button></div>
+          <Field label="รับรายงานจากแหล่งไหน" info="แหล่ง = token ขาเข้าที่ตั้งชื่อไว้ / LINE OA ที่ผูกกับแผนก (บทสนทนาลูกค้าจะถูกส่งต่อมาในชื่อ OA) / ค่า source ที่ระบบข้างนอกส่งมา - เลือกได้หลายอัน ช่องนี้จะได้เฉพาะรายงานจากแหล่งที่ติ๊ก · ทุกแหล่ง = ไม่กรอง (รวมแชท LINE ด้วย)">
+            <div className="flex flex-wrap items-center gap-1">
+              <button type="button" onClick={() => setSources('')}
+                className={`rounded-box border px-2 py-0.5 text-[11px] ${chosen.length === 0 ? 'border-carpet bg-[#22401f] text-carpet-lite' : 'border-ink-500 bg-ink-800 text-dim hover:border-brass'}`}>
+                ทุกแหล่ง
+              </button>
+              {knownSources.map((s) => (
+                <button key={s} type="button" onClick={() => toggleSource(s)}
+                  className={`rounded-box border px-2 py-0.5 text-[11px] ${chosen.includes(s) ? 'border-carpet bg-[#22401f] text-carpet-lite' : 'border-ink-500 bg-ink-800 text-dim hover:border-brass'}`}>
+                  {s}
+                </button>
+              ))}
+              {chosen.filter((s) => !knownSources.includes(s)).map((s) => (
+                <button key={s} type="button" onClick={() => toggleSource(s)} title="แหล่งที่ตั้งไว้แต่ยังไม่มี token/ข้อมูลเข้า"
+                  className="rounded-box border border-brass/60 bg-[#22401f] px-2 py-0.5 text-[11px] text-carpet-lite">{s} ×</button>
+              ))}
+              {knownSources.length === 0 && <span className="text-[10px] text-dim">ยังไม่มีแหล่ง - ไปสร้าง token หรือผูก LINE OA ในแท็บ "Webhook เข้า" ก่อน</span>}
+            </div>
+          </Field>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="primary" onClick={add} disabled={busy !== null || !valid}>
+              {busy === 'add' ? <LoaderCircle className="animate-spin" /> : editing ? <Check /> : <Plus />} {editing ? 'บันทึกการแก้ไข + ทดสอบ' : 'เพิ่มช่อง + ทดสอบ'}
+            </Button>
+            {editing && <Button size="sm" variant="outline" onClick={resetForm} disabled={busy !== null}>ยกเลิก</Button>}
+            <span className="text-[10px] text-dim">{editing ? `กำลังแก้ "${editing.label}"` : 'บันทึกทันที และส่งข้อความทดสอบไปที่ช่องนี้ให้เลย'}</span>
+          </div>
         </div>
       )}
       {(err || msg) && <p className={`text-[11px] ${err ? 'text-rug-lite' : 'text-carpet-lite'}`}>{err ?? msg}</p>}

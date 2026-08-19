@@ -38,6 +38,8 @@ interface Props {
   profile: Record<string, string>;
   products: Product[];
   deptNotes: Record<string, string>;
+  /** ข้อมูลที่ตอบลูกค้าได้ ต่อแผนก */
+  deptPublicNotes?: Record<string, string>;
   /** บันทึกเสร็จแล้วให้ page โหลดใหม่ - state ของจริงอยู่ที่ page */
   onChanged: () => void;
   /** header คีย์ LLM ที่ใช้อยู่ - ต้องใช้ตอน embed เอกสาร */
@@ -47,8 +49,9 @@ interface Props {
 }
 
 export default function CompanyPanel({
-  open, onClose, officeId, userId, profile, products, deptNotes, onChanged, llmHeaders, llmLabel, blocked,
+  open, onClose, officeId, userId, profile, products, deptNotes, deptPublicNotes = {}, onChanged, llmHeaders, llmLabel, blocked,
 }: Props) {
+  const [pubNotes, setPubNotes] = useState<Record<string, string>>({});
   const [tab, setTab] = useState('profile');
   const [canEdit, setCanEdit] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -74,6 +77,7 @@ export default function CompanyPanel({
     if (!open) return;
     setDraft({ ...profile });
     setNotes({ ...deptNotes });
+    setPubNotes({ ...deptPublicNotes });
     setItems(products.map((p) => ({ ...p })));
     setMsg(null);
     if (officeId) {
@@ -144,7 +148,7 @@ export default function CompanyPanel({
     if (!officeId) return;
     setSaving(true); setMsg(null);
     try {
-      await saveDeptNote(officeId, noteDept, (notes[noteDept] ?? '').trim(), userId);
+      await saveDeptNote(officeId, noteDept, (notes[noteDept] ?? '').trim(), userId, (pubNotes[noteDept] ?? '').trim());
       onChanged();
       setMsg({ ok: true, text: `บันทึกโน้ตของ${DEPT_BY_ID.get(noteDept)?.nameTh ?? noteDept}แล้ว` });
     } catch (e) {
@@ -173,7 +177,7 @@ export default function CompanyPanel({
       const res = await fetch('/api/embed', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...llmHeaders },
-        body: JSON.stringify({ document: text }),
+        body: JSON.stringify({ document: text, officeId }),
       });
       const data = (await res.json()) as { texts?: string[]; vectors?: number[][]; model?: string; error?: string };
       if (!res.ok || !data.texts || !data.vectors || !data.model) throw new Error(data.error ?? `HTTP ${res.status}`);
@@ -408,7 +412,7 @@ export default function CompanyPanel({
                     info={`เฉพาะคนของแผนกนี้ที่จะเห็น ควรมี: ${DEPT_NOTE_HINTS[noteDept] ?? ''}`}
                   >
                     <Textarea
-                      rows={9}
+                      rows={7}
                       value={notes[noteDept] ?? ''}
                       disabled={!canEdit}
                       onChange={(e) => setNotes((n) => ({ ...n, [noteDept]: e.target.value }))}
@@ -416,8 +420,29 @@ export default function CompanyPanel({
                       placeholder="เขียนเป็นข้อ ๆ ได้เลย ไม่ต้องสวย - agent อ่านได้"
                     />
                   </Field>
+                  <Field
+                    className="mt-2"
+                    label={
+                      <span className="flex items-center gap-2">
+                        ข้อมูลที่ตอบลูกค้าได้ <Badge variant="brass">ลูกค้าเห็น</Badge>
+                        <span className={`ml-auto text-[10px] font-normal ${(pubNotes[noteDept] ?? '').length > DEPT_NOTE_MAX ? 'text-brass' : 'text-dim'}`}>
+                          {(pubNotes[noteDept] ?? '').length}/{DEPT_NOTE_MAX}
+                        </span>
+                      </span>
+                    }
+                    info="ลูกค้าที่ทักมาทาง LINE/ช่องทางสาธารณะจะได้คำตอบจากตรงนี้ (และโปรไฟล์/สินค้า/เอกสารสาธารณะ) เท่านั้น - โน้ตภายในด้านบนไม่ออกไปหาลูกค้า · ใส่คำถามที่ลูกค้าถามบ่อยพร้อมคำตอบมาตรฐาน เวลาทำการ เงื่อนไข ช่องทางติดต่อ"
+                  >
+                    <Textarea
+                      rows={6}
+                      value={pubNotes[noteDept] ?? ''}
+                      disabled={!canEdit}
+                      onChange={(e) => setPubNotes((n) => ({ ...n, [noteDept]: e.target.value }))}
+                      className="h-auto font-mono text-[12px]"
+                      placeholder={'เช่น\nถาม: เปิดกี่โมง  ตอบ: จันทร์-ศุกร์ 9:00-18:00\nถาม: มีบริการอะไรบ้าง  ตอบ: ...'}
+                    />
+                  </Field>
                   <div className="mt-2 flex justify-end">
-                    <Button variant="primary" disabled={!canEdit || saving || (notes[noteDept] ?? '').length > DEPT_NOTE_MAX} onClick={doSaveNote}>
+                    <Button variant="primary" disabled={!canEdit || saving || (notes[noteDept] ?? '').length > DEPT_NOTE_MAX || (pubNotes[noteDept] ?? '').length > DEPT_NOTE_MAX} onClick={doSaveNote}>
                       {saving ? <LoaderCircle className="animate-spin" /> : <Save />} บันทึกโน้ตแผนกนี้
                     </Button>
                   </div>

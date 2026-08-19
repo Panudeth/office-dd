@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { PRESET_BY_ID, ROLE_ORDER, sanitizeDeptDef, slugifyDeptId, type AgentRole } from '@/lib/departments';
 import { ask, resolveCreds } from '@/lib/llm';
+import { checkOfficePolicy } from '@/lib/office-policy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,6 +21,7 @@ interface DraftBody {
   existingIds?: string[];
   /** ร่างทับแผนกเดิม (id คงเดิม) */
   id?: string;
+  officeId?: string;
 }
 
 const SYSTEM = `คุณคือที่ปรึกษาออกแบบองค์กร หน้าที่คือ "ตั้งแผนกใหม่" ให้บริษัทจำลองที่พนักงานทุกคนเป็น AI agent
@@ -79,6 +81,8 @@ export async function POST(req: NextRequest) {
   });
   if (!creds) return Response.json({ error: 'ยังไม่มีคีย์ AI - ใส่คีย์ก่อน หรือกรอกเองทุกช่อง' }, { status: 400 });
 
+  const deny = await checkOfficePolicy(body.officeId, creds);
+  if (deny) return Response.json({ error: deny }, { status: 403 });
   const existing = (Array.isArray(body.existingIds) ? body.existingIds : []).filter((x): x is string => typeof x === 'string').slice(0, 100);
   try {
     const text = await ask({ system: SYSTEM, user: userPrompt(body, existing), maxTokens: 6000, effort: 'medium' }, creds);

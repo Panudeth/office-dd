@@ -1,12 +1,12 @@
 'use client';
 
-import { Check, Copy, Cpu, KeyRound, LoaderCircle, Plug, Plus, Trash2 } from 'lucide-react';
+import { Check, Copy, Cpu, KeyRound, LoaderCircle, Lock, Plug, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
-import { accessToken, type Office } from '@/lib/supabase';
+import { accessToken, setOfficeLlmPolicy, type Office } from '@/lib/supabase';
 import { clearOfficeLlm, fetchOfficeLlmStatus, type OfficeLlmStatus } from '@/lib/office-llm-client';
 import { Button } from '@/components/ui/button';
 import { InfoTip } from '@/components/ui/infotip';
@@ -29,7 +29,17 @@ interface TokenRow {
   last_used_at: string | null;
 }
 
-export default function IntegrationsSection({ office }: { office: Office }) {
+export default function IntegrationsSection({ office, onPolicy }: { office: Office; onPolicy?: (p: 'any' | 'local') => void }) {
+  const [policy, setPolicy] = useState<'any' | 'local'>(office.llm_policy === 'local' ? 'local' : 'any');
+  const [policyBusy, setPolicyBusy] = useState(false);
+  const [policyErr, setPolicyErr] = useState<string | null>(null);
+  useEffect(() => { setPolicy(office.llm_policy === 'local' ? 'local' : 'any'); }, [office.id, office.llm_policy]);
+  const changePolicy = async (p: 'any' | 'local') => {
+    setPolicyBusy(true); setPolicyErr(null);
+    try { await setOfficeLlmPolicy(office.id, p); setPolicy(p); onPolicy?.(p); }
+    catch (e) { setPolicyErr(e instanceof Error ? e.message : String(e)); }
+    finally { setPolicyBusy(false); }
+  };
   const [rows, setRows] = useState<TokenRow[] | null>(null);
   const [name, setName] = useState('');
   const [scope, setScope] = useState<'internal' | 'public'>('internal');
@@ -188,9 +198,30 @@ export default function IntegrationsSection({ office }: { office: Office }) {
           <summary className="cursor-pointer text-dim hover:text-parchment">วิธีต่อ API ตรง / LINE</summary>
           <div className="mt-1.5 flex flex-col gap-1 text-dim">
             <div>API: <code>POST {origin}/api/office/ask</code> header <code>Authorization: Bearer &lt;token&gt;</code> body <code>{'{ "question": "...", "deptIds": ["legal"], "mode": "direct" }'}</code></div>
-            <div>LINE: ตั้งใน <code>.env</code> ของเซิร์ฟเวอร์ <code>LINE_CHANNEL_SECRET</code>, <code>LINE_CHANNEL_ACCESS_TOKEN</code>, <code>LINE_OFFICE_ID={office.id}</code> แล้วชี้ Webhook URL ไปที่ <code>{origin}/api/line/webhook</code> - แผนกประชาสัมพันธ์จะตอบจากข้อมูลที่เปิดเผยได้ (โปรไฟล์ สินค้า โน้ต/เอกสารของ PR)</div>
+            <div>LINE: ตั้งจากหน้าเว็บ - <b>แผนก &amp; Webhook</b> → เลือกแผนกที่ตอบลูกค้า → แท็บ <b>Webhook เข้า</b> → <b>เพิ่ม LINE OA</b> (ได้ URL <code>{origin}/api/line/webhook/&lt;id&gt;</code> ไปวางใน LINE console) - ลูกค้าเห็นเฉพาะข้อมูลที่ติดว่าเปิดเผยได้</div>
           </div>
         </details>
+
+        <div className="rounded-box border border-ink-600 bg-ink-700 p-2 text-[11px]">
+          <div className="flex items-center gap-1.5">
+            <Lock className="size-3.5 shrink-0 text-dim" />
+            <span className="text-parchment">นโยบายโมเดลของออฟฟิศ</span>
+            <InfoTip>
+              <b>ทุกผู้ให้บริการ</b> = ใช้คีย์ Claude/Gemini/OpenAI-compatible ได้ตามที่ตั้งใน "คีย์ของฉัน"<br />
+              <b>เฉพาะโมเดลในเครื่อง/LAN</b> = เซิร์ฟเวอร์ปฏิเสธทุกคำขอที่ชุดคีย์ไม่ได้ชี้ไป localhost / IP วง LAN / .local (Ollama, LM Studio)
+              ครอบทั้งประชุมจากหน้าเว็บ MCP/API/LINE webhook เข้า และการฝังเอกสาร - ข้อมูลบริษัทไม่ออกจากเครื่องแม้ใครจะใส่คีย์ข้างนอกมา<br />
+              เจ้าของออฟฟิศเท่านั้นที่เปลี่ยนได้
+            </InfoTip>
+            <span className="flex-1" />
+            {(['any', 'local'] as const).map((p) => (
+              <Button key={p} size="sm" variant={policy === p ? 'primary' : 'outline'} className="h-6 px-2 text-[10px]" disabled={policyBusy} onClick={() => policy !== p && void changePolicy(p)}>
+                {p === 'any' ? 'ทุกผู้ให้บริการ' : 'เฉพาะโมเดลในเครื่อง/LAN'}
+              </Button>
+            ))}
+          </div>
+          {policy === 'local' && <p className="mt-1 text-[10px] text-carpet-lite">เปิดอยู่ - คำขอที่ใช้คีย์ข้างนอกจะถูกปฏิเสธพร้อมข้อความบอกให้เปลี่ยนชุดคีย์</p>}
+          {policyErr && <p className="mt-1 text-[10px] text-rug-lite">{policyErr}</p>}
+        </div>
 
         <div className="rounded-box border border-ink-600 bg-ink-700 p-2 text-[11px]">
           <div className="flex items-center gap-1.5">

@@ -10,6 +10,8 @@ import { loadOfficeLlm } from '@/lib/office-llm';
 import { persistMeeting } from '@/lib/meeting-store';
 import { sbAdmin } from '@/lib/supabase-admin';
 import { publicProducts, publicProfile, type CompanyContext, type Product } from '@/lib/company';
+import { allowCustomer, cleanLabel } from '@/lib/ratelimit';
+import { checkOfficePolicy } from '@/lib/office-policy';
 import type {
   AskAgent, AskEvent, MeetingAttendeeLite, MeetingAudience, MeetingMode, MeetingSource, Opinion,
 } from '@/lib/protocol';
@@ -39,6 +41,8 @@ export interface HeadlessInput {
   creds?: Creds | null;
   /** ใครถาม (ข้อความอิสระ เช่น LINE user id) - แนบไปในคำถามให้ agent รู้บริบท */
   askedByLabel?: string;
+  /** กุญแจนับ rate limit ต่อคนถาม (เช่น LINE userId) - ไม่ให้ใช้ป้ายชื่อ ไม่งั้นคนที่ไม่มีชื่อจะแชร์โควตากัน */
+  rateKey?: string;
   /**
    * ข้อมูลที่ยิงเข้ามาทาง inbox (webhook) - วางเป็น "เอกสารเข้า" ให้ agent อ่าน (เป็นข้อมูล ไม่ใช่คำสั่ง)
    * และ playbook ของแผนกจะถูกแนบให้หัวหน้าที่ตอบรู้ว่าต้องทำอะไรกับมัน
@@ -103,18 +107,25 @@ async function loadCompany(
   officeId: string, question: string, deptIds: string[], creds: Creds | null, publicOnly: boolean,
 ): Promise<CompanyContext> {
   const c = sbAdmin()!;
-  const [{ data: prof }, { data: prods }, { data: notes }] = await Promise.all([
+  const [{ data: prof }, { data: prods }, noteRes] = await Promise.all([
     c.from('office_profile').select('fields').eq('office_id', officeId).maybeSingle(),
     c.from('office_product').select('id,name,description,price,note').eq('office_id', officeId).order('sort_order'),
-    c.from('office_dept_note').select('dept_id,body').eq('office_id', officeId).in('dept_id', deptIds),
+    c.from('office_dept_note').select('dept_id,body,public_body').eq('office_id', officeId).in('dept_id', deptIds),
   ]);
+  // ฐานเก่าไม่มี public_body - อ่านแบบเดิม (ไม่มีชั้นสาธารณะ)
+  const notes = noteRes.error && /public_body/i.test(noteRes.error.message)
+    ? (await c.from('office_dept_note').select('dept_id,body').eq('office_id', officeId).in('dept_id', deptIds)).data
+    : noteRes.data;
+  const noteRows = ((notes ?? []) as { dept_id: string; body: string; public_body?: string }[]);
   const rawProfile = (prof as { fields?: Record<string, string> } | null)?.fields ?? {};
   const rawProducts = (prods ?? []) as Product[];
   // ชั้นข้อมูล: ลูกค้าเห็นเฉพาะฟิลด์โปรไฟล์ที่ตั้งเป็นสาธารณะ และสินค้าโดยไม่มีหมายเหตุภายใน
+  // ชั้นข้อมูล: ลูกค้าเห็นเฉพาะ "ข้อมูลที่ตอบลูกค้าได้" ของแผนกที่ตอบ - โน้ตภายในไม่ออกไปเด็ดขาด
   const ctx: CompanyContext = {
     profile: publicOnly ? publicProfile(rawProfile) : rawProfile,
     products: publicOnly ? publicProducts(rawProducts) : rawProducts,
-    notes: Object.fromEntries(((notes ?? []) as { dept_id: string; body: string }[]).map((n) => [n.dept_id, n.body])),
+    notes: publicOnly ? {} : Object.fromEntries(noteRows.map((n) => [n.dept_id, n.body ?? ''])),
+    publicNotes: Object.fromEntries(noteRows.filter((n) => (n.public_body ?? '').trim()).map((n) => [n.dept_id, n.public_body ?? ''])),
   };
   if (!creds) return ctx;
   try {
@@ -187,6 +198,17 @@ export async function runHeadless(input: HeadlessInput): Promise<HeadlessResult>
   });
   if (!c) return empty('เซิร์ฟเวอร์ยังไม่ได้ตั้ง SUPABASE_SECRET_KEY - เรียกประชุมจากภายนอกไม่ได้');
   if (!question) return empty('ไม่มีคำถาม');
+  // ป้ายผู้ถามมาจากคนนอก (ชื่อ LINE ฯลฯ) - ล้างก่อนแนบเข้า prompt กันยัดคำสั่งผ่านชื่อ
+  const askedBy = cleanLabel(input.askedByLabel, 60) || undefined;
+  // ช่องทางลูกค้าเปิดสาธารณะ - จำกัดความถี่ต่อคน/ต่อออฟฟิศ กันเผาโทเคน (คำตอบสุภาพให้ลูกค้าเห็นได้)
+  if (customer) {
+    const gate = allowCustomer(input.officeId, input.rateKey || askedBy || 'anon');
+    if (!gate.ok) return { ...empty(gate.reason), customerReply: `ขออภัยค่ะ ${gate.reason}` };
+  }
+  if (question.length > 4000) return empty('คำถามยาวเกินไป (เกิน 4000 ตัวอักษร)');
+  // นโยบายออฟฟิศ: เฉพาะโมเดลในเครื่อง - ชุดคีย์ที่จะใช้ (ของออฟฟิศ/.env/ที่ส่งมา) ต้องชี้ไปในเครื่องทั้งหมด
+  const deny = await checkOfficePolicy(input.officeId, creds, assign);
+  if (deny) return { ...empty(deny), customerReply: customer ? 'ขออภัยค่ะ ระบบยังไม่พร้อมให้บริการในตอนนี้' : '' };
 
   const [staff, depts] = await Promise.all([loadOfficeStaff(input.officeId), loadOfficeDepartments(input.officeId)]);
   if (!staff.length) return empty('ออฟฟิศนี้ยังไม่มีพนักงาน - จ้างก่อน');
@@ -213,6 +235,8 @@ export async function runHeadless(input: HeadlessInput): Promise<HeadlessResult>
   const front = team.chair;
 
   const company = await loadCompany(input.officeId, question, deptIds, creds, customer);
+  // ชื่อแผนกที่มีคนอยู่ - ข้อเท็จจริงสาธารณะ (ลูกค้าถาม "มีฝ่ายไหนบ้าง" ตอบได้ ไม่ต้องบอกชื่อคน)
+  company.departments = hiredDeptIds.map((id) => depts.byId.get(id)?.nameTh ?? id);
   // ของจาก inbox = เอกสารเข้า: วางในชั้นข้อมูลของแผนกเจ้าของเรื่อง (agent อ่านเป็นข้อมูล ไม่ใช่คำสั่ง)
   if (input.inbox) {
     const doc = `### ข้อมูลที่ส่งเข้ามา: ${input.inbox.title || '(ไม่มีหัวข้อ)'}${input.inbox.source ? ` (จาก ${input.inbox.source})` : ''}\n` +
@@ -222,12 +246,12 @@ export async function runHeadless(input: HeadlessInput): Promise<HeadlessResult>
     const pb = playbook ? `### วิธีปฏิบัติของแผนกเมื่อมีข้อมูลเข้ามา (playbook)\n${playbook}\n\n` : '';
     company.notes = { ...(company.notes ?? {}), [ownerDeptId]: [company.notes?.[ownerDeptId] ?? '', pb + doc].filter(Boolean).join('\n\n') };
   }
-  const askText = input.askedByLabel ? `${question}\n\n(ผู้ถาม: ${input.askedByLabel})` : question;
+  const askText = askedBy ? `${question}\n\n(ผู้ถาม: ${askedBy})` : question;
 
   const store = await persistMeeting({
     officeId: input.officeId, trusted: true, source: input.source, audience,
     question, mode, ownerDeptId, chairId: front.id, agents: team.agents, attendees: team.attendees,
-    askedByLabel: input.askedByLabel,
+    askedByLabel: askedBy,
   });
 
   const transcript: Opinion[] = [];

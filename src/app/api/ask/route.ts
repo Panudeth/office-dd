@@ -3,6 +3,7 @@ import { sanitizeDeptDefs } from '@/lib/departments';
 import { normalizeMode, runMeetingEngine } from '@/lib/engine';
 import { resolveCreds } from '@/lib/llm';
 import { persistMeeting } from '@/lib/meeting-store';
+import { checkOfficePolicy } from '@/lib/office-policy';
 import type { AskEvent, AskRequest } from '@/lib/protocol';
 
 export const runtime = 'nodejs';
@@ -34,6 +35,10 @@ export async function POST(req: NextRequest) {
     model: req.headers.get('x-llm-model'),
     baseUrl: req.headers.get('x-llm-base-url'),
   });
+
+  // นโยบาย "เฉพาะโมเดลในเครื่อง" ของออฟฟิศ - ปฏิเสธก่อนส่งอะไรออกไป
+  const deny = await checkOfficePolicy(body.officeId, creds, body.llm);
+  if (deny) return Response.json({ error: deny }, { status: 403 });
 
   const mode = normalizeMode(body.mode);
   // บันทึกลง DB ได้ต่อเมื่อรู้ออฟฟิศ + ผู้ใช้เป็นสมาชิกจริง (ตรวจจาก access token ของ Supabase)

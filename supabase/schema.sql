@@ -584,3 +584,37 @@ begin
     alter publication supabase_realtime add table public.office_inbox;
   end if;
 end $$;
+
+-- ============================================================
+-- ขาเข้าแบบ LINE Official Account ต่อแผนก (ตั้งจากหน้าเว็บ แทน .env)
+-- config = { secret, token, ack? } - secret/token เข้ารหัส AES-256-GCM ด้วย secret ของเซิร์ฟเวอร์ (เหมือน office_llm)
+-- เปิด RLS แต่ไม่มี policy = เบราว์เซอร์แตะตรงไม่ได้ อ่าน/เขียนผ่าน /api/office/inbound เท่านั้น
+-- webhook: POST /api/line/webhook/<id>
+-- ============================================================
+create table if not exists public.office_dept_inbound (
+  id           uuid primary key default gen_random_uuid(),
+  office_id    uuid not null references public.office(id) on delete cascade,
+  dept_id      text not null,
+  kind         text not null default 'line',
+  label        text not null default '',
+  config       jsonb not null default '{}',
+  enabled      boolean not null default true,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+create index if not exists office_dept_inbound_office on public.office_dept_inbound(office_id, dept_id);
+alter table public.office_dept_inbound enable row level security;
+
+-- ============================================================
+-- โน้ตแผนกแยกสองชั้น: body = ภายใน (คนในเห็น) / public_body = ข้อมูลที่ตอบลูกค้าได้ (ลูกค้าเห็น)
+-- ลูกค้าที่ถามผ่าน LINE/API สาธารณะจะเห็นเฉพาะ public_body ของแผนกที่ตอบ - โน้ตภายในไม่หลุดออกไป
+-- ============================================================
+alter table public.office_dept_note add column if not exists public_body text not null default '';
+
+-- ============================================================
+-- นโยบายโมเดลของออฟฟิศ: any = ผู้ให้บริการไหนก็ได้ / local = เฉพาะโมเดลในเครื่อง/LAN (Ollama, LM Studio)
+-- เซิร์ฟเวอร์บังคับทุกจุดที่ส่งข้อมูลบริษัทไปหาโมเดล - เจ้าของออฟฟิศเท่านั้นที่เปลี่ยนได้ (policy office_update)
+-- ============================================================
+alter table public.office add column if not exists llm_policy text not null default 'any';
+alter table public.office drop constraint if exists office_llm_policy_check;
+alter table public.office add constraint office_llm_policy_check check (llm_policy in ('any', 'local'));

@@ -5,6 +5,7 @@ import { loadOfficeStaff, runHeadless } from '@/lib/headless';
 import { resolveCreds } from '@/lib/llm';
 import { loadOfficeDepartments } from '@/lib/office-depts';
 import { loadOfficeLlm } from '@/lib/office-llm';
+import { checkOfficePolicy } from '@/lib/office-policy';
 import type { MeetingMode } from '@/lib/protocol';
 import { sbAdmin } from '@/lib/supabase-admin';
 
@@ -91,6 +92,7 @@ async function ingestAsDoc(input: InboxInput, inboxId: string): Promise<void> {
   const office = await loadOfficeLlm(input.officeId);
   const creds = office.creds ?? resolveCreds({});
   if (!creds) return;
+  if (await checkOfficePolicy(input.officeId, creds)) return; // นโยบายเฉพาะในเครื่อง - ไม่ส่งข้อความไป embed ข้างนอก
   const name = `[inbox] ${input.title || input.source || 'ข้อมูลเข้า'} · ${new Date().toISOString().slice(0, 10)}`;
   const body = `${input.title}\n${input.source ? `ที่มา: ${input.source}\n` : ''}\n${input.dataText}`;
   const pieces = chunkText(body).slice(0, 120);
@@ -157,10 +159,12 @@ export async function processInbox(input: InboxInput, inboxId: string): Promise<
   let delivered: DeliveryResult[] = [];
   const answer = result.answer || result.customerReply || '';
   if (answer && input.deliver !== false) {
+    const chairRow = result.chair ? staff.find((s) => s.id === result.chair!.id) : undefined;
     delivered = await deliverReport({
       officeId: input.officeId, deptId: input.deptId, deptName, title: input.title || 'รายงานจากแผนก',
       text: answer, meetingId: result.meetingId, inboxId, source: input.source,
       link: input.origin ? `${input.origin}/` : undefined,
+      ...(chairRow ? { reporter: { name: chairRow.name, title: chairRow.title, palette: chairRow.palette } } : {}),
     }, Array.isArray(input.deliver) ? input.deliver : undefined);
   }
   await ingest;

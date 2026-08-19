@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { sendToChannel, type ChannelRow } from '@/lib/channels';
+import { loadOfficeStaff } from '@/lib/headless';
 import { loadOfficeDepartments } from '@/lib/office-depts';
 import { isMember, sbAdmin, userIdFromToken } from '@/lib/supabase-admin';
 
@@ -25,12 +26,17 @@ export async function POST(req: NextRequest) {
     .eq('office_id', body.officeId).eq('id', body.channelId).maybeSingle();
   if (!ch) return Response.json({ error: 'ไม่พบ channel' }, { status: 404 });
   const row = ch as ChannelRow;
-  const depts = await loadOfficeDepartments(body.officeId);
+  const [depts, staff] = await Promise.all([loadOfficeDepartments(body.officeId), loadOfficeStaff(body.officeId)]);
+  const deptName = depts.byId.get(row.dept_id)?.nameTh ?? row.dept_id;
+  // คนส่ง = หัวหน้าแผนก (คนแรกที่จ้าง) ถ้ายังไม่มีคนก็ส่งในนามแผนก
+  const head = staff.find((s) => s.dept_id === row.dept_id);
   try {
     await sendToChannel(row, {
-      officeId: body.officeId, deptId: row.dept_id, deptName: depts.byId.get(row.dept_id)?.nameTh ?? row.dept_id,
-      title: 'ทดสอบการเชื่อมต่อ', text: `สวัสดี - นี่คือข้อความทดสอบจาก${depts.byId.get(row.dept_id)?.nameTh ?? row.dept_id} ถ้าเห็นข้อความนี้แปลว่าช่อง "${row.label || row.kind}" ใช้ได้แล้ว`,
+      officeId: body.officeId, deptId: row.dept_id, deptName,
+      title: 'ทดสอบการเชื่อมต่อ',
+      text: `สวัสดี - ${head ? `${head.name}จาก${deptName}` : deptName}ส่งข้อความทดสอบมา ถ้าเห็นข้อความนี้แปลว่าช่อง "${row.label || row.kind}" ใช้ได้แล้ว`,
       meetingId: null, inboxId: null, source: 'ทดสอบจากหน้าออฟฟิศ', link: `${req.nextUrl.origin}/`,
+      ...(head ? { reporter: { name: head.name, title: head.title, palette: head.palette } } : {}),
     });
     return Response.json({ ok: true });
   } catch (e) {

@@ -120,10 +120,14 @@ export interface CompanyContext {
   profile: ProfileFields;
   /** รายการสินค้า/บริการ - ทุกแผนกเห็นเหมือนกัน */
   products?: Product[];
-  /** deptId -> body */
+  /** deptId -> โน้ตภายใน (คนในเห็น) */
   notes: Record<string, string>;
+  /** deptId -> ข้อมูลที่ตอบลูกค้าได้ (ลูกค้าเห็น) - ชั้นเดียวของโน้ตแผนกที่ออกไปนอกบริษัทได้ */
+  publicNotes?: Record<string, string>;
   /** ชิ้นเอกสารที่ค้นเจอว่าเกี่ยวกับคำถามนี้ (เฟส 3) */
   chunks?: { docName: string; seq: number; content: string }[];
+  /** ชื่อแผนก/ทีมที่บริษัทมี (ที่มีคนอยู่จริง) - ข้อเท็จจริงสาธารณะ ลูกค้าถาม "มีฝ่ายไหนบ้าง" ตอบได้ */
+  departments?: string[];
 }
 
 /** ส่วนโปรไฟล์ - ทุกแผนกได้เหมือนกัน */
@@ -154,14 +158,18 @@ export function productsBlock(products: Product[] | null | undefined): string {
 ${rows.map(line).join('\n')}`;
 }
 
-/** ส่วนโน้ตแผนก - เฉพาะแผนกตัวเอง */
-export function deptNoteBlock(deptId: string, notes: Record<string, string> | null | undefined, deptName?: string): string {
-  const body = (notes?.[deptId] ?? '').trim();
-  if (!body) return '';
+/** ส่วนโน้ตแผนก - เฉพาะแผนกตัวเอง (ภายใน + ที่ตอบลูกค้าได้) */
+export function deptNoteBlock(
+  deptId: string, notes: Record<string, string> | null | undefined, deptName?: string, publicNotes?: Record<string, string> | null,
+): string {
   const d = DEPT_BY_ID.get(deptId);
-  return `## ข้อมูลภายในของ${deptName ?? d?.nameTh ?? deptId} (เฉพาะแผนกคุณ)
-
-${body}`;
+  const name = deptName ?? d?.nameTh ?? deptId;
+  const body = (notes?.[deptId] ?? '').trim();
+  const pub = (publicNotes?.[deptId] ?? '').trim();
+  const parts: string[] = [];
+  if (body) parts.push(`## ข้อมูลภายในของ${name} (เฉพาะแผนกคุณ - ห้ามเปิดเผยกับลูกค้า)\n\n${body}`);
+  if (pub) parts.push(`## ข้อมูลของ${name}ที่ตอบลูกค้าได้ (เปิดเผยได้ ใช้ตอบลูกค้าตรง ๆ)\n\n${pub}`);
+  return parts.join('\n\n');
 }
 
 /** ส่วนเอกสารอ้างอิง - ชิ้นที่ค้นเจอ พร้อมบอกที่มาให้ agent cite ได้ */
@@ -181,7 +189,8 @@ ${chunks.map((c, i) => `[อ้างอิง ${i + 1}] จาก "${c.docName}
  */
 export function companyBlock(ctx: CompanyContext | null | undefined, deptId: string, deptName?: string): string {
   if (!ctx) return '';
-  return [profileBlock(ctx.profile), productsBlock(ctx.products), deptNoteBlock(deptId, ctx.notes, deptName), chunksBlock(ctx.chunks)]
+  const depts = ctx.departments?.length ? `## แผนก/ทีมของบริษัท\n\n${ctx.departments.join(' · ')}` : '';
+  return [profileBlock(ctx.profile), depts, productsBlock(ctx.products), deptNoteBlock(deptId, ctx.notes, deptName, ctx.publicNotes), chunksBlock(ctx.chunks)]
     .filter(Boolean)
     .join('\n\n');
 }
@@ -191,7 +200,7 @@ export function companyStats(ctx: CompanyContext | null | undefined, deptId: str
   return {
     profileChars: profileBlock(ctx?.profile).length,
     productCount: (ctx?.products ?? []).filter((p) => p.name.trim()).length,
-    noteChars: deptNoteBlock(deptId, ctx?.notes).length,
+    noteChars: deptNoteBlock(deptId, ctx?.notes, undefined, ctx?.publicNotes).length,
     chunkCount: ctx?.chunks?.length ?? 0,
   };
 }

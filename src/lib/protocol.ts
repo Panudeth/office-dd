@@ -71,6 +71,8 @@ export interface AgendaRequest {
   profile?: Record<string, string>;
   /** แผนกที่ออฟฟิศสร้างเอง/ทับ preset - เซิร์ฟเวอร์ไม่มี state ของออฟฟิศ เบราว์เซอร์ส่งมาให้ */
   departments?: DepartmentDef[];
+  /** ออฟฟิศ - ให้เซิร์ฟเวอร์บังคับนโยบายโมเดล (เฉพาะในเครื่อง) ได้ */
+  officeId?: string;
 }
 
 /* ---------- หลักฐานว่า skill ถูกส่งไปจริง ---------- */

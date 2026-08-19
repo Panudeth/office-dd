@@ -1,31 +1,21 @@
-import { NextRequest } from 'next/server';
-import { createHmac, timingSafeEqual } from 'node:crypto';
-import { runHeadless } from '@/lib/headless';
+import { NextRequest, after } from 'next/server';
+import { handleLineEvents, listInbound, verifyLineSignature } from '@/lib/line-inbound';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 /* ============================================================
-   LINE Official Account -> แผนกประชาสัมพันธ์
-   ลูกค้าทัก LINE -> webhook นี้ -> ตอบรับทันที ("รับเรื่องแล้ว") -> หัวหน้า PR ตอบจากข้อมูลบริษัท
-   (เฉพาะข้อมูลที่เปิดเผยได้: โปรไฟล์ สินค้า โน้ต/เอกสารของ PR) -> push คำตอบกลับ
-   ในจอออฟฟิศจะเห็นหัวหน้า PR ลุกไปตอบ และคำถาม/คำตอบเข้าสมุดเลขาฯ (source = line)
+   LINE Official Account -> แผนกรับลูกค้า (แบบตั้งใน .env - ออฟฟิศเดียวต่อหนึ่ง deployment)
+   แนะนำให้ย้ายไปตั้งจากหน้าเว็บแทน: แผนก -> Webhook เข้า -> LINE Official Account (ได้ URL /api/line/webhook/<id>)
+   เส้นนี้คงไว้ให้ของเดิมไม่พัง
 
-   ตั้งค่าใน .env (ออฟฟิศเดียวต่อหนึ่ง deployment):
+   .env:
      LINE_CHANNEL_SECRET=        จาก LINE Developers -> Basic settings
      LINE_CHANNEL_ACCESS_TOKEN=  จาก Messaging API -> Channel access token (long-lived)
-     LINE_OFFICE_ID=             uuid ของออฟฟิศ (ดูจากปุ่มออฟฟิศบนแถบบน)
+     LINE_OFFICE_ID=             uuid ของออฟฟิศ
      LINE_DEPT=pr                แผนกที่ตอบ (ค่าเริ่มต้น pr)
-   Webhook URL ใน LINE console = https://<โดเมนของคุณ>/api/line/webhook
    ============================================================ */
-
-interface LineEvent {
-  type: string;
-  replyToken?: string;
-  source?: { type: string; userId?: string; groupId?: string; roomId?: string };
-  message?: { type: string; text?: string };
-}
 
 const cfg = () => ({
   secret: process.env.LINE_CHANNEL_SECRET ?? '',
@@ -33,50 +23,6 @@ const cfg = () => ({
   officeId: process.env.LINE_OFFICE_ID ?? '',
   dept: process.env.LINE_DEPT ?? 'pr',
 });
-
-async function lineApi(path: string, body: unknown, token: string) {
-  const res = await fetch(`https://api.line.me/v2/bot/message/${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) console.error('[line]', path, res.status, await res.text().catch(() => ''));
-}
-
-/**
- * ชื่อโปรไฟล์ของคนทัก - เอาไปตั้งชื่อตัวละครแขกในออฟฟิศและลงสมุด (PR จะได้เรียกชื่อลูกค้าถูกด้วย)
- * แชท 1:1 ใช้ /profile, ในกลุ่ม/ห้องต้องผ่าน member endpoint - ดึงไม่ได้ (บล็อก OA / ไม่อนุญาต) ก็ไม่เป็นไร ใช้ชื่อกลาง
- * จำไว้ 10 นาทีต่อ userId - คนเดียวกันทักติด ๆ กันไม่ต้องถาม LINE ซ้ำ
- */
-const nameCache = new Map<string, { name: string; at: number }>();
-async function displayName(src: LineEvent['source'], token: string): Promise<string | null> {
-  const uid = src?.userId;
-  if (!uid) return null;
-  const hit = nameCache.get(uid);
-  if (hit && Date.now() - hit.at < 600_000) return hit.name;
-  const path = src?.type === 'group' && src.groupId ? `group/${src.groupId}/member/${uid}`
-    : src?.type === 'room' && src.roomId ? `room/${src.roomId}/member/${uid}`
-    : `profile/${uid}`;
-  try {
-    const res = await fetch(`https://api.line.me/v2/bot/${path}`, {
-      headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(4000),
-    });
-    if (!res.ok) return null;
-    const name = ((await res.json()) as { displayName?: string }).displayName?.trim() || null;
-    if (name) nameCache.set(uid, { name, at: Date.now() });
-    return name;
-  } catch {
-    return null;
-  }
-}
-
-/** LINE ตัดข้อความที่ 5000 ตัวอักษร - แบ่งเป็นหลายฟองถ้ายาว (สูงสุด 5 ฟองต่อครั้ง) */
-const chunks = (s: string, n = 4500) => {
-  const out: string[] = [];
-  let rest = s.trim();
-  while (rest.length && out.length < 5) { out.push(rest.slice(0, n)); rest = rest.slice(n); }
-  return out.length ? out : ['(ไม่มีคำตอบ)'];
-};
 
 /** GET ไว้ให้ LINE console กด Verify และให้เราเช็คว่าตั้ง env ครบไหม */
 export async function GET() {
@@ -86,62 +32,23 @@ export async function GET() {
     configured: Boolean(c.secret && c.token && c.officeId),
     missing: [!c.secret && 'LINE_CHANNEL_SECRET', !c.token && 'LINE_CHANNEL_ACCESS_TOKEN', !c.officeId && 'LINE_OFFICE_ID'].filter(Boolean),
     dept: c.dept,
+    hint: 'ตั้งค่าจากหน้าเว็บได้แล้ว: แผนก -> Webhook เข้า -> LINE Official Account (URL /api/line/webhook/<id>)',
   });
 }
 
 export async function POST(req: NextRequest) {
   const c = cfg();
   if (!c.secret || !c.token || !c.officeId) {
-    return Response.json({ error: 'LINE ยังไม่ได้ตั้งค่า (LINE_CHANNEL_SECRET / LINE_CHANNEL_ACCESS_TOKEN / LINE_OFFICE_ID)' }, { status: 503 });
+    return Response.json({ error: 'LINE ยังไม่ได้ตั้งค่า (.env) - หรือตั้งจากหน้าเว็บแล้วใช้ URL /api/line/webhook/<id> แทน' }, { status: 503 });
   }
-
-  // ตรวจลายเซ็นจาก raw body - แปลงเป็น JSON ก่อนจะตรวจไม่ผ่าน
   const raw = await req.text();
-  const sig = req.headers.get('x-line-signature') ?? '';
-  const expect = createHmac('sha256', c.secret).update(raw).digest('base64');
-  const a = Buffer.from(sig), b = Buffer.from(expect);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+  if (!verifyLineSignature(raw, req.headers.get('x-line-signature') ?? '', c.secret)) {
     return Response.json({ error: 'bad signature' }, { status: 401 });
   }
-
-  let events: LineEvent[] = [];
-  try {
-    events = ((JSON.parse(raw) as { events?: LineEvent[] }).events ?? []);
-  } catch {
-    return Response.json({ error: 'bad body' }, { status: 400 });
-  }
-
-  for (const ev of events) {
-    if (ev.type !== 'message' || ev.message?.type !== 'text' || !ev.message.text?.trim()) continue;
-    const question = ev.message.text.trim();
-    const to = ev.source?.userId ?? ev.source?.groupId ?? ev.source?.roomId;
-
-    // ตอบรับก่อน - LLM อาจใช้เวลาเป็นนาที replyToken รอไม่ไหว คำตอบจริงจะ push ตามไป
-    if (ev.replyToken) {
-      await lineApi('reply', {
-        replyToken: ev.replyToken,
-        messages: [{ type: 'text', text: 'รับเรื่องแล้วค่ะ กำลังหาข้อมูลให้ สักครู่นะคะ' }],
-      }, c.token);
-    }
-    if (!to) continue;
-
-    // ไม่ await - ตอบ LINE ให้เร็ว แล้วค่อยทำงานต่อ (บนเซิร์ฟเวอร์ Node ธรรมดา promise นี้รันต่อจนจบ)
-    void (async () => {
-      try {
-        const name = await displayName(ev.source, c.token);
-        // ลูกค้าได้เฉพาะ customerReply (PR ตอบเอง หรือกรองจากผลปรึกษาทีม) - บทถกภายในไม่ออกทาง LINE
-        const r = await runHeadless({
-          officeId: c.officeId, question, deptIds: [c.dept], audience: 'customer',
-          source: 'line', askedByLabel: name ? `${name} (LINE)` : `ลูกค้า (LINE)`,
-        });
-        const answer = r.customerReply || 'ขออภัยค่ะ ตอนนี้ยังตอบไม่ได้ เดี๋ยวทีมงานติดต่อกลับนะคะ';
-        await lineApi('push', { to, messages: chunks(answer).map((t) => ({ type: 'text', text: t })) }, c.token);
-      } catch (e) {
-        console.error('[line] answer failed:', e);
-        await lineApi('push', { to, messages: [{ type: 'text', text: 'ขออภัยค่ะ ระบบขัดข้อง เดี๋ยวทีมงานติดต่อกลับนะคะ' }] }, c.token);
-      }
-    })();
-  }
-
+  // ถ้าออฟฟิศ+แผนกนี้ตั้ง LINE OA จากหน้าเว็บไว้แล้ว ใช้ชื่อ OA นั้นเป็นแหล่ง - ช่องส่งออกที่กรองตามชื่อ OA จะได้ตรงกันไม่ว่ายิงเข้าเส้นไหน
+  const oa = (await listInbound(c.officeId, c.dept)).find((r) => r.enabled);
+  const r = handleLineEvents(raw, { officeId: c.officeId, deptId: c.dept, channelSecret: c.secret, accessToken: c.token, label: oa?.label || 'LINE', origin: req.nextUrl.origin });
+  if (!r.ok) return Response.json({ error: r.error }, { status: r.status });
+  after(async () => { await r.work; });
   return Response.json({ ok: true });
 }

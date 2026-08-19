@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { chunkText, embedModelFor, embedTexts } from '@/lib/embed';
 import { resolveCreds } from '@/lib/llm';
+import { checkOfficePolicy } from '@/lib/office-policy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,12 +22,15 @@ export async function POST(req: NextRequest) {
   });
   if (!creds) return Response.json({ error: 'ยังไม่มีคีย์ LLM - ตั้งค่าที่ปุ่มคีย์ของฉันก่อน' }, { status: 400 });
 
-  let body: { texts?: string[]; document?: string };
+  let body: { texts?: string[]; document?: string; officeId?: string };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return Response.json({ error: 'bad request' }, { status: 400 });
   }
+
+  const deny = await checkOfficePolicy(body.officeId, creds);
+  if (deny) return Response.json({ error: deny }, { status: 403 });
 
   const texts = Array.isArray(body.texts)
     ? body.texts.filter((t): t is string => typeof t === 'string' && t.trim() !== '')
