@@ -43,6 +43,7 @@ import {
   DEPARTMENTS, DEPT_BY_ID, PRESET_BY_ID, customDefs, sanitizeDeptDefs, setActiveDepartments, type DepartmentDef,
 } from '@/lib/departments';
 import { deptHeadIds } from '@/lib/heads';
+import { t, useLang } from '@/lib/i18n';
 import type {
   Agenda, AskAgent, AskEvent, ChatMessage, Consult, MeetingAttendeeLite, MeetingMode, Opinion,
 } from '@/lib/protocol';
@@ -106,6 +107,8 @@ const WELCOME: ChatMessage = {
 };
 
 export default function Page() {
+  // ภาษา UI - subscribe ไว้ที่นี่ พอสลับแล้วทั้งหน้า re-render (ทุกอย่างเรียก t() ตอน render)
+  const [lang, setLang] = useLang();
   const worldRef = useRef<World | null>(null);
   const [ready, setReady] = useState(false);
   const [roster, setRoster] = useState<EmployeeSnapshot[]>([]);
@@ -1309,11 +1312,20 @@ export default function Page() {
           {editSnap.logo && <img src={editSnap.logo} alt="" className="h-6 max-w-[96px] rounded-sm" />}
           VISUAL COMPANY
           <span className="ml-2 text-[11px] font-normal tracking-normal text-parchment-2/80">
-            บริษัทที่พนักงานเป็น AI agent
+            {t('บริษัทที่พนักงานเป็น AI agent')}
           </span>
         </h1>
 
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          {/* สลับภาษา EN/ไทย - จำใน localStorage */}
+          <button
+            type="button"
+            onClick={() => setLang(lang === 'en' ? 'th' : 'en')}
+            title={lang === 'en' ? 'เปลี่ยนเป็นภาษาไทย' : 'Switch to English'}
+            className="rounded-box border border-wood-deep px-2 py-1 text-[11px] text-parchment-2 hover:bg-wood-dark"
+          >
+            {lang === 'en' ? 'ไทย' : 'EN'}
+          </button>
           {/* ยังไม่ล็อกอิน = มีปุ่มเดียวให้กด ไม่ต้องเดาว่าออฟฟิศอยู่ตรงไหน
               ล็อกอินแล้ว = ปุ่มบัญชีบอกว่าเป็นใคร คู่กับปุ่มออฟฟิศที่กำลังใช้ */}
           {!supabaseConfigured ? (
