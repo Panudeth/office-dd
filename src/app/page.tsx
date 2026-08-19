@@ -28,8 +28,10 @@ import {
   listProducts, loadDeptNotes, loadEmployees, loadProfile, matchChunks, readOAuthReturn, rememberOffice,
   rememberedOfficeId, sb, saveEmployee, saveMeeting, sbError, supabaseConfigured, updateMeetingMinutes,
   accessToken, loadLayout, saveLayout, updateEmployeeSeat,
+  canEditOffice, deleteDepartment, loadDepartments, saveDepartment,
   type MeetingRow, type OAuthReturn, type Office, type User,
 } from '@/lib/supabase';
+import DepartmentPanel, { DepartmentsHub } from '@/components/DepartmentPanel';
 import { profileIsEmpty, type CompanyContext, type Product } from '@/lib/company';
 import { syncOfficeLlm } from '@/lib/office-llm-client';
 import type { EmployeeSnapshot } from '@/game/types';
@@ -37,7 +39,9 @@ import type { EditSnapshot, World } from '@/game/world';
 import { defaultLayout, parseLayout, type OfficeLayout } from '@/game/furniture';
 import LayoutPanel, { type LayoutSaveState } from '@/components/LayoutPanel';
 import { MAX_STAFF, SECRETARY_NAME, SECRETARY_PAL } from '@/game/map';
-import { DEPARTMENTS, DEPT_BY_ID } from '@/lib/departments';
+import {
+  DEPARTMENTS, DEPT_BY_ID, PRESET_BY_ID, customDefs, sanitizeDeptDefs, setActiveDepartments, type DepartmentDef,
+} from '@/lib/departments';
 import { deptHeadIds } from '@/lib/heads';
 import type {
   Agenda, AskAgent, AskEvent, ChatMessage, Consult, MeetingAttendeeLite, MeetingMode, Opinion,
@@ -46,6 +50,8 @@ import type {
 const GameCanvas = dynamic(() => import('@/components/GameCanvas'), { ssr: false });
 /** ผังเฟอร์นิเจอร์ตอนไม่มี Supabase (โหมดในเครื่อง) */
 const LAYOUT_KEY = 'visual-company.layout';
+/** แผนกที่สร้างเองในโหมดในเครื่อง (ไม่มี Supabase) */
+const DEPTS_KEY = 'visual-company.departments';
 
 /* ---- ความกว้างแผงขวา ---- */
 const SIDE_KEY = 'visual-company.side';
@@ -127,6 +133,11 @@ export default function Page() {
   const officeRef = useRef<Office | null>(null);
   const [llmStore, setLlmStore] = useState<LlmStore>({ active: null, items: [] });
   const [keyOpen, setKeyOpen] = useState(false);
+  /* ---- แผนกของออฟฟิศ (สร้างเอง/ทับ preset) - ทะเบียนจริงอยู่ใน DEPARTMENTS (live) ตัวนี้เก็บนิยามไว้ส่งไป API + บังคับ re-render ---- */
+  const [customDepts, setCustomDepts] = useState<DepartmentDef[]>([]);
+  const [deptPanel, setDeptPanel] = useState<{ open: boolean; id: string | null }>({ open: false, id: null });
+  const [deptHubOpen, setDeptHubOpen] = useState(false);
+  const [deptCanEdit, setDeptCanEdit] = useState(!supabaseConfigured);
   const [user, setUser] = useState<User | null>(null);
   // โหมดในเครื่องไม่มี session ให้รอ ถือว่ารู้คำตอบตั้งแต่แรก
   const [authReady, setAuthReady] = useState(!supabaseConfigured);
@@ -188,6 +199,37 @@ export default function Page() {
   /** ชุดที่กำลังใช้ - null คือยังไม่ได้เลือก แปลว่าใช้คีย์ของเซิร์ฟเวอร์ */
   const llm = activeOf(llmStore);
   const setLlmStoreSaved = useCallback((s: LlmStore) => { setLlmStore(s); saveStore(s); }, []);
+
+  /* ------------------------------------------------------------
+     เช็คชีพจร AI - ยิง /api/models (ไม่กินโทเคน) ด้วยคีย์ชุดที่ใช้อยู่ (ไม่มีก็ใช้คีย์ของเซิร์ฟเวอร์)
+     ต่อไม่ติด/คีย์ผิด/ยังไม่ได้ตั้ง = aiDown -> พนักงานทั้งออฟฟิศลุกไปพัก (กาแฟ ข้าว โซฟา สวน บุหรี่)
+     เช็คตอนโหลด, เมื่อเปลี่ยนคีย์, ทุก 5 นาทีตอนปกติ / ทุก 30 วิตอนล่ม, และหลังประชุมพัง
+     ------------------------------------------------------------ */
+  const [aiDown, setAiDown] = useState<string | null>(null);
+  const aiCheckSeq = useRef(0);
+  const checkAi = useCallback(async () => {
+    const seq = ++aiCheckSeq.current;
+    let reason: string | null = null;
+    try {
+      const res = await fetch('/api/models', {
+        method: 'POST', headers: authHeaders(llm), signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        reason = res.status === 400 ? 'ยังไม่ได้ตั้งค่า AI (ไม่มีคีย์)' : (data.error ?? `AI ตอบ HTTP ${res.status}`);
+      }
+    } catch (err) {
+      reason = err instanceof Error && err.name === 'TimeoutError' ? 'AI ไม่ตอบสนอง (หมดเวลารอ)' : `ต่อ AI ไม่ได้: ${err instanceof Error ? err.message : String(err)}`;
+    }
+    if (seq !== aiCheckSeq.current) return; // มีรอบใหม่ยิงทับแล้ว
+    setAiDown(reason);
+  }, [llm]);
+  useEffect(() => {
+    void checkAi();
+    const iv = window.setInterval(() => { if (document.visibilityState === 'visible') void checkAi(); }, aiDown ? 30_000 : 300_000);
+    return () => window.clearInterval(iv);
+  }, [checkAi, aiDown]);
+  useEffect(() => { worldRef.current?.setAiDown(aiDown); }, [aiDown, ready]);
   /** ตั้งโมเดลรายคนจากแผงพนักงาน - เก็บในที่เดียวกับคีย์ (localStorage) เพราะ id ของชุดคีย์เป็นของเบราว์เซอร์นี้ */
   const setEmployeeLlm = useCallback((employeeId: string, connId: string | null) => {
     setLlmStore((s) => {
@@ -372,16 +414,63 @@ export default function Page() {
     setRoomLeft(rooms);
   }, []);
 
+  /** ใช้ชุดแผนกนี้ทั้งแอป - เปลี่ยนเนื้อใน DEPARTMENTS/DEPT_BY_ID แล้ว re-render (roomLeft ต่อแผนกก็คิดใหม่) */
+  const applyDepts = useCallback((defs: DepartmentDef[]) => {
+    setActiveDepartments(defs);
+    setCustomDepts(defs);
+    rosterSigRef.current = '';
+    syncRoster();
+  }, [syncRoster]);
+
+  /** บันทึกแผนก (สร้าง/แก้/ทับ preset) - Supabase ต่อออฟฟิศ หรือ localStorage ในโหมดในเครื่อง */
+  const saveDept = useCallback(async (def: DepartmentDef) => {
+    const next = [...customDepts.filter((d) => d.id !== def.id), def];
+    if (supabaseConfigured && office) await saveDepartment(office.id, def, user?.id ?? null);
+    else { try { localStorage.setItem(DEPTS_KEY, JSON.stringify(next)); } catch { /* โหมดส่วนตัว */ } }
+    applyDepts(next);
+  }, [customDepts, office, user, applyDepts]);
+  const deleteDept = useCallback(async (id: string) => {
+    if (!PRESET_BY_ID.has(id) && roster.some((r) => r.deptId === id)) throw new Error('ยังมีพนักงานในแผนกนี้ - เลิกจ้างก่อน');
+    const next = customDepts.filter((d) => d.id !== id);
+    if (supabaseConfigured && office) await deleteDepartment(office.id, id);
+    else { try { localStorage.setItem(DEPTS_KEY, JSON.stringify(next)); } catch { /* โหมดส่วนตัว */ } }
+    applyDepts(next);
+  }, [customDepts, office, roster, applyDepts]);
+
+  // สิทธิ์แก้แผนก = สิทธิ์แก้ข้อมูลออฟฟิศ (owner/exec) - โหมดในเครื่องแก้ได้เสมอ
+  useEffect(() => {
+    if (!supabaseConfigured) { setDeptCanEdit(true); return; }
+    if (!office) { setDeptCanEdit(false); return; }
+    let alive = true;
+    canEditOffice(office.id).then((v) => { if (alive) setDeptCanEdit(v); }).catch(() => { if (alive) setDeptCanEdit(false); });
+    return () => { alive = false; };
+  }, [office, user]);
+
+  // realtime: เครื่องอื่นสร้าง/แก้แผนก -> โหลดชุดใหม่
+  useEffect(() => {
+    const c = sb();
+    if (!c || !officeId || !ready) return;
+    const ch = c
+      .channel(`office_department:${officeId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'office_department', filter: `office_id=eq.${officeId}` }, () => {
+        loadDepartments(officeId).then((rows) => applyDepts(sanitizeDeptDefs(rows))).catch(() => undefined);
+      })
+      .subscribe();
+    return () => { void c.removeChannel(ch); };
+  }, [officeId, ready, applyDepts]);
+
   // เปลี่ยนออฟฟิศ = โหลดพนักงานของออฟฟิศนั้นมาแทนที่ทั้งชุด
   useEffect(() => {
     const w = worldRef.current;
     if (!w || !ready) return;
     // โหมดในเครื่องไม่มีออฟฟิศให้โหลด - ห้ามล้าง ไม่งั้นทับพนักงานที่จ้างไว้ตอน mount
     if (!supabaseConfigured) return;
-    if (!office) { w.setLayout(defaultLayout(), 'sync'); w.restore([]); syncRoster(); return; }
-    // ผังก่อน แล้วค่อยพนักงาน - restore() เอาที่นั่งจากผัง (โต๊ะที่ owner เป็นเขา)
+    if (!office) { w.setLayout(defaultLayout(), 'sync'); w.restore([]); applyDepts([]); syncRoster(); return; }
+    // แผนกก่อน (restore ต้องรู้จักแผนกที่สร้างเอง) แล้วผัง แล้วค่อยพนักงาน - restore() เอาที่นั่งจากผัง (โต๊ะที่ owner เป็นเขา)
     let cancelled = false;
     (async () => {
+      try { const rows = await loadDepartments(office.id); if (!cancelled) applyDepts(sanitizeDeptDefs(rows)); } catch (e) { setSaveErr(sbError(e)); }
+      if (cancelled) return;
       let layout: OfficeLayout | null = null;
       try { layout = parseLayout(await loadLayout(office.id)); } catch (e) { setLayoutErr(sbError(e)); }
       if (cancelled) return;
@@ -397,7 +486,7 @@ export default function Page() {
       syncRoster();
     })().catch((e) => setSaveErr(sbError(e)));
     return () => { cancelled = true; };
-  }, [office, ready, syncRoster]);
+  }, [office, ready, syncRoster, applyDepts]);
   useEffect(() => { officeRef.current = office; }, [office]);
 
   /** ผังเปลี่ยนโดยเครื่องนี้ (ลาก/หมุน/จ้าง/ไล่ออก) - บันทึกแบบหน่วง; โหมดในเครื่องลง localStorage */
@@ -466,6 +555,7 @@ export default function Page() {
       // โหมดในเครื่อง: ผังจาก localStorage แล้วจ้างทีมกฎหมายให้ 3 คนเลย จะได้ลองถามได้ทันที
       // ถ้าต่อ Supabase อยู่ ห้ามจ้างเอง เดี๋ยวไปทับกับพนักงานที่โหลดมาจากออฟฟิศ
       if (!supabaseConfigured) {
+        try { applyDepts(sanitizeDeptDefs(JSON.parse(localStorage.getItem(DEPTS_KEY) ?? '[]'))); } catch { /* ไม่มี/พัง = preset ล้วน */ }
         let l: OfficeLayout | null = null;
         try { l = parseLayout(JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? 'null')); } catch { /* ไม่มี/พัง = ค่าเริ่มต้น */ }
         if (l) { layoutRevRef.current = l.rev; w.setLayout(l, 'sync'); }
@@ -476,7 +566,7 @@ export default function Page() {
       }
       syncRoster();
     },
-    [syncRoster, persistLayout],
+    [syncRoster, persistLayout, applyDepts],
   );
 
   // สถานะพนักงานเปลี่ยนตลอดเวลาใน game loop - poll เบา ๆ มาแสดงผล
@@ -596,7 +686,7 @@ export default function Page() {
       const res = await fetch('/api/agenda', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders(llm) },
-        body: JSON.stringify({ question, hiredDeptIds, profile }),
+        body: JSON.stringify({ question, hiredDeptIds, profile, departments: customDefs() }),
       });
       const data = (await res.json()) as Agenda & { error?: string };
       if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
@@ -1029,6 +1119,7 @@ export default function Page() {
           officeId: office?.id,
           company,
           llm: llmAssignment(llmStore, ids),
+          departments: customDefs(),
         }),
       });
       if (!res.ok || !res.body) throw new Error(`เรียก API ไม่สำเร็จ (${res.status})`);
@@ -1055,8 +1146,10 @@ export default function Page() {
         }
       }
       await s.end(errorText || undefined);
+      if (errorText) void checkAi();
     } catch (err) {
       await s.end(err instanceof Error ? err.message : String(err));
+      void checkAi();
     }
   }
 
@@ -1293,6 +1386,17 @@ export default function Page() {
             )}
           </Button>
 
+          {/* แผนก & Webhook - สร้างแผนกใหม่ / สกิล / webhook เข้า / ช่องส่งออก อยู่ที่เดียว */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setDeptHubOpen(true)}
+            title="แผนกทั้งหมด - สร้างแผนกใหม่ ตั้งสกิล webhook รับข้อมูลเข้า และช่องส่งออกไป Teams/Slack/LINE"
+            className="border-wood-deep text-parchment-2 hover:bg-wood-dark"
+          >
+            <Building2 /> แผนก & Webhook
+          </Button>
+
           {/* ข้อมูลบริษัท - ยังไม่ได้กรอกจะขึ้นเตือน เพราะไม่กรอก agent จะตอบแบบไม่รู้ว่าเราเป็นใคร */}
           <Button
             variant={profileIsEmpty(profile) && office ? 'primary' : 'outline'}
@@ -1443,9 +1547,14 @@ export default function Page() {
             <span>
               ในห้องประชุม <b className="text-parchment">{busyAgents}</b>
             </span>
-            <span className={`ml-auto ${saveErr ? 'text-rug-lite' : 'text-brass'}`}>
-              {saveErr ? `บันทึกไม่สำเร็จ: ${saveErr}` : (phase ?? 'พร้อมรับงาน')}
+            <span className={`ml-auto ${saveErr || aiDown ? 'text-rug-lite' : 'text-brass'}`} title={aiDown ?? undefined}>
+              {saveErr ? `บันทึกไม่สำเร็จ: ${saveErr}` : aiDown ? `AI ไม่พร้อม - พนักงานพักก่อน (${aiDown.slice(0, 60)})` : (phase ?? 'พร้อมรับงาน')}
             </span>
+            {aiDown && (
+              <button type="button" className="rounded-box border border-ink-500 px-1.5 py-px text-[10px] text-parchment-2 hover:border-brass" onClick={() => void checkAi()}>
+                ลองเชื่อมใหม่
+              </button>
+            )}
             <span>ลากเพื่อเลื่อน / ล้อเลื่อนเพื่อซูม</span>
           </div>
         </div>
@@ -1512,6 +1621,8 @@ export default function Page() {
               onRoleLlm={setRoleLlm}
               llmActiveLabel={llm ? llm.label : 'คีย์ของเซิร์ฟเวอร์'}
               llmHeadLabel={llmHeadLabel}
+              onEditDept={(id) => setDeptPanel({ open: true, id })}
+              deptCanEdit={deptCanEdit}
               secretary={
                 <SecretaryTab
                   meetings={secretaryMeetings}
@@ -1632,6 +1743,25 @@ export default function Page() {
         startedAt={meetingStart}
         phase={phase}
         activities={activities}
+      />
+      <DepartmentsHub
+        open={deptHubOpen}
+        onClose={() => setDeptHubOpen(false)}
+        officeId={officeId}
+        roster={roster}
+        canEdit={deptCanEdit && !locked}
+        onPick={(id) => { setDeptHubOpen(false); setDeptPanel({ open: true, id }); }}
+      />
+      <DepartmentPanel
+        open={deptPanel.open}
+        onClose={() => setDeptPanel((d) => ({ ...d, open: false }))}
+        deptId={deptPanel.id}
+        officeId={officeId}
+        canEdit={deptCanEdit && !locked}
+        llmHeaders={authHeaders(llm)}
+        headcount={deptPanel.id ? roster.filter((r) => r.deptId === deptPanel.id).length : 0}
+        onSave={saveDept}
+        onDelete={deleteDept}
       />
       <KeyPanel
         open={keyOpen}

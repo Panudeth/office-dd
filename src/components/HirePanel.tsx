@@ -1,7 +1,8 @@
 'use client';
 
 import {
-  AlertTriangle, Cpu, Crown, LayoutGrid, List, Lock, Minus, NotebookPen, UserPlus, Users, Wrench } from 'lucide-react';
+  AlertTriangle, Cpu, Crown, LayoutGrid, List, Lock, Minus, NotebookPen, Plus, Settings2, UserPlus, Users, Wrench,
+} from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { DEPARTMENTS } from '@/lib/departments';
 import { SECRETARY_NAME, SECRETARY_PAL } from '@/game/map';
@@ -10,6 +11,7 @@ import type { LlmRoles } from '@/components/KeyPanel';
 import type { AgentState, EmployeeSnapshot } from '@/game/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { InfoTip } from '@/components/ui/infotip';
 import { Hint, Panel, PanelBody } from '@/components/ui/panel';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -36,6 +38,7 @@ const STATE_TH: Record<AgentState, string> = {
   bench: 'นั่งม้านั่ง',
   pond: 'ชมบ่อน้ำ',
   chat: 'คุยกับเพื่อน',
+  smoke: 'ออกไปสูบบุหรี่',
   idle: 'ยืนเล่น',
 };
 
@@ -77,6 +80,10 @@ interface Props {
   llmActiveLabel?: string;
   /** ป้ายค่าเริ่มต้นของหัวหน้าแผนก (ค่า chair หรือถอยไปค่าลูกทีม) */
   llmHeadLabel?: string;
+  /** เปิดหน้าต่างแผนก - null = สร้างแผนกใหม่ */
+  onEditDept?: (id: string | null) => void;
+  /** แก้/สร้างแผนกได้ไหม (owner/exec) - ดูอย่างเดียวก็ยังเปิดดูสกิล/webhook ได้ */
+  deptCanEdit?: boolean;
 }
 
 /** มุมมองแผงพนักงาน - จำไว้ข้ามรีเฟรช */
@@ -88,6 +95,7 @@ export default function HirePanel({
   tab, onTab: setTab, secretary, meetingCount, layoutPanel,
   llmOptions = [], llmOf, llmDefaultLabel = 'ค่าเริ่มต้น', onLlm,
   roleLlm, onRoleLlm, llmActiveLabel = 'คีย์ของเซิร์ฟเวอร์', llmHeadLabel = llmDefaultLabel,
+  onEditDept, deptCanEdit = false,
 }: Props) {
   const off = disabled || !!lock;
 
@@ -374,12 +382,20 @@ export default function HirePanel({
           <PanelBody className="gap-1.5">
             {lockNote}
 
-            <Hint>
-              จ้าง 1 คนคือสร้าง agent 1 ตัว พร้อมบทบาทตามลำดับ ผู้เสนอ ผู้ค้าน ผู้ตรวจสอบ
-              แต่ละบทบาทถูกประเมินคนละเกณฑ์ จึงเถียงกันจริง ต้องครบ 3 คนถึงได้การถกเต็มรูปแบบ
-              <br />
-              ไฟล์สกิลถูกอ่าน<b className="text-parchment">ตอนถามคำถาม</b> ไม่ใช่ตอนกดจ้าง
+            <Hint className="flex items-center gap-1.5">
+              จ้าง 1 คน = agent 1 ตัว · ครบ 3 คนถึงถกเต็มรูปแบบ
+              <InfoTip>คนที่ 1-4 ของแผนกได้บทบาทผู้เสนอ ผู้ค้าน ผู้ตรวจสอบ ผู้ดูความเป็นไปได้ตามลำดับ แต่ละบทบาทถูกประเมินคนละเกณฑ์จึงเถียงกันจริง · สกิลถูกอ่านตอนถามคำถาม ไม่ใช่ตอนกดจ้าง</InfoTip>
             </Hint>
+
+            {onEditDept && (
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" className="h-7" onClick={() => onEditDept(null)} disabled={!deptCanEdit}
+                  title={deptCanEdit ? 'ตั้งแผนกใหม่ - ชื่ออะไรก็ได้ ให้ AI ร่างสกิลให้ แล้วผูก webhook เข้า/ออกได้' : 'เจ้าของหรือ exec ของออฟฟิศเท่านั้น'}>
+                  <Plus /> แผนกใหม่
+                </Button>
+                <InfoTip>ตั้งแผนกชื่ออะไรก็ได้ เช่น IT Support รับ bug จาก logger แล้วแจ้ง Teams - ให้ AI ร่างสกิลให้ แล้วผูก webhook เข้า/ช่องส่งออกในหน้าเดียวกัน (หรือกด "แผนก & Webhook" บนแถบบน)</InfoTip>
+              </div>
+            )}
 
             <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pr-1">
               {DEPARTMENTS.map((d) => {
@@ -392,6 +408,12 @@ export default function HirePanel({
                   >
                     <div className="flex items-center gap-2">
                       <span className="text-[13px] font-semibold text-parchment">{d.nameTh}</span>
+                      {onEditDept && (
+                        <button type="button" onClick={() => onEditDept(d.id)} title="ตั้งค่าแผนก: สกิล / webhook เข้า / ส่งออก"
+                          className="rounded-box border border-transparent p-0.5 text-dim hover:border-ink-500 hover:text-parchment">
+                          <Settings2 className="size-3.5" />
+                        </button>
+                      )}
                       <span
                         className="ml-auto min-w-5 rounded-box px-1.5 text-center text-[11px] font-bold text-ink-900"
                         style={{ background: team.length ? d.color : 'var(--color-ink-500)' }}
@@ -400,8 +422,10 @@ export default function HirePanel({
                       </span>
                     </div>
 
-                    <p className="mb-1.5 mt-0.5 text-[11px] text-dim">
-                      ใช้สกิล <code>skills/{d.skill}.md</code>
+                    <p className="mb-1.5 mt-0.5 line-clamp-2 text-[11px] text-dim" title={d.description}>
+                      {d.custom
+                        ? (d.description || 'แผนกของออฟฟิศ - สกิลเก็บในออฟฟิศ')
+                        : <>ใช้สกิล <code>skills/{d.skill}.md</code></>}
                     </p>
 
                     <div className="flex gap-1.5">

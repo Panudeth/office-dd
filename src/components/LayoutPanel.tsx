@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import FurnThumb, { TileThumb } from '@/components/FurnThumb';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { InfoTip } from '@/components/ui/infotip';
 import { Input } from '@/components/ui/input';
 import { Hint, PanelBody } from '@/components/ui/panel';
 import {
@@ -121,9 +122,12 @@ export default function LayoutPanel({ world, snap, roster, save, saveErr }: Prop
         )}
       </div>
 
-      <Hint className="text-[10px] leading-snug">
-        โหมดเลือก: <b>คลิก</b>ของเพื่อเลือก (ของซ้อนกัน เช่นโต๊ะบนพรม - คลิกซ้ำที่เดิมเพื่อวนเลือกชิ้นข้างล่าง) · <b>ลาก</b>ย้าย · <b>ดับเบิลคลิก</b>/<kbd className="rounded bg-ink-700 px-1">R</kbd> หมุน · <kbd className="rounded bg-ink-700 px-1">Del</kbd> ลบ · <kbd className="rounded bg-ink-700 px-1">Esc</kbd>/คลิกขวา ยกเลิก
-        <br />เขียว = วางได้ / แดง = วางไม่ได้ (ทับของ ทับคน หรือทำให้เดินไปที่นั่ง/จุดสำคัญไม่ถึงจากทางเข้า)
+      <Hint className="flex items-center gap-1.5 text-[10px] leading-snug">
+        คลิกเลือก · ลากย้าย · <kbd className="rounded bg-ink-700 px-1">R</kbd> หมุน · <kbd className="rounded bg-ink-700 px-1">Del</kbd> ลบ
+        <InfoTip>
+          โหมดเลือก: <b>คลิก</b>ของเพื่อเลือก (ของซ้อนกัน เช่นโต๊ะบนพรม คลิกซ้ำที่เดิมเพื่อวนเลือกชิ้นข้างล่าง) · <b>ลาก</b>ย้าย · <b>ดับเบิลคลิก</b>/<kbd className="rounded bg-ink-700 px-1">R</kbd> หมุน · <kbd className="rounded bg-ink-700 px-1">Del</kbd> ลบ · <kbd className="rounded bg-ink-700 px-1">Esc</kbd>/คลิกขวา ยกเลิก
+          <br />เขียว = วางได้ / แดง = วางไม่ได้ (ทับของ ทับคน หรือทำให้เดินไปที่นั่ง/จุดสำคัญไม่ถึงจากทางเข้า)
+        </InfoTip>
       </Hint>
 
       {/* แถบเครื่องมือ - โหมดปัจจุบันเห็นชัด กด "เลือก" กลับได้ทุกเมื่อ */}
@@ -263,9 +267,12 @@ export default function LayoutPanel({ world, snap, roster, save, saveErr }: Prop
         </div>
         {tab === 'paint' ? (
           <>
-          <Hint className="text-[10px] leading-snug">
-            <b>กั้นห้อง/สร้างกำแพงข้างใน</b>: เลือก "ผนัง" หรือ "ผนังกระจก" แล้ว<b>ลาก</b>บนพื้นเป็นเส้น · <b>รื้อกำแพง/เจาะประตู</b>: เลือกพื้นชนิดใดก็ได้แล้วระบายทับผนัง
-            · ระบบไม่ยอมให้กั้นจนที่นั่ง/จุดสำคัญเดินไม่ถึง (ขึ้นข้อความบอก)
+          <Hint className="flex items-center gap-1.5 text-[10px] leading-snug">
+            กั้นห้อง / รื้อกำแพง
+            <InfoTip>
+              <b>กั้นห้อง/สร้างกำแพงข้างใน</b>: เลือก &quot;ผนัง&quot; หรือ &quot;ผนังกระจก&quot; แล้ว<b>ลาก</b>บนพื้นเป็นเส้น · <b>รื้อกำแพง/เจาะประตู</b>: เลือกพื้นชนิดใดก็ได้แล้วระบายทับผนัง
+              · ระบบไม่ให้กั้นจนที่นั่ง/จุดสำคัญเดินไม่ถึง (จะขึ้นข้อความแจ้ง)
+            </InfoTip>
           </Hint>
           <div className="grid grid-cols-4 gap-1">
             {TILES.map((t) => (

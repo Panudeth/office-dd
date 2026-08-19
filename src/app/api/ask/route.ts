@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { sanitizeDeptDefs } from '@/lib/departments';
 import { normalizeMode, runMeetingEngine } from '@/lib/engine';
 import { resolveCreds } from '@/lib/llm';
 import { persistMeeting } from '@/lib/meeting-store';
@@ -59,6 +60,7 @@ export async function POST(req: NextRequest) {
         await runMeetingEngine({
           question, mode, ownerDeptId: body.ownerDeptId, chairId: body.chairId,
           agents: body.agents, company: body.company, creds, assign: body.llm,
+          departments: sanitizeDeptDefs(body.departments),
         }, send);
       } finally {
         closed = true;

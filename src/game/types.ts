@@ -16,10 +16,11 @@ export type AgentState =
   | 'bench'     // นั่งม้านั่งในสวน
   | 'pond'      // ยืนชมบ่อน้ำ
   | 'chat'      // คุยกับเพื่อนร่วมงาน
+  | 'smoke'     // ออกไปสูบบุหรี่นอกตึก (ตอน AI ล่ม/ไม่ได้เชื่อม - พักยาว)
   | 'idle';     // ยืนเล่น
 
 export type BubbleIcon =
-  | 'talk' | 'type' | 'coffee' | 'idea' | 'board' | 'music' | 'food' | 'question';
+  | 'talk' | 'type' | 'coffee' | 'idea' | 'board' | 'music' | 'food' | 'question' | 'smoke';
 
 export interface Palette {
   skin: string;

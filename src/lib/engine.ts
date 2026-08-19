@@ -1,7 +1,7 @@
-import { DEPT_BY_ID, ROLES } from '@/lib/departments';
+import { ROLES, deptMap, type DepartmentDef } from '@/lib/departments';
 import { SECRETARY_NAME } from '@/game/map';
 import { ask, byokCreds, effectiveModel, type Creds } from '@/lib/llm';
-import { loadSkill, type LoadedSkill } from '@/lib/skills';
+import { loadSkillFor, type LoadedSkill } from '@/lib/skills';
 import { companyBlock, companyStats, type CompanyContext } from '@/lib/company';
 import {
   MAX_ATTENDEES, type AskAgent, type AskEvent, type LlmAssignment, type MeetingMode, type SkillFile,
@@ -44,7 +44,7 @@ const dumpSaid = (rows: Said[]) =>
 function agentSystem(skill: string, a: AskAgent, roomNote: string, company?: CompanyContext): string {
   const role = ROLES[a.role];
   // ชั้นข้อเท็จจริงของบริษัทวางต่อจาก skill - skill บอกวิธีคิด ข้อมูลบริษัทบอกว่าคิดกับอะไร
-  const facts = companyBlock(company, a.deptId);
+  const facts = companyBlock(company, a.deptId, a.deptName);
   return `${skill}
 ${facts ? `\n---\n\n${facts}\n` : ''}
 ---
@@ -463,13 +463,15 @@ export interface EngineInput {
   assign?: LlmAssignment;
   /** คนถามเป็นลูกค้า (โหมดตอบตรง) - ใช้กติกาบริการลูกค้า และอาจขึ้น ESCALATE_MARK ให้คนเรียกเปิดประชุมต่อ */
   customer?: boolean;
+  /** แผนกที่ออฟฟิศสร้างเอง/ทับ preset - ไม่ส่งมาใช้ preset ล้วน */
+  departments?: DepartmentDef[];
 }
 
 /** โหลด skill ของแผนก (ให้ headless ใช้ตอน PR เขียนคำตอบให้ลูกค้า) */
-export async function skillTextOf(deptId: string): Promise<string> {
-  const d = DEPT_BY_ID.get(deptId);
+export async function skillTextOf(deptId: string, custom: DepartmentDef[] = []): Promise<string> {
+  const d = deptMap(custom).get(deptId);
   if (!d) return '';
-  return (await loadSkill(d.skill)).text;
+  return (await loadSkillFor(d)).text;
 }
 
 /** ตัดคำขอให้อยู่ในกรอบ - ใช้ทั้ง route และ headless */
@@ -485,6 +487,7 @@ export async function runMeetingEngine(input: EngineInput, send: (ev: AskEvent) 
   const creds = input.creds;
   const deptIds = [...new Set(agents.map((a) => a.deptId))];
   const ownerDeptId = deptIds.includes(input.ownerDeptId) ? input.ownerDeptId : deptIds[0];
+  const depts = deptMap(input.departments);
 
   /**
    * โมเดลต่อคน/ต่อบทบาท - ชุดคีย์เพิ่มเติมมาใน body เพราะมีได้หลายชุดพร้อมกัน
@@ -541,8 +544,8 @@ export async function runMeetingEngine(input: EngineInput, send: (ev: AskEvent) 
         const skills = new Map<string, LoadedSkill>();
         await Promise.all(
           deptIds.map(async (id) => {
-            const d = DEPT_BY_ID.get(id);
-            if (d) skills.set(id, await loadSkill(d.skill));
+            const d = depts.get(id);
+            if (d) skills.set(id, await loadSkillFor(d));
           }),
         );
         const skillOf = (a: AskAgent) => skills.get(a.deptId)?.text ?? '';
@@ -550,10 +553,10 @@ export async function runMeetingEngine(input: EngineInput, send: (ev: AskEvent) 
 
         const files: SkillFile[] = deptIds.map((id) => {
           const s = skills.get(id);
-          const d = DEPT_BY_ID.get(id);
+          const d = depts.get(id);
           return {
             deptId: id,
-            deptName: d?.nameTh ?? id,
+            deptName: d?.nameTh ?? agents.find((a) => a.deptId === id)?.deptName ?? id,
             file: s?.file ?? '',
             bytes: s?.bytes ?? 0,
             missing: s?.missing ?? true,
@@ -702,7 +705,7 @@ export async function runMeetingEngine(input: EngineInput, send: (ev: AskEvent) 
 
         send({ type: 'phase', phase: 'synthesis', label: 'ประธานสรุปก่อนมารายงาน' });
         // ประธาน = หัวหน้าแผนกที่ผู้ใช้เลือกไว้ (เลือกไว้แล้วข้างบน) - ถกมาด้วยแล้ว ตอนนี้สวมหมวกประธาน
-        const deptNames = deptIds.map((id) => DEPT_BY_ID.get(id)?.nameTh ?? id);
+        const deptNames = deptIds.map((id) => depts.get(id)?.nameTh ?? agents.find((a) => a.deptId === id)?.deptName ?? id);
         await working(chair, 'synthesis', 'สรุปในฐานะประธาน', chairC);
         const final = chairC
           ? await synthesize(skillOf(chair), chair, question, deptNames, r1, r2, chairC, company)

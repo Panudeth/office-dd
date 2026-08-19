@@ -17,6 +17,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { InfoTip } from '@/components/ui/infotip';
 import { Field, Input, Textarea } from '@/components/ui/input';
 import { Hint } from '@/components/ui/panel';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -224,9 +225,12 @@ export default function CompanyPanel({
             )}
             <p className="flex items-start gap-1.5 rounded-box border border-dashed border-ink-500 px-2 py-1 text-[10px] leading-relaxed text-dim">
               <ShieldAlert className="mt-px size-3 shrink-0 text-brass" />
-              <span>
-                ข้อมูลตรงนี้จะถูกส่งไปกับทุกคำถามที่ <b className="text-parchment">{llmLabel}</b> - อย่าใส่รหัสผ่าน เลขบัตร หรือข้อมูลที่ห้ามออกนอกบริษัท
-                (Ollama ในเครื่องปลอดภัยสุด free tier บางเจ้าเอาไป train ได้)
+              <span className="flex flex-wrap items-center gap-1.5">
+                ข้อมูลนี้ถูกส่งไปที่ <b className="text-parchment">{llmLabel}</b> ทุกคำถาม - อย่าใส่รหัสผ่าน เลขบัตร หรือข้อมูลลับ
+                <InfoTip>
+                  ทุกฟิลด์ในหน้านี้ถูกแนบไปกับทุกคำถามที่ส่งถึงผู้ให้บริการโมเดล จึงไม่ควรใส่รหัสผ่าน เลขบัตร
+                  หรือข้อมูลที่ห้ามออกนอกบริษัท Ollama ในเครื่องปลอดภัยที่สุด ส่วน free tier ของบางผู้ให้บริการอาจนำข้อมูลไปฝึกโมเดล
+                </InfoTip>
               </span>
             </p>
 
@@ -257,7 +261,7 @@ export default function CompanyPanel({
                             <span className={`ml-auto text-[10px] font-normal ${over ? 'text-brass' : 'text-dim'}`}>{v.length}/{f.max}</span>
                           </span>
                         }
-                        hint={f.hint}
+                        info={f.hint}
                       >
                         {f.long ? (
                           <Textarea rows={2} value={v} disabled={!canEdit} onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))} className="h-auto" />
@@ -282,9 +286,12 @@ export default function CompanyPanel({
               {/* ---------- สินค้า/บริการ ---------- */}
               <TabsContent value="products" className="min-h-0">
                 <div className="flex max-h-[56vh] flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5">
-                  <Hint>
-                    รายการนี้ถูกส่งให้ agent ทุกตัวพร้อมโปรไฟล์ - ใส่ชื่อกับราคาให้ตรงของจริง agent จะอ้างตามนี้และไม่แต่งราคาเอง
-                    ราคาพิมพ์เป็นข้อความได้เลย เช่น "990-2,990 บาท/เดือน" หรือ "เริ่มต้น 15,000 บาท/โปรเจกต์"
+                  <Hint className="flex items-center gap-1.5">
+                    รายการสินค้า/บริการที่ agent ใช้อ้างอิง
+                    <InfoTip>
+                      รายการนี้ถูกส่งให้ agent ทุกตัวพร้อมโปรไฟล์ ควรใส่ชื่อและราคาให้ตรงของจริง agent จะอ้างตามนี้และไม่แต่งราคาเอง
+                      ราคาพิมพ์เป็นข้อความได้ เช่น &quot;990-2,990 บาท/เดือน&quot; หรือ &quot;เริ่มต้น 15,000 บาท/โปรเจกต์&quot;
+                    </InfoTip>
                   </Hint>
 
                   {!items.length ? (
@@ -398,7 +405,7 @@ export default function CompanyPanel({
                         </span>
                       </span>
                     }
-                    hint={`ควรมี: ${DEPT_NOTE_HINTS[noteDept] ?? ''} - เฉพาะคนของแผนกนี้ที่จะเห็น`}
+                    info={`เฉพาะคนของแผนกนี้ที่จะเห็น ควรมี: ${DEPT_NOTE_HINTS[noteDept] ?? ''}`}
                   >
                     <Textarea
                       rows={9}
@@ -420,12 +427,16 @@ export default function CompanyPanel({
               {/* ---------- เอกสาร ---------- */}
               <TabsContent value="docs" className="min-h-0">
                 <div className="flex max-h-[56vh] flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5">
-                  <Hint>
-                    เอกสารจะถูกตัดเป็นชิ้น แปลงเป็น vector ด้วย <b className="text-parchment">{llmLabel}</b> แล้วเก็บใน Supabase
-                    ตอนถาม ระบบค้นชิ้นที่เกี่ยวมาแนบให้ agent พร้อมอ้างอิงชื่อไฟล์ - ต้องใช้คีย์ที่ทำ embedding ได้ (Gemini / OpenAI / Ollama ที่ pull nomic-embed-text แล้ว)
+                  <Hint className="flex items-center gap-1.5">
+                    เอกสารอ้างอิงสำหรับ agent (ค้นด้วย embedding)
+                    <InfoTip>
+                      เอกสารจะถูกตัดเป็นชิ้น แปลงเป็น vector ด้วย <b className="text-parchment">{llmLabel}</b> แล้วเก็บใน Supabase
+                      ตอนถาม ระบบค้นชิ้นที่เกี่ยวข้องมาแนบให้ agent พร้อมอ้างอิงชื่อไฟล์
+                      ต้องใช้คีย์ที่ทำ embedding ได้ (Gemini / OpenAI / Ollama ที่ pull nomic-embed-text แล้ว)
+                    </InfoTip>
                   </Hint>
 
-                  <Field label="ชั้นข้อมูล" hint="ภายใน = คนในและ agent ภายในเท่านั้น  สาธารณะ = ลูกค้าที่ถามผ่าน LINE/ช่องทางสาธารณะให้ PR ค้นตอบได้ด้วย (เช่น โบรชัวร์ ราคา FAQ เงื่อนไขบริการ)">
+                  <Field label="ชั้นข้อมูล" info="ภายใน = คนในและ agent ภายในเท่านั้น สาธารณะ = ลูกค้าที่ถามผ่าน LINE/ช่องทางสาธารณะให้ PR ค้นตอบได้ด้วย (เช่น โบรชัวร์ ราคา FAQ เงื่อนไขบริการ)">
                     <div className="flex gap-1">
                       <button onClick={() => setUploadPublic(false)} disabled={!canEdit}
                         className={`rounded-box border-2 px-2 py-0.5 text-[10px] ${!uploadPublic ? 'border-brass bg-ink-700 text-parchment' : 'border-ink-600 bg-ink-800 text-dim hover:border-ink-500'}`}>
@@ -438,7 +449,7 @@ export default function CompanyPanel({
                     </div>
                   </Field>
 
-                  <Field label="ให้แผนกไหนอ่านได้" hint="ไม่เลือก = ทุกแผนก  เอกสารกฎหมายเลือกเฉพาะกฎหมาย จะได้ไม่ไปรกหัวการตลาด">
+                  <Field label="ให้แผนกไหนอ่านได้" info="ไม่เลือก = ทุกแผนก เลือกเฉพาะแผนกที่เกี่ยวข้อง เช่น เอกสารกฎหมายเลือกเฉพาะแผนกกฎหมาย">
                     <div className="flex flex-wrap gap-1">
                       {DEPARTMENTS.map((d) => {
                         const on = uploadDepts.includes(d.id);

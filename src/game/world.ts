@@ -55,7 +55,7 @@ const FEM_NAMES = new Set(['แนน', 'ฟ้า', 'มิ้น', 'ปอ', '
 const STATE_TH: Record<AgentState, string> = {
   work: 'ทำงาน', walk: 'กำลังเดิน', meet: 'ประชุม', think: 'กำลังถกกัน',
   report: 'มารายงาน', coffee: 'ชงกาแฟ', eat: 'กินข้าว', lounge: 'นั่งเล่น',
-  bench: 'นั่งสวน', pond: 'ชมบ่อน้ำ', chat: 'คุยกัน', idle: 'ยืนเล่น',
+  bench: 'นั่งสวน', pond: 'ชมบ่อน้ำ', chat: 'คุยกัน', smoke: 'สูบบุหรี่', idle: 'ยืนเล่น',
 };
 export const stateLabel = (s: AgentState) => STATE_TH[s] ?? s;
 
@@ -126,6 +126,8 @@ export class World {
   private layoutListeners = new Set<(l: OfficeLayout, cause: LayoutCause) => void>();
   private seatListeners = new Set<(id: string, seat: Tile) => void>();
   private editListeners = new Set<(s: EditSnapshot) => void>();
+  /** AI ล่ม/ไม่ได้เชื่อม (ข้อความเหตุผล) - พนักงานพักยาว ไม่นั่งทำงาน; null = ปกติ */
+  private aiDown: string | null = null;
   /** cache จำนวนที่ว่างต่อแผนก - คำนวณแพง (ลองวางโต๊ะทีละตัว) เลยจำไว้ต่อ rev */
   private roomLeftCache: { rev: string; staff: number; by: Record<string, number> } | null = null;
 
@@ -959,10 +961,127 @@ export class World {
   }
 
   /* ============================================================
+     AI ล่ม / ไม่ได้เชื่อม -> ทั้งออฟฟิศพักยาว
+     ============================================================ */
+  isAiDown() { return this.aiDown; }
+  /** หน้าเว็บบอกสถานะ AI - down (มีเหตุผล) = ทุกคนลุกจากโต๊ะไปพัก, null = กลับมาทำงานตามปกติ */
+  setAiDown(reason: string | null) {
+    const was = !!this.aiDown;
+    this.aiDown = reason;
+    if (!!reason === was) return;
+    this.employees.forEach((e) => {
+      if (e.busy || e.isBoss || e.isVisitor || !Number.isFinite(e.timer)) return;
+      // เพิ่งรู้ว่า AI ล่ม: คนที่นั่งโต๊ะอยู่ทยอยลุกใน 1-5 วิ / AI กลับมา: คนที่พักอยู่ทยอยกลับใน 2-8 วิ
+      if (reason && e.state === 'work') e.timer = Math.min(e.timer, 1 + Math.random() * 4);
+      else if (!reason && e.state !== 'work' && e.state !== 'walk') e.timer = Math.min(e.timer, 2 + Math.random() * 6);
+    });
+  }
+  /** จุดยืนสูบบุหรี่ - นอกตึก ใกล้ทางเข้าถ้ามี ไม่มีก็ที่ว่างกลางแจ้งที่ไหนก็ได้ */
+  private smokeSpots(): Tile[] {
+    const ent = this.lay.entrance();
+    const pick = (near: boolean) => {
+      const out: Tile[] = [];
+      for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
+        if (isIndoor(x, y) || !tileFree(x, y) || this.lay.at(x, y)) continue;
+        if (near && ent && (Math.abs(x - ent.x) > 5 || Math.abs(y - ent.y) > 4)) continue;
+        out.push({ x, y });
+      }
+      return out;
+    };
+    const near = ent ? pick(true) : [];
+    const all = near.length ? near : pick(false);
+    for (let i = all.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [all[i], all[j]] = [all[j], all[i]]; }
+    return all.slice(0, 10);
+  }
+  /** พฤติกรรมตอน AI ล่ม - ไม่มีใครนั่งทำงาน: กาแฟ ข้าว โซฟา สวน สูบบุหรี่ คุยกัน (พักนานกว่าปกติ) */
+  private decideBreak(e: Employee) {
+    const roll = Math.random();
+    const long = (a: number, b: number) => a + Math.random() * b;
+    if (roll < 0.2) {
+      const spot = this.pickSpot(e, this.lay.spots('cooler'));
+      if (spot) {
+        this.goTo(e, spot.x, spot.y, () => {
+          e.pose = 'stand'; e.dir = 'up'; e.state = 'coffee';
+          e.timer = long(8, 10); e.bubble = 'coffee'; e.bubbleT = 4;
+        });
+        return;
+      }
+    }
+    if (roll < 0.38) {
+      const spot = this.pickSpot(e, this.lay.spots('counter'));
+      if (spot) {
+        this.goTo(e, spot.x, spot.y, () => {
+          e.pose = 'stand'; e.dir = 'up'; e.state = 'eat';
+          e.timer = long(10, 12); e.bubble = 'food'; e.bubbleT = 5;
+        });
+        return;
+      }
+    }
+    if (roll < 0.56) {
+      const seats = this.lay.loungeSeats();
+      const s = this.pickSpot(e, seats);
+      if (s) {
+        const dir = seats.find((q) => q.x === s.x && q.y === s.y)?.dir ?? 'down';
+        this.goTo(e, s.x, s.y, () => {
+          this.sitAt(e, s.x, s.y, dir, 'lounge', long(12, 14));
+          e.bubble = 'music'; e.bubbleT = 4;
+        });
+        return;
+      }
+    }
+    if (roll < 0.76) {
+      const s = this.pickSpot(e, this.smokeSpots());
+      if (s) {
+        this.goTo(e, s.x, s.y, () => {
+          e.pose = 'stand'; e.dir = rnd<Dir>(['down', 'left', 'right']); e.state = 'smoke';
+          e.timer = long(10, 12); e.bubble = 'smoke'; e.bubbleT = 5;
+        });
+        return;
+      }
+    }
+    if (roll < 0.9) {
+      const b = this.pickSpot(e, this.lay.benchSeats());
+      if (b) {
+        this.goTo(e, b.x, b.y, () => {
+          this.sitAt(e, b.x, b.y, 'down', 'bench', long(12, 14));
+          e.bubble = rnd<BubbleIcon>(['music', 'coffee', 'smoke']); e.bubbleT = 4;
+        });
+        return;
+      }
+      const s = this.pickSpot(e, this.lay.pondSpots());
+      if (s) {
+        this.goTo(e, s.x, s.y, () => {
+          e.pose = 'stand'; e.dir = 'right'; e.state = 'pond';
+          e.timer = long(8, 10); e.bubble = 'idea'; e.bubbleT = 3;
+        });
+        return;
+      }
+    }
+    // ไปคุยกับคนที่ยืนพักอยู่ หรือไม่ก็ยืนเล่นแถวนั้น
+    const other = this.employees.find((o) => o !== e && !o.busy && o.pose !== 'walk' && (o.state === 'smoke' || o.state === 'coffee' || o.state === 'idle' || o.state === 'eat'));
+    if (other) {
+      const spot = ([[other.tx - 1, other.ty], [other.tx + 1, other.ty], [other.tx, other.ty + 1]] as const)
+        .find(([x, y]) => tileFree(x, y) && !this.lay.at(x, y) && !this.spotTaken(x, y, e));
+      if (spot) {
+        this.goTo(e, spot[0], spot[1], () => {
+          e.pose = 'stand';
+          e.dir = spot[0] < other.tx ? 'right' : spot[0] > other.tx ? 'left' : 'up';
+          e.state = 'chat'; e.timer = long(6, 8); e.bubble = 'talk'; e.bubbleT = 3;
+        });
+        return;
+      }
+    }
+    const s = this.pickSpot(e, this.idleSpots());
+    if (!s) { e.timer = 3; return; }
+    this.goTo(e, s.x, s.y, () => { e.pose = 'stand'; e.state = 'idle'; e.timer = long(4, 6); });
+  }
+
+  /* ============================================================
      AI สุ่มพฤติกรรมตอนว่าง
      ============================================================ */
   private decide(e: Employee) {
     if (e.busy) { e.timer = 5; return; }
+    if (this.aiDown) { this.decideBreak(e); return; }
     if (e.isSecretary) { this.decideSecretary(e); return; }
     const roll = Math.random();
 
@@ -1022,7 +1141,7 @@ export class World {
       const other = this.employees.find((o) => o !== e && o.state === 'work' && !o.busy);
       if (other) {
         const spot = ([[other.tx - 1, other.ty], [other.tx + 1, other.ty], [other.tx, other.ty - 1]] as const)
-          .find(([x, y]) => tileFree(x, y));
+          .find(([x, y]) => tileFree(x, y) && !this.spotTaken(x, y, e));
         if (spot) {
           this.goTo(e, spot[0], spot[1], () => {
             e.pose = 'stand';
@@ -1103,6 +1222,12 @@ export class World {
           e.path.shift();
           if (!e.path.length) {
             e.path = null;
+            // ถึงแล้วแต่มีคนยืน/นั่งอยู่ก่อน (จุดยืนธรรมดา ไม่ใช่ที่นั่ง/โต๊ะตัวเอง) -> ขยับไปช่องข้าง ๆ ก่อนค่อยทำต่อ
+            const blocked = this.employees.some((o) => o !== e && !o.path?.length && o.tx === e.tx && o.ty === e.ty);
+            if (blocked && !this.lay.at(e.tx, e.ty) && !(e.tx === e.seat.x && e.ty === e.seat.y)) {
+              const alt = this.freeNeighbor(e);
+              if (alt) { const f = e.after; e.after = null; this.goTo(e, alt.x, alt.y, f); continue; }
+            }
             const f = e.after; e.after = null;
             f?.();
           }
@@ -1130,7 +1255,7 @@ export class World {
       e.timer -= dt;
       if (e.timer <= 0) {
         if (e.busy) { e.timer = 5; continue; }
-        if (e.state === 'work' && Math.random() < 0.55) {
+        if (e.state === 'work' && !this.aiDown && Math.random() < 0.55) {
           e.timer = 6 + Math.random() * 10;
           e.bubble = rnd<BubbleIcon>(['type', 'idea', 'talk']);
           e.bubbleT = 2;
@@ -1559,9 +1684,34 @@ export class World {
   private pickSpot<T extends Tile>(e: Employee, spots: T[]): T | null {
     const ok = spots.filter((t) =>
       tileFree(t.x, t.y)
-      && !this.employees.some((o) => o !== e && o.tx === t.x && o.ty === t.y)
+      && !this.spotTaken(t.x, t.y, e)
       && findPath(e.tx, e.ty, t.x, t.y) !== null);
     return ok.length ? rnd(ok) : null;
+  }
+
+  /**
+   * ช่องนี้ "ถูกจอง" ไหม - มีคนยืน/นั่งอยู่ หรือมีคนกำลังเดินไปจะหยุดตรงนั้น (ไม่นับตัวเอง)
+   * เดินผ่านกันได้ (pathfinding ไม่สนคน) แต่ห้ามหยุดซ้อนกัน - คนที่กำลังเดินจึงนับที่ปลายทาง ไม่ใช่ที่เท้าอยู่ตอนนี้
+   */
+  private spotTaken(x: number, y: number, except?: Employee): boolean {
+    return this.employees.some((o) => {
+      if (o === except) return false;
+      const t: Tile = o.path?.length ? o.path[o.path.length - 1] : { x: o.tx, y: o.ty };
+      return t.x === x && t.y === y;
+    });
+  }
+
+  /** ช่องว่างข้าง ๆ ที่ยังไม่มีใครจอง - ไว้ขยับหลบตอนเดินไปถึงแล้วเจอคนยืนอยู่ก่อน */
+  private freeNeighbor(e: Employee): Tile | null {
+    const cand: Tile[] = [];
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]] as const) {
+      const x = e.tx + dx, y = e.ty + dy;
+      if (!tileFree(x, y) || this.lay.at(x, y) || this.spotTaken(x, y, e)) continue;
+      if (isIndoor(x, y) !== isIndoor(e.tx, e.ty)) continue; // ไม่หลบทะลุออกนอก/เข้าในตึก
+      if (findPath(e.tx, e.ty, x, y) === null) continue;
+      cand.push({ x, y });
+    }
+    return cand.length ? rnd(cand) : null;
   }
 
   private refreshLayoutIndex() {

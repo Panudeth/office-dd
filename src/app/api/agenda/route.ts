@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { buildAgenda } from '@/lib/agenda';
+import { sanitizeDeptDefs } from '@/lib/departments';
 import { resolveCreds } from '@/lib/llm';
 import type { AgendaRequest } from '@/lib/protocol';
 
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
   });
 
   try {
-    const agenda = await buildAgenda(question, body.hiredDeptIds ?? [], creds, body.profile);
+    const agenda = await buildAgenda(question, body.hiredDeptIds ?? [], creds, body.profile, sanitizeDeptDefs(body.departments));
     return Response.json(agenda);
   } catch (err) {
     return Response.json(

@@ -1,4 +1,4 @@
-import { DEPARTMENTS, DEPT_BY_ID } from './departments';
+import { mergeDepartments, type Department, type DepartmentDef } from './departments';
 import { ask, type Creds } from './llm';
 import type { Agenda, AgendaItem, MeetingMode } from './protocol';
 import { profileBlock } from './company';
@@ -12,9 +12,9 @@ import { profileBlock } from './company';
    ============================================================ */
 
 /** อธิบายว่าแต่ละแผนกดูแลอะไร - ประกอบจาก lens ที่มีอยู่แล้ว ไม่ต้องเขียนซ้ำ */
-function deptCatalog(hiredDeptIds: string[]): string {
-  return DEPARTMENTS.filter((d) => hiredDeptIds.includes(d.id))
-    .map((d) => `- ${d.id} (${d.nameTh}): ${d.lenses.proposer} / ${d.lenses.challenger}`)
+function deptCatalog(depts: Department[], hiredDeptIds: string[]): string {
+  return depts.filter((d) => hiredDeptIds.includes(d.id))
+    .map((d) => `- ${d.id} (${d.nameTh}): ${d.description ? `${d.description} / ` : ''}${d.lenses.proposer} / ${d.lenses.challenger}`)
     .join('\n');
 }
 
@@ -41,11 +41,11 @@ const SYSTEM = `คุณคือเลขานุการที่ประ�
 
 ตอบเป็น JSON อย่างเดียว ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ markdown code fence`;
 
-function userPrompt(question: string, hiredDeptIds: string[], profile?: Record<string, string>): string {
+function userPrompt(question: string, depts: Department[], hiredDeptIds: string[], profile?: Record<string, string>): string {
   const facts = profileBlock(profile);
   return `${facts ? `${facts}\n\n` : ''}แผนกที่บริษัทนี้มีพนักงานอยู่จริง (เลือกได้เฉพาะ id ในรายการนี้เท่านั้น):
 
-${deptCatalog(hiredDeptIds)}
+${deptCatalog(depts, hiredDeptIds)}
 
 คำถามของผู้บริหาร:
 
@@ -78,9 +78,9 @@ function extractJson(text: string): unknown {
  * เลือกแผนกด้วยการนับคำ - ใช้ตอนไม่มีคีย์ LLM (โหมดสาธิต)
  * แม่นน้อยกว่ามาก แต่ยังดีกว่าเดิมตรงที่คืนได้หลายแผนก ไม่ใช่แผนกเดียว
  */
-export function keywordAgenda(question: string, hiredDeptIds: string[]): Agenda {
+export function keywordAgenda(question: string, hiredDeptIds: string[], custom: DepartmentDef[] = []): Agenda {
   const q = question.toLowerCase();
-  const scored = DEPARTMENTS.filter((d) => hiredDeptIds.includes(d.id))
+  const scored = mergeDepartments(custom).filter((d) => hiredDeptIds.includes(d.id))
     .map((d) => ({
       id: d.id,
       score: d.keywords.reduce((n, kw) => (q.includes(kw.toLowerCase()) ? n + 1 : n), 0),
@@ -109,19 +109,22 @@ export async function buildAgenda(
   hiredDeptIds: string[],
   creds: Creds | null,
   profile?: Record<string, string>,
+  custom: DepartmentDef[] = [],
 ): Promise<Agenda> {
-  if (!creds || !hiredDeptIds.length) return keywordAgenda(question, hiredDeptIds);
+  if (!creds || !hiredDeptIds.length) return keywordAgenda(question, hiredDeptIds, custom);
+  const depts = mergeDepartments(custom);
+  const known = new Set(depts.map((d) => d.id));
 
   let raw: unknown;
   try {
     const text = await ask(
-      { system: SYSTEM, user: userPrompt(question, hiredDeptIds, profile), maxTokens: 2000, effort: 'low' },
+      { system: SYSTEM, user: userPrompt(question, depts, hiredDeptIds, profile), maxTokens: 2000, effort: 'low' },
       creds,
     );
     raw = extractJson(text);
   } catch {
     // เลขาฯ พังไม่ควรทำให้ถามคำถามไม่ได้เลย - ถอยไปใช้การนับคำแล้วเดินต่อ
-    return keywordAgenda(question, hiredDeptIds);
+    return keywordAgenda(question, hiredDeptIds, custom);
   }
 
   const o = (raw ?? {}) as Record<string, unknown>;
@@ -133,7 +136,7 @@ export async function buildAgenda(
     const row = (r ?? {}) as Record<string, unknown>;
     const deptId = typeof row.dept === 'string' ? row.dept : '';
     // โมเดลชอบแต่งแผนกที่ไม่มีอยู่จริงขึ้นมา - ตัดทิ้งเงียบ ๆ ดีกว่าปล่อยไปพังตอนประชุม
-    if (!DEPT_BY_ID.has(deptId) || !hiredDeptIds.includes(deptId) || seen.has(deptId)) continue;
+    if (!known.has(deptId) || !hiredDeptIds.includes(deptId) || seen.has(deptId)) continue;
     seen.add(deptId);
     items.push({
       deptId,
@@ -142,7 +145,7 @@ export async function buildAgenda(
     if (items.length >= 3) break;
   }
 
-  if (!items.length) return keywordAgenda(question, hiredDeptIds);
+  if (!items.length) return keywordAgenda(question, hiredDeptIds, custom);
 
   const owner = typeof o.owner === 'string' && seen.has(o.owner) ? o.owner : items[0].deptId;
   const mode: MeetingMode = o.mode === 'relay' ? 'relay' : o.mode === 'direct' ? 'direct' : 'roundtable';

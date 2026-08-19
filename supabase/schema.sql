@@ -487,3 +487,100 @@ begin
     alter publication supabase_realtime add table public.office_layout;
   end if;
 end $$;
+
+-- ============================================================
+-- แผนกของออฟฟิศ (สร้างเอง / ทับ preset) + ช่องทางเข้า-ออกต่อแผนก
+--   office_department : แผนกที่ผู้ใช้สร้าง (IT Support, บัญชี GCP ...) หรือแถว id เดียวกับ preset = ทับสกิล/หน้าที่
+--   office_dept_channel: ช่องส่งออกของแผนก (Teams / LINE group / Slack / webhook ทั่วไป) - อ่าน/เขียนได้เฉพาะเจ้าของ/exec (มี URL ลับ)
+--   office_inbox       : ของที่ระบบข้างนอกยิงเข้ามาหาแผนก (webhook) - เซิร์ฟเวอร์เขียน สมาชิกอ่าน
+--   office_token.scope 'inbox' + dept_ids : token ที่ยิงเข้า inbox ของแผนกที่ระบุได้อย่างเดียว
+-- ============================================================
+create table if not exists public.office_department (
+  office_id    uuid not null references public.office(id) on delete cascade,
+  id           text not null,
+  name_th      text not null,
+  short_th     text not null default '',
+  color        text not null default '#8a8f98',
+  description  text not null default '',
+  skill_md     text not null default '',
+  lenses       jsonb not null default '{}',
+  keywords     text[] not null default '{}',
+  playbook     text not null default '',
+  sort_order   int  not null default 0,
+  updated_by   uuid references auth.users(id) on delete set null,
+  updated_at   timestamptz not null default now(),
+  primary key (office_id, id)
+);
+
+create table if not exists public.office_dept_channel (
+  id           uuid primary key default gen_random_uuid(),
+  office_id    uuid not null references public.office(id) on delete cascade,
+  dept_id      text not null,
+  kind         text not null,                 -- teams | slack | discord | line | webhook
+  label        text not null default '',
+  config       jsonb not null default '{}',   -- { url } / { token, to }
+  events       text[] not null default '{report}',  -- report = ผลจาก inbox/ประชุมของแผนกนี้, meeting = ทุกประชุมที่แผนกนี้เข้า
+  enabled      boolean not null default true,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+create index if not exists office_dept_channel_office on public.office_dept_channel(office_id, dept_id);
+
+create table if not exists public.office_inbox (
+  id           uuid primary key default gen_random_uuid(),
+  office_id    uuid not null references public.office(id) on delete cascade,
+  dept_id      text not null,
+  source       text not null default '',
+  title        text not null default '',
+  intent       text not null default 'task',  -- note = แค่ให้แผนกรู้ | task = ทำรายงาน/ตัดสินใจ
+  ask          text not null default '',
+  data         jsonb,
+  data_text    text not null default '',      -- data ที่แปลงเป็นข้อความให้ agent อ่าน (และค้นย้อนหลัง)
+  idem_key     text,
+  status       text not null default 'received', -- received | running | done | error
+  meeting_id   uuid references public.meeting(id) on delete set null,
+  answer       text not null default '',
+  delivered    jsonb not null default '[]',   -- [{channelId, kind, ok, error}]
+  error        text,
+  created_at   timestamptz not null default now(),
+  finished_at  timestamptz
+);
+create index if not exists office_inbox_office on public.office_inbox(office_id, created_at desc);
+create unique index if not exists office_inbox_idem on public.office_inbox(office_id, dept_id, idem_key) where idem_key is not null;
+
+alter table public.office_token add column if not exists dept_ids text[] not null default '{}';
+alter table public.office_token drop constraint if exists office_token_scope_check;
+alter table public.office_token add constraint office_token_scope_check check (scope in ('internal', 'public', 'inbox'));
+
+alter table public.office_department   enable row level security;
+alter table public.office_dept_channel enable row level security;
+alter table public.office_inbox        enable row level security;
+
+drop policy if exists office_department_select on public.office_department;
+create policy office_department_select on public.office_department
+  for select using (public.is_office_member(office_id));
+drop policy if exists office_department_write on public.office_department;
+create policy office_department_write on public.office_department
+  for all using (public.can_edit_office(office_id)) with check (public.can_edit_office(office_id));
+
+-- channel มี URL/token ลับ - แม้แต่อ่านก็ให้เฉพาะเจ้าของ/exec
+drop policy if exists office_dept_channel_all on public.office_dept_channel;
+create policy office_dept_channel_all on public.office_dept_channel
+  for all using (public.can_edit_office(office_id)) with check (public.can_edit_office(office_id));
+
+drop policy if exists office_inbox_select on public.office_inbox;
+create policy office_inbox_select on public.office_inbox
+  for select using (public.is_office_member(office_id));
+drop policy if exists office_inbox_write on public.office_inbox;
+create policy office_inbox_write on public.office_inbox
+  for all using (public.can_edit_office(office_id)) with check (public.can_edit_office(office_id));
+
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'office_department') then
+    alter publication supabase_realtime add table public.office_department;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'office_inbox') then
+    alter publication supabase_realtime add table public.office_inbox;
+  end if;
+end $$;

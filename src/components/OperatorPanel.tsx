@@ -73,7 +73,7 @@ export default function OperatorPanel({ open, onClose, meetings, loading, onRefr
       <DialogContent
         icon={<BellRing />}
         title="สมุดประชาสัมพันธ์"
-        description="ลูกค้าติดต่ออะไรเข้ามาบ้าง ตอบไปว่าอะไร เรื่องไหนต้องปรึกษาทีม - เฉพาะคำถามจากคนนอก (LINE / MCP / API)"
+        description="คำถามจากคนนอก (LINE / MCP / API) คำตอบที่ส่งกลับ และเรื่องที่ต้องปรึกษาทีม"
         wide
       >
         <div className="flex flex-wrap items-center gap-2 text-[11px]">

@@ -1,6 +1,5 @@
 import { createMcpHandler, withMcpAuth } from 'mcp-handler';
 import { z } from 'zod';
-import { DEPARTMENTS } from '@/lib/departments';
 import { listOfficeDepartments, runHeadless } from '@/lib/headless';
 import { adminConfigured, officeFromToken, sbAdmin } from '@/lib/supabase-admin';
 
@@ -14,8 +13,6 @@ export const maxDuration = 300;
      auth:      Authorization: Bearer <office token>  (สร้างจากหน้าออฟฟิศ)
    ทุก tool ทำงานบนออฟฟิศของ token นั้นเท่านั้น - คำถามที่ถามผ่านทางนี้จะเห็นเป็นการประชุมจริงในจอ
    ============================================================ */
-
-const DEPT_IDS = DEPARTMENTS.map((d) => d.id) as [string, ...string[]];
 
 const officeOf = (ctx: { http?: { authInfo?: { extra?: Record<string, unknown> } } }): string => {
   const id = ctx.http?.authInfo?.extra?.officeId;
@@ -149,7 +146,7 @@ const handler = createMcpHandler(
           'เร็ว - คำขอ LLM ครั้งเดียว เหมาะกับคำถามข้อเท็จจริง/ข้อกฎหมาย/ตัวเลข ที่อยากได้มุมของแผนกนั้น ' +
           'ในจอออฟฟิศจะเห็นหัวหน้าแผนกลุกไปตอบ และคำตอบถูกบันทึกในสมุดเลขาฯ',
         inputSchema: z.object({
-          department: z.enum(DEPT_IDS).describe('id แผนก: ' + DEPARTMENTS.map((d) => `${d.id}=${d.nameTh}`).join(', ')),
+          department: z.string().min(1).describe('id แผนก - ดูรายการจาก list_departments (รวมแผนกที่ออฟฟิศสร้างเอง)'),
           question: z.string().min(1).describe('คำถาม (ภาษาไทยหรืออังกฤษ)'),
           asked_by: z.string().optional().describe('ใครถาม เช่น ชื่อ agent หรือระบบ - โชว์ในบันทึก'),
           wait_seconds: z.number().int().min(5).max(280).optional()
@@ -182,7 +179,7 @@ const handler = createMcpHandler(
           'ใช้กับเรื่องที่ต้องชั่งน้ำหนักหลายมุม ไม่ระบุแผนกให้เลขาฯ เลือกจากคำถาม',
         inputSchema: z.object({
           question: z.string().min(1),
-          departments: z.array(z.enum(DEPT_IDS)).optional().describe('แผนกที่ให้เข้าประชุม - ว่าง = เลขาฯ เลือกให้'),
+          departments: z.array(z.string().min(1)).optional().describe('id แผนกที่ให้เข้าประชุม (ดู list_departments) - ว่าง = เลขาฯ เลือกให้'),
           mode: z.enum(['roundtable', 'relay']).optional().describe('roundtable (ค่าเริ่มต้น) หรือ relay'),
           asked_by: z.string().optional(),
           wait_seconds: z.number().int().min(5).max(280).optional()

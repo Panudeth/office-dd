@@ -86,9 +86,34 @@ export interface Department {
   keywords: string[];
   /** มุมมองเฉพาะสาขา ผูกกับบทบาทตามลำดับ ROLE_ORDER - ทำให้บทบาทเดียวกันในคนละแผนกไม่พูดเหมือนกัน */
   lenses: Record<AgentRole, string>;
+  /** หน้าที่ของแผนก (ภาษาคน) - แผนกที่ผู้ใช้สร้างเอง ใช้เป็นต้นทางให้ AI ร่างสกิล/มุมมอง และให้เลขาฯ route คำถาม */
+  description?: string;
+  /** สกิลแบบ inline (markdown) - แผนกที่สร้างเอง หรือทับสกิลของ preset; ไม่มี = อ่าน skills/<skill>.md */
+  skillText?: string;
+  /** สิ่งที่แผนกต้องทำเมื่อมีข้อมูลยิงเข้ามาทาง inbox (webhook) เช่น "จัดระดับความรุนแรง ถ้า high แจ้ง Teams ทันที" */
+  playbook?: string;
+  /** แถวจากออฟฟิศ (DB/localStorage) - แก้/ลบได้ ต่างจาก preset ที่ฝังในโค้ด */
+  custom?: boolean;
 }
 
-export const DEPARTMENTS: Department[] = [
+/**
+ * นิยามแผนกที่ส่งข้ามเครือข่ายได้ (เบราว์เซอร์ -> API, DB -> เซิร์ฟเวอร์) - ไม่มีฟิลด์ที่ผูกกับไฟล์ในเครื่อง
+ * แผนกที่ผู้ใช้สร้างเองมีหน้าตาแบบนี้ทั้งตัว ส่วน preset ส่งเฉพาะที่ถูกทับ (เช่น skillText)
+ */
+export interface DepartmentDef {
+  id: string;
+  nameTh: string;
+  shortTh: string;
+  color: string;
+  description?: string;
+  keywords?: string[];
+  lenses?: Partial<Record<AgentRole, string>>;
+  skillText?: string;
+  playbook?: string;
+}
+
+/** 6 แผนกมาตรฐานที่ฝังมากับโค้ด - ออฟฟิศเพิ่มแผนกของตัวเองทับ/ต่อจากชุดนี้ได้ (ดู mergeDepartments) */
+export const PRESET_DEPARTMENTS: Department[] = [
   {
     id: 'legal',
     nameTh: 'ฝ่ายกฎหมาย',
@@ -197,13 +222,126 @@ export const DEPARTMENTS: Department[] = [
   },
 ];
 
-export const DEPT_BY_ID = new Map(DEPARTMENTS.map((d) => [d.id, d]));
+export const PRESET_BY_ID = new Map(PRESET_DEPARTMENTS.map((d) => [d.id, d]));
+
+/* ============================================================
+   ทะเบียนแผนก "ที่ใช้อยู่" (ฝั่งเบราว์เซอร์)
+   DEPARTMENTS / DEPT_BY_ID เป็น live binding - หน้าเว็บโหลดแผนกของออฟฟิศแล้วเรียก setActiveDepartments()
+   ทุก component ที่อ้าง DEPARTMENTS/DEPT_BY_ID จะเห็นชุดใหม่ทันทีโดยไม่ต้องแก้ (array/Map ตัวเดิม เปลี่ยนแค่ข้างใน)
+   ฝั่งเซิร์ฟเวอร์ห้ามพึ่งสองตัวนี้ (หลายออฟฟิศพร้อมกัน) - ใช้ deptMap(custom) ต่อคำขอแทน
+   ============================================================ */
+export const DEPARTMENTS: Department[] = [...PRESET_DEPARTMENTS];
+export const DEPT_BY_ID = new Map<string, Department>(PRESET_DEPARTMENTS.map((d) => [d.id, d]));
+
+const LENS_FALLBACK = (d: DepartmentDef): Record<AgentRole, string> => {
+  const what = d.description?.trim() || d.nameTh;
+  return {
+    proposer: `ทางที่ทำให้เรื่องนี้เดินหน้าได้จริงในมุมของ${d.nameTh} (${what})`,
+    challenger: `จุดที่เรื่องนี้จะพังหรือย้อนกลับมาทำร้าย${d.nameTh}`,
+    verifier: `ข้ออ้างที่ยังไม่มีข้อมูลรองรับในมุมของ${d.nameTh}`,
+    pragmatist: `แรง เวลา และต้นทุนที่${d.nameTh}ต้องแบกจริงถ้าทำเรื่องนี้`,
+  };
+};
+
+/** ประกอบ Department เต็มตัวจากนิยามที่ส่งมา - preset id เดิม = ทับเฉพาะฟิลด์ที่ให้มา, id ใหม่ = แผนกใหม่ */
+export function toDepartment(def: DepartmentDef): Department {
+  const base = PRESET_BY_ID.get(def.id);
+  const lenses = { ...(base?.lenses ?? LENS_FALLBACK(def)), ...(def.lenses ?? {}) } as Record<AgentRole, string>;
+  return {
+    id: def.id,
+    nameTh: def.nameTh || base?.nameTh || def.id,
+    shortTh: def.shortTh || base?.shortTh || def.nameTh || def.id,
+    color: def.color || base?.color || '#8a8f98',
+    skill: base?.skill ?? def.id,
+    keywords: def.keywords?.length ? def.keywords : (base?.keywords ?? []),
+    lenses,
+    ...(def.description ? { description: def.description } : {}),
+    ...(def.skillText ? { skillText: def.skillText } : {}),
+    ...(def.playbook ? { playbook: def.playbook } : {}),
+    custom: true,
+  };
+}
+
+/** preset ทั้งหมด + แผนกของออฟฟิศ (id ซ้ำ preset = ทับ, id ใหม่ = ต่อท้าย) - ลำดับคงที่ทุกครั้ง */
+export function mergeDepartments(custom: DepartmentDef[] = []): Department[] {
+  const byId = new Map<string, Department>(PRESET_DEPARTMENTS.map((d) => [d.id, d]));
+  const extra: Department[] = [];
+  for (const def of custom) {
+    if (!def?.id) continue;
+    const d = toDepartment(def);
+    if (byId.has(def.id)) byId.set(def.id, d); else { byId.set(def.id, d); extra.push(d); }
+  }
+  return [...PRESET_DEPARTMENTS.map((p) => byId.get(p.id)!), ...extra];
+}
+
+/** ต่อคำขอฝั่งเซิร์ฟเวอร์ - แผนที่ id -> แผนก โดยไม่แตะทะเบียนกลาง */
+export function deptMap(custom: DepartmentDef[] = []): Map<string, Department> {
+  return new Map(mergeDepartments(custom).map((d) => [d.id, d]));
+}
+
+/** หน้าเว็บโหลดแผนกของออฟฟิศแล้วเรียก - เปลี่ยนเนื้อใน DEPARTMENTS/DEPT_BY_ID ให้ทุก component เห็นชุดเดียวกัน */
+export function setActiveDepartments(custom: DepartmentDef[] = []): Department[] {
+  const list = mergeDepartments(custom);
+  DEPARTMENTS.splice(0, DEPARTMENTS.length, ...list);
+  DEPT_BY_ID.clear();
+  for (const d of list) DEPT_BY_ID.set(d.id, d);
+  return list;
+}
+
+/** ตัด Department เหลือเฉพาะส่วนที่ต้องส่งข้ามเครือข่าย (เฉพาะแผนก custom/ที่ถูกทับ) */
+export function customDefs(list: Department[] = DEPARTMENTS): DepartmentDef[] {
+  return list.filter((d) => d.custom).map((d) => ({
+    id: d.id, nameTh: d.nameTh, shortTh: d.shortTh, color: d.color,
+    ...(d.description ? { description: d.description } : {}),
+    keywords: d.keywords, lenses: d.lenses,
+    ...(d.skillText ? { skillText: d.skillText } : {}),
+    ...(d.playbook ? { playbook: d.playbook } : {}),
+  }));
+}
+
+export const DEPT_ID_RE = /^[a-z0-9][a-z0-9_-]{1,31}$/;
+export const MAX_SKILL_CHARS = 20_000;
+export const MAX_PLAYBOOK_CHARS = 4_000;
+/** ทำชื่อให้เป็น id: อังกฤษ/ตัวเลข/ขีด เท่านั้น - ชื่อไทยล้วนได้ dept-<เลข> ให้ผู้ใช้แก้ */
+export function slugifyDeptId(name: string): string {
+  const s = name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32);
+  return DEPT_ID_RE.test(s) ? s : '';
+}
+
+const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+/** ตรวจ/ล้างนิยามแผนกจากข้างนอก (body/DB) - คืน null ถ้าใช้ไม่ได้ */
+export function sanitizeDeptDef(raw: unknown): DepartmentDef | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  const id = str(o.id, 32).toLowerCase();
+  if (!DEPT_ID_RE.test(id)) return null;
+  const nameTh = str(o.nameTh, 60);
+  if (!nameTh && !PRESET_BY_ID.has(id)) return null;
+  const lensesIn = (o.lenses && typeof o.lenses === 'object' ? o.lenses : {}) as Record<string, unknown>;
+  const lenses: Partial<Record<AgentRole, string>> = {};
+  for (const r of ROLE_ORDER) { const v = str(lensesIn[r], 300); if (v) lenses[r] = v; }
+  const keywords = Array.isArray(o.keywords) ? o.keywords.map((k) => str(k, 40)).filter(Boolean).slice(0, 40) : [];
+  const color = /^#[0-9a-f]{6}$/i.test(str(o.color, 7)) ? str(o.color, 7) : '';
+  const def: DepartmentDef = { id, nameTh, shortTh: str(o.shortTh, 20) || nameTh, color };
+  const description = str(o.description, 1_000);
+  const skillText = str(o.skillText, MAX_SKILL_CHARS);
+  const playbook = str(o.playbook, MAX_PLAYBOOK_CHARS);
+  if (description) def.description = description;
+  if (keywords.length) def.keywords = keywords;
+  if (Object.keys(lenses).length) def.lenses = lenses;
+  if (skillText) def.skillText = skillText;
+  if (playbook) def.playbook = playbook;
+  return def;
+}
+export function sanitizeDeptDefs(raw: unknown): DepartmentDef[] {
+  return Array.isArray(raw) ? raw.map(sanitizeDeptDef).filter((d): d is DepartmentDef => !!d).slice(0, 40) : [];
+}
 
 /** เลือกแผนกจากคำถามแบบง่าย ๆ (นับคำที่ตรง) - ผู้ใช้เลือกเองทับได้ */
-export function routeDepartment(question: string, availableIds: string[]): string | null {
+export function routeDepartment(question: string, availableIds: string[], depts: Department[] = DEPARTMENTS): string | null {
   const q = question.toLowerCase();
   let best: { id: string; score: number } | null = null;
-  for (const d of DEPARTMENTS) {
+  for (const d of depts) {
     if (!availableIds.includes(d.id)) continue;
     let score = 0;
     for (const kw of d.keywords) if (q.includes(kw.toLowerCase())) score += 1;

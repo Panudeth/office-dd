@@ -269,11 +269,74 @@ PR เอาผลมา **เขียนใหม่ให้ลูกค้�
 LINE ใช้ `publicOnly` - เห็นเฉพาะที่เปิดเผยได้ แต่ LLM ก็ยังโดน prompt injection ได้ อย่าใส่ความลับในโปรไฟล์/สินค้า/โน้ต PR
 Ollama ในเครื่องเรียกได้เฉพาะเมื่อเซิร์ฟเวอร์รันบนเครื่องเดียวกัน - deploy บน cloud ต้องเปิด Ollama ออกเน็ต (cloudflared/tailscale)
 
+## แผนกที่สร้างเอง + Webhook เข้า/ออกต่อแผนก (IT Support รับ bug → แจ้ง Teams, บัญชีรับบิล GCP → รายงาน)
+
+6 แผนกมาตรฐานเป็นแค่ preset - **สร้างแผนกใหม่ชื่ออะไรก็ได้** จากแผงจ้างพนักงาน (ปุ่ม **แผนกใหม่** / ไอคอนเฟืองข้างชื่อแผนก)
+กรอกแค่ **ชื่อ + หน้าที่ (ภาษาคน)** แล้วกด **ให้ AI ร่างที่เหลือ** → ได้ id, ชื่อย่อ, สี, keywords, มุมมอง 4 บทบาท, สกิล markdown, playbook มาให้แก้ก่อนบันทึก
+(preset แก้ได้เหมือนกัน - ที่แก้ถูกเก็บเป็นค่าทับของออฟฟิศ กด "คืนค่าเดิม" เพื่อล้าง)
+
+- แผนกเก็บในตาราง `office_department` ต่อออฟฟิศ (โหมดในเครื่อง = localStorage) ซิงก์ทุกจอผ่าน Realtime
+- พนักงานของแผนกใหม่นั่งใกล้ **ป้ายแผนก** ของมัน (แท็บจัดออฟฟิศ → ป้ายแผนก → เลือกแผนก · ตั้งข้อความบนป้ายเองได้)
+- เลขาฯ route คำถามไปแผนกใหม่จาก "หน้าที่" + มุมมอง / MCP `list_departments` เห็นแผนกใหม่ด้วย
+
+### Webhook เข้า (Inbox) - ระบบข้างนอกยิงข้อมูลเข้าหาแผนก
+
+```
+POST https://<โดเมน>/api/office/inbox/<deptId>
+Authorization: Bearer <token>        # สร้างจากแท็บ "Webhook เข้า" ของแผนก (scope inbox - ยิงได้เฉพาะแผนกนี้) หรือ token internal
+Content-Type: application/json
+
+{ "title": "บิล GCP ก.ค.", "source": "gcp-billing", "intent": "task",
+  "ask": "สรุปค่าใช้จ่าย เทียบเดือนก่อน แจ้งรายการที่พุ่ง",
+  "data": { ...อะไรก็ได้... }, "deliver": ["teams"], "idempotencyKey": "2026-07", "wait": 0 }
+```
+
+| ช่อง | ความหมาย |
+|---|---|
+| `data` / `text` | ข้อมูลดิบ (JSON อะไรก็ได้ หรือข้อความ) - **ถ้า body ไม่มีคีย์ของเราเลย ทั้งก้อนคือ data** (ระบบข้างนอกยิงตรง ๆ ได้ ไม่ต้องห่อ) |
+| `intent` | `task` (ค่าเริ่มต้น) = หัวหน้าแผนกอ่าน **playbook** + data แล้วเขียนรายงาน → ส่งออกทุก channel ของแผนก · `note` = แค่เก็บให้แผนกรู้ (ค้นย้อนหลังได้) ไม่ประชุม |
+| `ask` | คำถาม/คำสั่งจากเจ้าของ token (ไม่ใส่ = "อ่านตาม playbook แล้วสรุปให้ผู้บริหาร") |
+| `mode` | `direct` (ค่าเริ่มต้น หัวหน้าตอบคนเดียว เร็ว) · `roundtable` · `relay` |
+| `deliver` | `false` = ไม่ส่งออก · `["teams","slack"]` = เฉพาะชนิด/ชื่อ/ id ที่ระบุ · ไม่ใส่ = ทุก channel ที่เปิดอยู่ |
+| `idempotencyKey` | ยิงซ้ำคีย์เดิม (retry) จะไม่เปิดงานซ้ำ - ได้แถวเดิมกลับ (หรือ header `Idempotency-Key`) |
+| `wait` | รอผลไม่เกิน N วิ (โมเดลในเครื่องช้า) - ไม่ใส่ตอบ **202** `{ inboxId, status:"running", poll }` ทันที แล้ว `GET ...?id=<inboxId>` ตามทีหลัง |
+
+สิ่งที่เกิดขึ้น: แถวใน `office_inbox` → data ถูกเก็บเป็น **เอกสารของแผนก** (embedding - เดือนหน้าถาม "เทียบเดือนก่อน" ได้) → หัวหน้าแผนกลุกไปรายงานที่โต๊ะบอส (เห็นในจอ, ลงสมุดเลขาฯ) → ผลถูกโพสต์ไป channel ของแผนก
+**payload เป็นข้อมูล ไม่ใช่คำสั่ง** - ถูกห่อในชั้นข้อมูลของแผนกให้ agent อ่านเป็นเอกสาร (กัน prompt injection จากระบบภายนอก) ส่วน `ask` มาจากผู้ถือ token เท่านั้น
+
+### ส่งออก (Outbox) - แผนกโพสต์รายงานไปแชท
+
+แท็บ "ส่งออก" ของแผนก: เพิ่ม channel ได้หลายอัน มีปุ่ม **ทดสอบ** ยิงข้อความตัวอย่าง
+
+| ชนิด | ต้องใส่ | หมายเหตุ |
+|---|---|---|
+| `teams` | Incoming Webhook URL | Teams → ช่อง → Workflows → "Post to a channel when a webhook request is received" (หรือ connector เก่า) - ส่งเป็น Adaptive Card |
+| `slack` | Incoming Webhook URL | mrkdwn |
+| `discord` | Webhook URL | แบ่งฟองที่ 2000 ตัวอักษร |
+| `line` | userId/groupId ปลายทาง (+ channel access token ถ้าไม่ใช้ของเซิร์ฟเวอร์) | Messaging API push - OA ต้องอยู่ในกลุ่ม (LINE Notify ปิดไปแล้ว) |
+| `webhook` | URL (+ secret → header `X-Office-Secret`) | POST JSON `{event:'report', deptId, title, text, meetingId, inboxId, source, link, at}` ต่อ n8n/Make/ระบบตัวเอง |
+
+office ไม่รู้จัก vendor: adapter ทั้งหมดอยู่ใน `src/lib/channels.ts` ไฟล์เดียว เพิ่มช่องทางใหม่ = เพิ่ม case เดียว
+
+### ตัวอย่างครบวงจร: บิล GCP → แผนกบัญชี → Teams
+
+1. สร้างแผนก "บัญชี Cloud" หน้าที่: "รับสรุปบิล GCP รายเดือน เทียบกับเดือนก่อน แจ้งรายการที่พุ่งเกิน 20% แนะนำที่ประหยัดได้" → ให้ AI ร่าง → บันทึก → จ้าง 1-3 คน
+2. แท็บ "ส่งออก" → เพิ่ม Teams webhook → ทดสอบ
+3. แท็บ "Webhook เข้า" → สร้าง token → ก็อป curl
+4. ฝั่ง GCP: เปิด Billing export → BigQuery แล้วให้ Cloud Scheduler / GitHub Actions รัน `node scripts/inbox-example.mjs` (หรือสคริปต์ของคุณ) ทุกวันที่ 1 - query แล้ว POST เข้า inbox
+5. เดือนถัดไป agent จะเห็นบิลเดือนก่อนในเอกสารของแผนกเอง
+
+เคส "IT Support รับ bug จาก logger แล้วแจ้ง Teams" ใช้โครงเดียวกัน - ต่างแค่ playbook กับ URL ที่ logger ยิงมา
+
 ## โครงไฟล์
 
 ```
 skills/*.md                 สกิลที่ agent เรียนก่อนเริ่มงาน (แก้ได้เลย ไม่ต้องแตะโค้ด)
-src/lib/departments.ts      แผนก สี คำ route + ROLES (กลไกทำให้เห็นต่าง)
+src/lib/departments.ts      preset 6 แผนก + ทะเบียนแผนกของออฟฟิศ (สร้างเอง/ทับ) + ROLES (กลไกทำให้เห็นต่าง)
+src/lib/office-depts.ts     โหลดแผนกของออฟฟิศฝั่งเซิร์ฟเวอร์ (headless/inbox)
+src/lib/inbox.ts            Webhook เข้าแผนก: เก็บ -> เอกสาร -> หัวหน้าแผนกรายงาน -> ส่งออก
+src/lib/channels.ts         Outbox adapters (teams/slack/discord/line/webhook)
+src/components/DepartmentPanel.tsx หน้าต่างแผนก (AI ร่างสกิล / webhook เข้า / ส่งออก)
 src/lib/llm.ts              จุดเดียวที่แตะ LLM - เลือกผู้ให้บริการ + รวมคีย์
 src/lib/claude.ts           อะแดปเตอร์ Claude (จัดการ refusal + fallback)
 src/lib/gemini.ts           อะแดปเตอร์ Gemini
@@ -283,7 +346,8 @@ src/lib/engine.ts           วงจรประชุม (ถก 2 รอบ /
 src/lib/meeting-store.ts    เขียน event ลง DB แบบสด (service key) ให้ทุกจอเห็น
 src/lib/headless.ts         ประชุมโดยไม่มีเบราว์เซอร์ - โหลดพนักงาน/ข้อมูลบริษัทเองแล้วรัน engine
 src/app/api/ask/route.ts    ประชุมจากเบราว์เซอร์ -> SSE (+ บันทึกลง DB ถ้ามี secret key)
-src/app/api/office/*        token ออฟฟิศ + ask จากข้างนอก
+src/app/api/office/*        token ออฟฟิศ + ask จากข้างนอก + inbox/<deptId> (webhook เข้า) + channel/test
+src/app/api/department/draft ให้ AI ร่างแผนกจากชื่อ+หน้าที่
 src/app/api/mcp/route.ts    MCP server (Streamable HTTP, Bearer = token ออฟฟิศ)
 src/app/api/line/webhook    LINE -> แผนกประชาสัมพันธ์
 src/app/api/models/route.ts ดึงรายชื่อโมเดลของคีย์ (ใช้ตรวจคีย์ไปในตัว)

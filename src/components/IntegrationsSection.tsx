@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { accessToken, type Office } from '@/lib/supabase';
 import { clearOfficeLlm, fetchOfficeLlmStatus, type OfficeLlmStatus } from '@/lib/office-llm-client';
 import { Button } from '@/components/ui/button';
+import { InfoTip } from '@/components/ui/infotip';
 import { Field, Input } from '@/components/ui/input';
 import { Hint } from '@/components/ui/panel';
 
@@ -21,7 +22,9 @@ interface TokenRow {
   id: string;
   name: string;
   /** internal = agent ของเรา (ทำได้ทุกอย่าง) / public = ช่องทางลูกค้า (ถาม PR ได้อย่างเดียว) */
-  scope?: 'internal' | 'public';
+  scope?: 'internal' | 'public' | 'inbox';
+  /** scope inbox: แผนกที่ยิงเข้าได้ */
+  dept_ids?: string[];
   created_at: string;
   last_used_at: string | null;
 }
@@ -113,7 +116,7 @@ export default function IntegrationsSection({ office }: { office: Office }) {
   return (
     <Field
       label={<span className="flex items-center gap-1.5"><Plug className="size-3.5" /> การเชื่อมต่อภายนอก (MCP / API / LINE)</span>}
-      hint="internal = agent ของเราเอง (ถามทุกแผนก ประชุม อ่านสมุดได้)  public = ช่องทางลูกค้า (ถาม PR ได้อย่างเดียว ได้เฉพาะคำตอบที่กรองแล้ว ไม่เห็นสมุด) - เก็บเหมือนรหัสผ่าน"
+      info="internal = agent ของเราเอง (ถามทุกแผนก ประชุม อ่านสมุดได้) public = ช่องทางลูกค้า (ถาม PR ได้อย่างเดียว ได้เฉพาะคำตอบที่กรองแล้ว ไม่เห็นสมุด) เก็บ token เหมือนรหัสผ่าน"
     >
       <div className="flex flex-col gap-1.5">
         {rows === null ? (
@@ -126,7 +129,9 @@ export default function IntegrationsSection({ office }: { office: Office }) {
               <li key={r.id} className="flex items-center gap-2 rounded-box border border-ink-600 bg-ink-700 px-2 py-1 text-[11px]">
                 <KeyRound className="size-3.5 shrink-0 text-dim" />
                 <span className="min-w-0 flex-1 truncate text-parchment">{r.name}</span>
-                <Badge variant={r.scope === 'public' ? 'brass' : 'good'}>{r.scope === 'public' ? 'public - ลูกค้า' : 'internal - ทีมเรา'}</Badge>
+                <Badge variant={r.scope === 'public' ? 'brass' : r.scope === 'inbox' ? 'default' : 'good'}>
+                  {r.scope === 'public' ? 'public - ลูกค้า' : r.scope === 'inbox' ? `inbox - ${(r.dept_ids ?? []).join(', ')}` : 'internal - ทีมเรา'}
+                </Badge>
                 <span className="shrink-0 text-[10px] text-dim">
                   {r.last_used_at ? `ใช้ล่าสุด ${new Date(r.last_used_at).toLocaleString('th-TH')}` : 'ยังไม่เคยใช้'}
                 </span>
@@ -198,9 +203,10 @@ export default function IntegrationsSection({ office }: { office: Office }) {
             <Hint className="mt-1">กำลังโหลด</Hint>
           ) : llmStatus?.configured ? (
             <div className="mt-1 flex flex-col gap-1 text-dim">
-              <div>
-                ใช้ชุดคีย์/โมเดลรายคนตามที่ตั้งใน &quot;คีย์ของฉัน&quot; และแผงพนักงาน (sync อัตโนมัติ เข้ารหัสก่อนลงฐาน)
+              <div className="flex flex-wrap items-center gap-1.5">
+                ใช้ชุดคีย์ที่ sync จาก &quot;คีย์ของฉัน&quot;
                 {llmStatus.updatedAt && <> · อัปเดต {new Date(llmStatus.updatedAt).toLocaleString('th-TH')}</>}
+                <InfoTip>ใช้ชุดคีย์/โมเดลรายคนตามที่ตั้งใน &quot;คีย์ของฉัน&quot; และแผงพนักงาน sync อัตโนมัติจากเบราว์เซอร์ของเจ้าของ/exec และเข้ารหัสก่อนบันทึกลงฐานข้อมูล</InfoTip>
               </div>
               <div className="flex flex-wrap gap-1">
                 {llmStatus.connections.map((c) => (
@@ -214,9 +220,12 @@ export default function IntegrationsSection({ office }: { office: Office }) {
               </div>
             </div>
           ) : (
-            <Hint className="mt-1">
-              ยังไม่มีชุดคีย์บนเซิร์ฟเวอร์ - ตอนนี้ MCP/API/LINE ใช้ค่าจาก <code>.env</code> (LLM_PROVIDER, OPENAI_BASE_URL, OPENAI_MODEL)
-              เพิ่มชุดคีย์ใน &quot;คีย์ของฉัน&quot; แล้วระบบจะ sync ให้เอง (เฉพาะเจ้าของ/exec)
+            <Hint className="mt-1 flex items-center gap-1.5">
+              ยังไม่มีชุดคีย์บนเซิร์ฟเวอร์ - ใช้ค่าจาก <code>.env</code>
+              <InfoTip side="top">
+                ตอนนี้ MCP/API/LINE ใช้ค่าจาก <code>.env</code> (LLM_PROVIDER, OPENAI_BASE_URL, OPENAI_MODEL)
+                เพิ่มชุดคีย์ใน &quot;คีย์ของฉัน&quot; แล้วระบบจะ sync ให้อัตโนมัติ (เฉพาะเจ้าของ/exec)
+              </InfoTip>
             </Hint>
           )}
         </div>

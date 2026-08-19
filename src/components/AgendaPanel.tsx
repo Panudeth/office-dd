@@ -168,7 +168,12 @@ export default function AgendaPanel({
               </Hint>
             )}
 
-            <Field label="รูปแบบการประชุม">
+            <Field
+              label="รูปแบบการประชุม"
+              info={MEETING_MODES.map((m) => (
+                <span key={m.id} className="block"><b className="text-parchment">{m.th}</b> - {m.hint}</span>
+              ))}
+            >
               <div className="flex gap-1.5">
                 {MEETING_MODES.map((m) => (
                   <Button
@@ -182,12 +187,11 @@ export default function AgendaPanel({
                   </Button>
                 ))}
               </div>
-              <Hint className="mt-1">{MEETING_MODES.find((m) => m.id === mode)?.hint}</Hint>
             </Field>
 
             <Field
               label={mode === 'relay' ? 'เจ้าของเรื่อง (คนถือคำถามและสรุป)' : mode === 'direct' ? 'คนตอบ' : 'ประธานที่ประชุม (คนสรุป)'}
-              hint="เลือกได้เฉพาะหัวหน้าแผนก (คนแรกที่จ้างในแผนก) - หัวหน้าถกในรอบปกติด้วย แล้วสวมหมวกประธานตอนสรุป"
+              info="เลือกได้เฉพาะหัวหน้าแผนก (คนแรกที่จ้างในแผนก) หัวหน้าร่วมถกในรอบปกติด้วย แล้วรับหน้าที่ประธานตอนสรุป"
             >
               <div className="flex flex-wrap gap-1.5">
                 {chairOptions.map((r) => {

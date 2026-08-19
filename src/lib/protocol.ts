@@ -1,6 +1,6 @@
 /** สัญญาระหว่าง /api/agenda, /api/ask (SSE) กับหน้าเว็บ */
 
-import type { AgentRole } from './departments';
+import type { AgentRole, DepartmentDef } from './departments';
 import type { CompanyContext } from './company';
 import type { Palette } from '@/game/types';
 
@@ -69,6 +69,8 @@ export interface AgendaRequest {
   hiredDeptIds: string[];
   /** โปรไฟล์บริษัท - เลขาฯ จะเลือกแผนกได้แม่นขึ้นเมื่อรู้ว่าเราเป็นบริษัทแบบไหน */
   profile?: Record<string, string>;
+  /** แผนกที่ออฟฟิศสร้างเอง/ทับ preset - เซิร์ฟเวอร์ไม่มี state ของออฟฟิศ เบราว์เซอร์ส่งมาให้ */
+  departments?: DepartmentDef[];
 }
 
 /* ---------- หลักฐานว่า skill ถูกส่งไปจริง ---------- */
@@ -138,6 +140,8 @@ export interface AskRequest {
   officeId?: string;
   /** สำเนาผู้เข้าประชุมสำหรับบันทึก - คนอาจถูกเลิกจ้างไปแล้วแต่บันทึกต้องอ่านออก */
   attendees?: MeetingAttendeeLite[];
+  /** แผนกที่ออฟฟิศสร้างเอง/ทับ preset (สกิล inline) - engine ใช้แทน skills/*.md */
+  departments?: DepartmentDef[];
 }
 
 export interface MeetingAttendeeLite {

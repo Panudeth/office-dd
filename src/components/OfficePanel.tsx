@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog';
 import { GoogleMark } from '@/components/ui/google-mark';
+import { InfoTip } from '@/components/ui/infotip';
 import { Field, Input } from '@/components/ui/input';
 import { Hint } from '@/components/ui/panel';
 
@@ -143,30 +144,32 @@ export default function OfficePanel({
         )}
 
         {usingSecretKeyByMistake ? (
-          <Hint className="text-brass">
-            คีย์ที่ใส่มาเป็น <b>secret key</b> (<code>sb_secret_...</code>) อันนี้ข้าม RLS ได้ทั้งหมด
-            และห้ามให้เบราว์เซอร์เห็นเด็ดขาด
-            <br />
-            <br />
-            เปลี่ยนเป็น <b>publishable key</b> (<code>sb_publishable_...</code>) จาก Project Settings
-            หน้า API keys แล้วรีสตาร์ท dev server
+          <Hint className="flex flex-wrap items-center gap-1.5 text-brass">
+            คีย์ที่ตั้งไว้เป็น <b>secret key</b> - ห้ามให้เบราว์เซอร์เห็น ต้องเปลี่ยนเป็น publishable key
+            <InfoTip>
+              คีย์ <code>sb_secret_...</code> ข้าม RLS ได้ทั้งหมด จึงห้ามให้เบราว์เซอร์เห็น
+              เปลี่ยนเป็น <b>publishable key</b> (<code>sb_publishable_...</code>) จาก Project Settings
+              หน้า API keys แล้วรีสตาร์ท dev server
+            </InfoTip>
           </Hint>
         ) : !supabaseConfigured ? (
-          <Hint>
-            ยังไม่ได้ตั้งค่า Supabase ตอนนี้แอปทำงานแบบ{' '}
-            <b className="text-parchment">ในเครื่องอย่างเดียว</b> จ้างพนักงานแล้วรีเฟรชจะหาย
-            <br />
-            <br />
-            วิธีเปิดใช้
-            <br />
-            1. สร้างโปรเจกต์ที่ supabase.com
-            <br />
-            2. เอา <code>supabase/schema.sql</code> ไปรันใน SQL Editor
-            <br />
-            3. ใส่ <code>NEXT_PUBLIC_SUPABASE_URL</code> และ{' '}
-            <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code> ใน <code>.env.local</code>
-            <br />
-            4. รีสตาร์ท dev server
+          <Hint className="flex flex-wrap items-center gap-1.5">
+            ยังไม่ได้ตั้งค่า Supabase - แอปทำงานแบบ<b className="text-parchment">ในเครื่องอย่างเดียว</b>
+            <InfoTip>
+              ข้อมูลที่จ้างพนักงานไว้จะหายเมื่อรีเฟรช
+              <br />
+              <br />
+              วิธีเปิดใช้
+              <br />
+              1. สร้างโปรเจกต์ที่ supabase.com
+              <br />
+              2. นำ <code>supabase/schema.sql</code> ไปรันใน SQL Editor
+              <br />
+              3. ใส่ <code>NEXT_PUBLIC_SUPABASE_URL</code> และ{' '}
+              <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code> ใน <code>.env.local</code>
+              <br />
+              4. รีสตาร์ท dev server
+            </InfoTip>
           </Hint>
         ) : !authReady ? (
           /* ยังไม่รู้ว่ามี session ไหม - โชว์ฟอร์มตอนนี้คือเชิญให้กดเข้าสู่ระบบซ้ำทั้งที่เข้าอยู่แล้ว */
@@ -195,7 +198,7 @@ export default function OfficePanel({
               <span className="h-px flex-1 bg-ink-600" />
             </div>
 
-            <Field label="อีเมล" hint="ต้องเป็นอีเมลจริง Supabase บล็อกโดเมนทดสอบอย่าง example.com">
+            <Field label="อีเมล" info="ต้องเป็นอีเมลจริง Supabase บล็อกโดเมนทดสอบอย่าง example.com">
               <Input
                 type="email"
                 value={email}

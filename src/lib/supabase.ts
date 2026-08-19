@@ -638,3 +638,141 @@ export async function deleteEmployee(id: string): Promise<void> {
   const { error } = await c.from('employee').delete().eq('id', id);
   if (error) throw new Error(sbError(error));
 }
+
+/* ---------- แผนกของออฟฟิศ (office_department) ---------- */
+
+/** แถวแผนกที่ออฟฟิศสร้างเอง/ทับ preset - รูปเดียวกับ DepartmentDef (แปลงชื่อคอลัมน์ให้แล้ว) */
+export interface DepartmentRow {
+  id: string;
+  nameTh: string;
+  shortTh: string;
+  color: string;
+  description?: string;
+  keywords?: string[];
+  lenses?: Record<string, string>;
+  skillText?: string;
+  playbook?: string;
+}
+
+const rowToDept = (r: Record<string, unknown>): DepartmentRow => ({
+  id: String(r.id),
+  nameTh: String(r.name_th ?? ''),
+  shortTh: String(r.short_th ?? ''),
+  color: String(r.color ?? ''),
+  ...(r.description ? { description: String(r.description) } : {}),
+  ...(Array.isArray(r.keywords) && r.keywords.length ? { keywords: r.keywords as string[] } : {}),
+  ...(r.lenses && typeof r.lenses === 'object' && Object.keys(r.lenses as object).length ? { lenses: r.lenses as Record<string, string> } : {}),
+  ...(r.skill_md ? { skillText: String(r.skill_md) } : {}),
+  ...(r.playbook ? { playbook: String(r.playbook) } : {}),
+});
+
+/** แผนกของออฟฟิศ - [] ถ้ายังไม่มี/ตารางยังไม่มี (ยังไม่ได้รัน schema รอบล่าสุด) */
+export async function loadDepartments(officeId: string): Promise<DepartmentRow[]> {
+  const c = sb();
+  if (!c) return [];
+  const { data, error } = await c.from('office_department').select('*').eq('office_id', officeId).order('sort_order').order('updated_at');
+  if (error) {
+    if (/office_department/i.test(error.message)) return [];
+    throw new Error(sbError(error));
+  }
+  return ((data ?? []) as Record<string, unknown>[]).map(rowToDept);
+}
+
+export async function saveDepartment(officeId: string, d: DepartmentRow, userId: string | null): Promise<void> {
+  const c = sb();
+  if (!c) return;
+  const { error } = await c.from('office_department').upsert({
+    office_id: officeId, id: d.id, name_th: d.nameTh, short_th: d.shortTh, color: d.color,
+    description: d.description ?? '', skill_md: d.skillText ?? '', lenses: d.lenses ?? {},
+    keywords: d.keywords ?? [], playbook: d.playbook ?? '',
+    updated_by: userId, updated_at: new Date().toISOString(),
+  });
+  if (error) throw new Error(sbError(error));
+}
+
+export async function deleteDepartment(officeId: string, id: string): Promise<void> {
+  const c = sb();
+  if (!c) return;
+  const { error } = await c.from('office_department').delete().eq('office_id', officeId).eq('id', id);
+  if (error) throw new Error(sbError(error));
+}
+
+/* ---------- ช่องส่งออกของแผนก (office_dept_channel) ---------- */
+
+export type ChannelKind = 'teams' | 'slack' | 'discord' | 'line' | 'webhook';
+export interface DeptChannel {
+  id: string;
+  dept_id: string;
+  kind: ChannelKind;
+  label: string;
+  /** teams/slack/discord/webhook: { url } · line: { token?, to } (ไม่ใส่ token = ใช้ LINE_CHANNEL_ACCESS_TOKEN ของเซิร์ฟเวอร์) */
+  config: Record<string, string>;
+  events: string[];
+  enabled: boolean;
+  created_at: string;
+}
+
+export async function listChannels(officeId: string): Promise<DeptChannel[]> {
+  const c = sb();
+  if (!c) return [];
+  const { data, error } = await c.from('office_dept_channel').select('id,dept_id,kind,label,config,events,enabled,created_at')
+    .eq('office_id', officeId).order('created_at');
+  if (error) {
+    if (/office_dept_channel/i.test(error.message)) return [];
+    throw new Error(sbError(error));
+  }
+  return (data ?? []) as DeptChannel[];
+}
+
+export async function saveChannel(
+  officeId: string, ch: Omit<DeptChannel, 'id' | 'created_at'> & { id?: string },
+): Promise<DeptChannel> {
+  const c = sb();
+  if (!c) throw new Error('ยังไม่ได้ตั้งค่า Supabase');
+  const row = {
+    ...(ch.id ? { id: ch.id } : {}), office_id: officeId, dept_id: ch.dept_id, kind: ch.kind, label: ch.label,
+    config: ch.config, events: ch.events, enabled: ch.enabled, updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await c.from('office_dept_channel').upsert(row).select('id,dept_id,kind,label,config,events,enabled,created_at').single();
+  if (error) throw new Error(sbError(error));
+  return data as DeptChannel;
+}
+
+export async function deleteChannel(officeId: string, id: string): Promise<void> {
+  const c = sb();
+  if (!c) return;
+  const { error } = await c.from('office_dept_channel').delete().eq('office_id', officeId).eq('id', id);
+  if (error) throw new Error(sbError(error));
+}
+
+/* ---------- กล่องรับของแผนก (office_inbox) - อ่านอย่างเดียวจากเบราว์เซอร์ ---------- */
+
+export interface InboxRow {
+  id: string;
+  dept_id: string;
+  source: string;
+  title: string;
+  intent: string;
+  ask: string;
+  data_text: string;
+  status: string;
+  meeting_id: string | null;
+  answer: string;
+  delivered: { channelId: string; kind: string; ok: boolean; error?: string }[];
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export async function listInbox(officeId: string, limit = 50): Promise<InboxRow[]> {
+  const c = sb();
+  if (!c) return [];
+  const { data, error } = await c.from('office_inbox')
+    .select('id,dept_id,source,title,intent,ask,data_text,status,meeting_id,answer,delivered,error,created_at,finished_at')
+    .eq('office_id', officeId).order('created_at', { ascending: false }).limit(limit);
+  if (error) {
+    if (/office_inbox/i.test(error.message)) return [];
+    throw new Error(sbError(error));
+  }
+  return (data ?? []) as InboxRow[];
+}

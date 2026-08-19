@@ -55,7 +55,7 @@ export async function sha256(text: string): Promise<string> {
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export type TokenScope = 'internal' | 'public';
+export type TokenScope = 'internal' | 'public' | 'inbox';
 
 /**
  * ตรวจ token ออฟฟิศ (Bearer จาก MCP/API/LINE) - คืน office id + scope ถ้าถูก
@@ -64,17 +64,22 @@ export type TokenScope = 'internal' | 'public';
  */
 export async function officeFromToken(
   token: string | null | undefined,
-): Promise<{ officeId: string; scope: TokenScope } | null> {
+): Promise<{ officeId: string; scope: TokenScope; deptIds: string[] } | null> {
   const c = sbAdmin();
   if (!c || !token) return null;
   const hash = await sha256(token.trim());
+  // ฐานที่ยังไม่ได้รัน schema รอบล่าสุดอาจไม่มีคอลัมน์ dept_ids (หรือ scope) - ถอยทีละขั้น
+  // ห้ามข้าม scope ถ้าคอลัมน์มีอยู่ ไม่งั้น token ลูกค้าจะกลายเป็น internal
   let { data, error } = await c
     .from('office_token')
-    .select('id, office_id, scope')
+    .select('id, office_id, scope, dept_ids')
     .eq('token_hash', hash)
     .maybeSingle();
-  // ฐานที่ยังไม่ได้รัน schema รอบล่าสุดไม่มีคอลัมน์ scope - อ่านแบบเก่าแล้วถือเป็น internal (token เดิมเป็นของเจ้าของออฟฟิศ)
-  if (!data) {
+  if (!data && error && /dept_ids/i.test(error.message)) {
+    const r = await c.from('office_token').select('id, office_id, scope').eq('token_hash', hash).maybeSingle();
+    data = r.data as typeof data; error = r.error;
+  }
+  if (!data && error && /scope/i.test(error.message)) {
     const legacy = await c.from('office_token').select('id, office_id').eq('token_hash', hash).maybeSingle();
     data = legacy.data as typeof data;
     error = legacy.error ?? error;
@@ -84,8 +89,11 @@ export async function officeFromToken(
   if (!data) return null;
   // จดว่าใช้ล่าสุดเมื่อไร - ไม่รอผล พังก็ไม่เป็นไร
   void c.from('office_token').update({ last_used_at: new Date().toISOString() }).eq('id', data.id);
-  const scope: TokenScope = (data as { scope?: string }).scope === 'public' ? 'public' : 'internal';
-  return { officeId: data.office_id as string, scope };
+  const sc = (data as { scope?: string }).scope;
+  const scope: TokenScope = sc === 'public' ? 'public' : sc === 'inbox' ? 'inbox' : 'internal';
+  const rawDepts = (data as { dept_ids?: unknown }).dept_ids;
+  const deptIds = Array.isArray(rawDepts) ? rawDepts.filter((d): d is string => typeof d === 'string') : [];
+  return { officeId: data.office_id as string, scope, deptIds };
 }
 
 /** เฉพาะ office id - ใช้ที่ที่ไม่สนใจ scope */

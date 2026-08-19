@@ -11,6 +11,7 @@ import {
 import { MEETING_MODES, type ChatMessage, type Opinion } from '@/lib/protocol';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { InfoTip } from '@/components/ui/infotip';
 import { Textarea } from '@/components/ui/input';
 import { Hint, Panel, PanelBody, PanelHeader } from '@/components/ui/panel';
 import { fmt } from '@/components/ui/rich-text';
@@ -206,15 +207,17 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
                           ))}
                         </Hint>
                         <Hint className="mb-1.5">
-                          ด้านล่างคือ system prompt ตัวจริงที่ถูกส่งไปที่{' '}
-                          <code>{m.proof.provider}</code> <code>{m.proof.model}</code> ในนามของ{' '}
-                          <b className="text-parchment">{m.proof.agentName}</b> ประกอบจากสกิลของแผนกเขา
-                          บวกบทบาท บวกมุมมองของแผนก
-                          <br />
-                          skill ถูกอ่าน<b className="text-parchment">ตอนถามคำถามนี้</b> ไม่ใช่ตอนกดจ้าง
-                          {m.proof.agentModels && new Set(m.proof.agentModels.map((x) => x.model)).size > 1 && (
-                            <>
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            system prompt ที่ส่งไปที่ <code>{m.proof.provider}</code> <code>{m.proof.model}</code> ในนามของ{' '}
+                            <b className="text-parchment">{m.proof.agentName}</b>
+                            <InfoTip>
+                              ด้านล่างคือ system prompt ตัวจริงที่ถูกส่งไป ประกอบจากสกิลของแผนก บวกบทบาท บวกมุมมองของแผนก
                               <br />
+                              skill ถูกอ่าน<b className="text-parchment">ตอนถามคำถามนี้</b> ไม่ใช่ตอนกดจ้าง
+                            </InfoTip>
+                          </span>
+                          {m.proof.agentModels && new Set(m.proof.agentModels.map((x) => x.model)).size > 1 && (
+                            <span className="block">
                               ประชุมนี้ใช้หลายโมเดล:{' '}
                               {m.proof.agentModels.map((x, i) => (
                                 <span key={x.agentId}>
@@ -222,19 +225,18 @@ export default function ChatPanel({ messages: allMessages, busy, phase, onSend, 
                                   <b className="text-parchment">{x.agentName}</b> <code>{x.model}</code>
                                 </span>
                               ))}
-                            </>
+                            </span>
                           )}
                           {m.proof.company && (
-                            <>
-                              <br />
+                            <span className="block">
                               ข้อมูลบริษัทที่แนบไป:{' '}
                               {m.proof.company.profileChars > 0 ? `โปรไฟล์ ${m.proof.company.profileChars.toLocaleString()} ตัวอักษร` : 'ไม่มีโปรไฟล์'}
                               {m.proof.company.noteChars > 0 && ` · โน้ตแผนก ${m.proof.company.noteChars.toLocaleString()} ตัวอักษร`}
                               {m.proof.company.chunkCount > 0 && ` · เอกสาร ${m.proof.company.chunkCount} ชิ้น`}
                               {m.proof.company.profileChars === 0 && (
-                                <b className="text-brass"> - กรอกที่ปุ่มข้อมูลบริษัทแล้ว agent จะรู้ว่าเราเป็นใคร</b>
+                                <b className="text-brass"> - ยังไม่ได้กรอกข้อมูลบริษัท</b>
                               )}
-                            </>
+                            </span>
                           )}
                         </Hint>
                         <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-box border border-ink-600 bg-ink-900 p-2 font-mono text-[11px] leading-relaxed text-wall-top">

@@ -155,11 +155,11 @@ ${rows.map(line).join('\n')}`;
 }
 
 /** ส่วนโน้ตแผนก - เฉพาะแผนกตัวเอง */
-export function deptNoteBlock(deptId: string, notes: Record<string, string> | null | undefined): string {
+export function deptNoteBlock(deptId: string, notes: Record<string, string> | null | undefined, deptName?: string): string {
   const body = (notes?.[deptId] ?? '').trim();
   if (!body) return '';
   const d = DEPT_BY_ID.get(deptId);
-  return `## ข้อมูลภายในของ${d?.nameTh ?? deptId} (เฉพาะแผนกคุณ)
+  return `## ข้อมูลภายในของ${deptName ?? d?.nameTh ?? deptId} (เฉพาะแผนกคุณ)
 
 ${body}`;
 }
@@ -179,9 +179,9 @@ ${chunks.map((c, i) => `[อ้างอิง ${i + 1}] จาก "${c.docName}
  * เรียงลำดับ: โปรไฟล์ (ทุกคนเห็น) -> สินค้า (ทุกคนเห็น) -> โน้ตแผนก (เฉพาะแผนก) -> เอกสาร (เฉพาะที่ค้นเจอ)
  * คืนสตริงว่างถ้าไม่มีอะไรเลย - route จะได้ข้ามได้โดยไม่ต้องเช็คซ้ำ
  */
-export function companyBlock(ctx: CompanyContext | null | undefined, deptId: string): string {
+export function companyBlock(ctx: CompanyContext | null | undefined, deptId: string, deptName?: string): string {
   if (!ctx) return '';
-  return [profileBlock(ctx.profile), productsBlock(ctx.products), deptNoteBlock(deptId, ctx.notes), chunksBlock(ctx.chunks)]
+  return [profileBlock(ctx.profile), productsBlock(ctx.products), deptNoteBlock(deptId, ctx.notes, deptName), chunksBlock(ctx.chunks)]
     .filter(Boolean)
     .join('\n\n');
 }

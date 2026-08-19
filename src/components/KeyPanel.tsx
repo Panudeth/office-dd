@@ -10,6 +10,7 @@ import type { EmployeeSnapshot } from '@/game/types';
 import Portrait from '@/components/Portrait';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog';
+import { InfoTip } from '@/components/ui/infotip';
 import { Field, Input } from '@/components/ui/input';
 import { Hint } from '@/components/ui/panel';
 import {
@@ -548,7 +549,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [] }
             {store.items.length > 0 && (
               <Field
                 label="ใครใช้ชุดไหนในห้องประชุม"
-                hint="หัวหน้าแผนก (คนแรกที่จ้าง) ใช้โมเดลเก่งเสมอ และเป็นประธานที่ประชุม/คนสรุป - ลูกทีมใช้โมเดลถูกได้ ตั้งรายคนทับได้อีกที่ด้านล่างหรือแผงพนักงาน"
+                info="หัวหน้าแผนก (คนแรกที่จ้าง) ใช้โมเดลเก่งเสมอ และเป็นประธานที่ประชุม/คนสรุป ลูกทีมใช้โมเดลราคาถูกกว่าได้ ตั้งรายคนทับได้ที่ด้านล่างหรือแผงพนักงาน"
               >
                 <div className="flex flex-col gap-1.5">
                   {(
@@ -586,7 +587,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [] }
             {store.items.length > 0 && roster.length > 0 && (
               <Field
                 label={<span className="flex items-center gap-1.5"><Cpu className="size-3.5" /> โมเดลรายคน</span>}
-                hint="ตั้งเฉพาะคนที่อยากให้ต่างจากค่าหัวหน้า/ลูกทีม - ตั้งจากการ์ดพนักงานในแผงขวาก็ได้เหมือนกัน"
+                info="ตั้งเฉพาะคนที่ต้องการให้ต่างจากค่าหัวหน้า/ลูกทีม ตั้งจากการ์ดพนักงานในแผงขวาได้เช่นกัน"
               >
                 <div className="flex max-h-56 flex-col gap-1 overflow-y-auto pr-1">
                   {DEPARTMENTS.map((d) => {
@@ -636,14 +637,17 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [] }
               </Field>
             )}
 
-            <Hint>
-              คีย์เก็บไว้ใน <code>localStorage</code> ของเบราว์เซอร์คุณ ส่งไปที่เซิร์ฟเวอร์ของแอปนี้ตอนถามคำถาม
-              แล้วใช้ยิงต่อไปที่ผู้ให้บริการ - ไม่ถูก log
-              <br />
-              ถ้าคุณเป็นเจ้าของ/exec ของออฟฟิศที่เปิดอยู่ ชุดนี้จะถูก sync ขึ้นเซิร์ฟเวอร์ (คีย์เข้ารหัสก่อนลงฐาน)
-              เพื่อให้ MCP / API / LINE ใช้โมเดลรายคนแบบเดียวกับหน้าเว็บ - ลบได้ที่ &quot;การเชื่อมต่อภายนอก&quot;
-              <br />
-              ถ้าเครื่องนี้มีคนอื่นใช้ด้วย หรือจะเอาแอปนี้ไป deploy บนเน็ต ให้กดลบเมื่อเลิกใช้
+            <Hint className="flex items-center gap-1.5">
+              คีย์เก็บไว้ในเบราว์เซอร์นี้ - ลบเมื่อเลิกใช้บนเครื่องที่ใช้ร่วมกัน
+              <InfoTip side="top">
+                คีย์เก็บใน <code>localStorage</code> ของเบราว์เซอร์ และส่งไปที่เซิร์ฟเวอร์ของแอปตอนถามคำถาม
+                เพื่อเรียกต่อไปยังผู้ให้บริการ โดยไม่ถูก log
+                <br />
+                ถ้าคุณเป็นเจ้าของ/exec ของออฟฟิศที่เปิดอยู่ ชุดนี้จะถูก sync ขึ้นเซิร์ฟเวอร์ (เข้ารหัสก่อนบันทึก)
+                เพื่อให้ MCP / API / LINE ใช้โมเดลรายคนแบบเดียวกับหน้าเว็บ ลบได้ที่ &quot;การเชื่อมต่อภายนอก&quot;
+                <br />
+                ถ้าเครื่องนี้มีผู้ใช้ร่วม หรือจะนำแอปไป deploy บนอินเทอร์เน็ต ควรลบคีย์เมื่อเลิกใช้
+              </InfoTip>
             </Hint>
 
             <DialogFooter>
@@ -654,7 +658,7 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [] }
           </>
         ) : (
           <>
-            <Field label="ชื่อการเชื่อมต่อ" hint="ตั้งให้จำง่าย เช่น Gemini ส่วนตัว หรือ Ollama ในเครื่อง">
+            <Field label="ชื่อการเชื่อมต่อ" info="ตั้งชื่อให้จำง่าย เช่น Gemini ส่วนตัว หรือ Ollama ในเครื่อง">
               <Input
                 value={draft.label}
                 onChange={(e) => patch({ label: e.target.value })}
@@ -682,18 +686,29 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [] }
             {draft.provider === 'openai' && (
               <Field
                 label="ปลายทาง (base URL)"
-                hint={
+                info={
                   <>
-                    {preset
-                      ? optional ? 'ไม่ต้องใช้คีย์ - รายชื่อโมเดลจะโหลดให้เองจากเครื่อง' : `เอาคีย์จาก ${preset.keys}`
-                      : 'ใส่เองได้ ต้องเป็น URL ที่มี /chat/completions และ /models ต่อท้าย (ปกติลงท้ายด้วย /v1)'}
+                    เลือกจากรายการ หรือใส่ URL เอง โดยต้องรองรับ /chat/completions และ /models (ปกติลงท้ายด้วย /v1)
                     {remoteWarning && (
-                      <b className="mt-1 block text-brass">
-                        เว็บนี้ไม่ได้รันบนเครื่องคุณ - localhost ตรงนี้หมายถึงเครื่องเซิร์ฟเวอร์ของเว็บ ไม่ใช่เครื่องคุณ
-                        จะเรียก Ollama ไม่เจอ ต้องเปิด Ollama ออกเน็ต (เช่น cloudflared / ngrok / Tailscale) แล้วใส่ URL นั้นแทน
-                      </b>
+                      <>
+                        <br />
+                        เว็บนี้ไม่ได้รันบนเครื่องคุณ localhost จึงหมายถึงเครื่องเซิร์ฟเวอร์ของเว็บ ไม่ใช่เครื่องคุณ
+                        ต้องเปิด Ollama ออกอินเทอร์เน็ต (เช่น cloudflared / ngrok / Tailscale) แล้วใส่ URL นั้นแทน
+                      </>
                     )}
                   </>
+                }
+                hint={
+                  (preset || remoteWarning) ? (
+                    <>
+                      {preset && (optional ? 'ไม่ต้องใช้คีย์ - โหลดรายชื่อโมเดลจากเครื่องให้อัตโนมัติ' : `รับคีย์ได้ที่ ${preset.keys}`)}
+                      {remoteWarning && (
+                        <b className="mt-1 block text-brass">
+                          เว็บนี้ไม่ได้รันบนเครื่องคุณ - localhost จะเรียก Ollama ไม่เจอ
+                        </b>
+                      )}
+                    </>
+                  ) : undefined
                 }
               >
                 <Select
@@ -726,15 +741,13 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [] }
             {!optional && (
             <Field
               label="API key"
+              info={`รับคีย์ได้ที่ ${meta.where} - ${meta.note}`}
               hint={
-                <>
-                  {`เอาจาก ${meta.where} ${meta.note}`}
-                  {looksWrong && (
-                    <b className="mt-1 block text-brass">
-                      คีย์ของ{meta.label}มักขึ้นต้นด้วย {meta.prefix} เลือกผู้ให้บริการถูกอันแล้วใช่ไหม
-                    </b>
-                  )}
-                </>
+                looksWrong ? (
+                  <b className="text-brass">
+                    คีย์ของ{meta.label}มักขึ้นต้นด้วย {meta.prefix} - ตรวจสอบว่าเลือกผู้ให้บริการถูกต้อง
+                  </b>
+                ) : undefined
               }
             >
               <div className="flex gap-1.5">
@@ -762,14 +775,15 @@ export default function KeyPanel({ open, store, onClose, onChange, roster = [] }
 
             <Field
               label="โมเดล"
+              info={`ไม่ระบุจะใช้ค่าดีฟอลต์ (${effDefault}) กดปุ่มด้านล่างเพื่อโหลดรายชื่อโมเดลที่คีย์นี้ใช้ได้แทนการพิมพ์ชื่อเอง ต้องการอีกโมเดลบนปลายทางเดียวกัน ให้ทำสำเนาชุดนี้จากหน้ารายการ`}
               hint={
                 checkMsg ? (
                   <b className={checkMsg.ok ? 'text-carpet-lite' : 'text-brass'}>{checkMsg.text}</b>
                 ) : !models ? (
                   optional
-                    ? (loading ? 'กำลังถามเครื่องว่ามีโมเดลอะไรบ้าง...' : `โหลดรายชื่อจากเครื่องไม่ได้ - Ollama เปิดอยู่ไหม? (ค่าดีฟอลต์ ${effDefault} อาจไม่มี)`)
-                    : 'กดปุ่มด้านล่างเพื่อดูว่าคีย์นี้เรียกโมเดลไหนได้บ้าง จะได้ไม่ต้องเดาชื่อ'
-                ) : optional ? `มี ${models.length} โมเดลในเครื่อง - เลือกได้เลย จะเพิ่มชุดใหม่สำหรับโมเดลอื่นก็ทำสำเนาชุดนี้จากหน้ารายการ` : null
+                    ? (loading ? 'กำลังโหลดรายชื่อโมเดลจากเครื่อง...' : `โหลดรายชื่อจากเครื่องไม่ได้ - Ollama เปิดอยู่หรือไม่ (ค่าดีฟอลต์ ${effDefault} อาจไม่มี)`)
+                    : 'กดปุ่มด้านล่างเพื่อโหลดรายชื่อโมเดล'
+                ) : optional ? `มี ${models.length} โมเดลในเครื่อง` : null
               }
             >
               {models ? (

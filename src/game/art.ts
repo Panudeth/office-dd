@@ -1018,5 +1018,10 @@ export function drawBubble(g: G, x: number, y: number, icon: string) {
     P(g, cx + 2, cy, 4, 1, '#c85868'); P(g, cx + 5, cy + 1, 1, 2, '#c85868');
     P(g, cx + 3, cy + 2, 2, 1, '#c85868'); P(g, cx + 3, cy + 3, 1, 1, '#c85868');
     P(g, cx + 3, cy + 5, 1, 1, '#c85868');
+  } else if (icon === 'smoke') {
+    // มวนบุหรี่ + ปลายแดง + ควันลอย
+    P(g, cx, cy + 4, 6, 1, '#f4f1e8'); P(g, cx, cy + 3, 6, 1, '#e0dccf');
+    P(g, cx + 5, cy + 3, 1, 2, '#e8622a'); P(g, cx + 6, cy + 3, 1, 1, '#ffb347');
+    P(g, cx + 6, cy + 1, 1, 1, '#b8c0c8'); P(g, cx + 7, cy, 1, 1, '#c8d0d8'); P(g, cx + 5, cy, 1, 1, '#d8dee4');
   }
 }
