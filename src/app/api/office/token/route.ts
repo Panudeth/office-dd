@@ -63,3 +63,18 @@ export async function DELETE(req: NextRequest) {
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ ok: true });
 }
+
+/** แก้ชื่อ / แผนกที่ token แบบ inbox ยิงเข้าได้ - { officeId, id, name?, deptIds? } */
+export async function PATCH(req: NextRequest) {
+  const body = (await req.json().catch(() => ({}))) as { officeId?: string; id?: string; name?: string; deptIds?: string[] };
+  const e = await editor(req, body.officeId ?? null);
+  if ('error' in e) return Response.json({ error: e.error }, { status: e.status });
+  const patch: Record<string, unknown> = {};
+  if (typeof body.name === 'string' && body.name.trim()) patch.name = body.name.trim().slice(0, 80);
+  if (Array.isArray(body.deptIds)) patch.dept_ids = body.deptIds.filter((d): d is string => typeof d === 'string' && /^[a-z0-9_-]{2,32}$/.test(d)).slice(0, 40);
+  if (!Object.keys(patch).length) return Response.json({ error: 'ไม่มีอะไรให้แก้' }, { status: 400 });
+  const { data, error } = await e.c.from('office_token').update(patch).eq('id', body.id ?? '').eq('office_id', body.officeId!)
+    .select('id,name,scope,dept_ids,created_at,last_used_at').single();
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+  return Response.json({ row: data });
+}

@@ -13,3 +13,6 @@ next-env.d.ts
 
 # dist ของ dev server ทดสอบ (NEXT_DIST_DIR)
 .next-test/
+
+# log ของ task รายวันบิล GCP
+.gcp-billing.log

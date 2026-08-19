@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   if (!ch) return Response.json({ error: 'ไม่พบ channel' }, { status: 404 });
   const row = ch as ChannelRow;
   const [depts, staff] = await Promise.all([loadOfficeDepartments(body.officeId), loadOfficeStaff(body.officeId)]);
-  const deptName = depts.byId.get(row.dept_id)?.nameTh ?? row.dept_id;
+  const deptName = row.dept_id === '*' ? 'ออฟฟิศ' : (depts.byId.get(row.dept_id)?.nameTh ?? row.dept_id);
   // คนส่ง = หัวหน้าแผนก (คนแรกที่จ้าง) ถ้ายังไม่มีคนก็ส่งในนามแผนก
   const head = staff.find((s) => s.dept_id === row.dept_id);
   try {

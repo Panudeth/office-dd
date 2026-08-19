@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  AlertTriangle, Cpu, Crown, LayoutGrid, List, Lock, Minus, NotebookPen, Plus, Settings2, UserPlus, Users, Wrench,
+  AlertTriangle, Cpu, Crown, LayoutGrid, List, Lock, Minus, NotebookPen, Plug, Plus, Settings2, UserPlus, Users, Wrench,
 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { DEPARTMENTS } from '@/lib/departments';
@@ -62,6 +62,8 @@ interface Props {
   onTab: (t: string) => void;
   /** เนื้อหาแท็บ "จัดออฟฟิศ" (LayoutPanel) - หน้าเว็บเป็นคนประกอบให้ เพราะต้องคุยกับ world */
   layoutPanel?: ReactNode;
+  /** เนื้อหาแท็บ "แผนก & เชื่อมต่อ" (รายการแผนก / แก้แผนก / webhook เข้า / นโยบาย) - หน้าเว็บประกอบให้ */
+  connectPanel?: ReactNode;
   /** เนื้อหาแท็บสมุดเลขาฯ - ประกอบจากข้างนอก (page มีข้อมูล meetings อยู่แล้ว) */
   secretary: ReactNode;
   meetingCount: number;
@@ -92,7 +94,7 @@ type StaffView = 'card' | 'list';
 
 export default function HirePanel({
   roster, seatsLeft, roomLeft, onHire, onFire, onFocus, disabled, lock, onUnlock,
-  tab, onTab: setTab, secretary, meetingCount, layoutPanel,
+  tab, onTab: setTab, secretary, meetingCount, layoutPanel, connectPanel,
   llmOptions = [], llmOf, llmDefaultLabel = 'ค่าเริ่มต้น', onLlm,
   roleLlm, onRoleLlm, llmActiveLabel = 'คีย์ของเซิร์ฟเวอร์', llmHeadLabel = llmDefaultLabel,
   onEditDept, deptCanEdit = false,
@@ -149,6 +151,9 @@ export default function HirePanel({
           </TabsTrigger>
           <TabsTrigger value="layout" title="จัดโต๊ะ เก้าอี้ ของตกแต่ง">
             <Wrench /> จัดออฟฟิศ
+          </TabsTrigger>
+          <TabsTrigger value="connect" title="แผนก / webhook เข้า-ออก / MCP / LINE / นโยบายโมเดล">
+            <Plug /> แผนก & เชื่อมต่อ
           </TabsTrigger>
           <Badge
             variant={seatsLeft > 0 ? 'default' : 'bad'}
@@ -484,6 +489,9 @@ export default function HirePanel({
         {/* ---------- แท็บจัดออฟฟิศ (เนื้อหามาจากหน้าเว็บ) ---------- */}
         <TabsContent value="layout" className="min-h-0">
           {layoutPanel}
+        </TabsContent>
+        <TabsContent value="connect" className="min-h-0">
+          <PanelBody className="gap-2 overflow-y-auto">{connectPanel}</PanelBody>
         </TabsContent>
 
         <TabsContent value="notes" className="min-h-0">

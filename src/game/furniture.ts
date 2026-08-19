@@ -30,7 +30,7 @@ export type FurnKind =
   // ป้ายตั้งพื้นโชว์โลโก้
   | 'logostand'
   // พื้น (พรม/ตรา/โลโก้ - วาดใต้ของทุกชิ้น เดินทับได้)
-  | 'rug_l' | 'rug_m' | 'rug_s' | 'mat' | 'emblem' | 'logo'
+  | 'rug_l' | 'rug_m' | 'rug_s' | 'mat' | 'emblem' | 'logo' | 'parking'
   // สวน
   | 'lamp' | 'sign' | 'flower' | 'bush' | 'rock' | 'pine';
 
@@ -149,6 +149,7 @@ export const FURN: Record<FurnKind, FurnSpec> = {
   rug_m:      { label: 'พรมกลาง 4x3', category: 'floor', decal: true, variants: 3 },
   rug_s:      { label: 'พรมเล็ก 4x2', category: 'floor', decal: true, variants: 3 },
   mat:        { label: 'พรมเช็ดเท้า', category: 'floor', decal: true },
+  parking:    { label: 'ที่จอดมอไซค์ (แมสเซนเจอร์มาจอด)', category: 'garden', decal: true },
   emblem:     { label: 'ตราวงกลม 8x2', category: 'floor', decal: true },
   logo:       { label: 'โลโก้บริษัท (ย่อ/ขยาย ลากได้)', category: 'floor', decal: true, single: true, resizable: { minW: 1, maxW: 16, minH: 1, maxH: 8, defW: 8, defH: 2 } },
   lamp:       { label: 'เสาไฟสวน', category: 'garden' },
@@ -288,6 +289,8 @@ export function footprint(it: LayoutItem): FootTile[] {
     case 'rug_s': return rugTiles(it, 4, 2);
     case 'mat':
       return [{ x: it.x, y: it.y, layer: 'decal', decal: { type: 'mat', x: it.x, y: it.y, w: 1, h: 1 }, solid: false }];
+    case 'parking':
+      return [{ x: it.x, y: it.y, layer: 'decal', decal: { type: 'parking', x: it.x, y: it.y, w: 1, h: 1 }, solid: false }];
     case 'emblem': {
       const out: FootTile[] = [];
       for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 8; dx++) {

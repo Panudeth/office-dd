@@ -11,7 +11,7 @@ import {
 } from './furniture';
 import { LayoutState, key, type Rect, type Verdict } from './layout';
 import type {
-  AgentState, BubbleIcon, Dir, Employee, EmployeeSnapshot, PersistedEmployee, Pose, Tile,
+  AgentState, BubbleIcon, Dir, Employee, EmployeeSnapshot, Palette, PersistedEmployee, Pose, Tile,
 } from './types';
 
 /** สาเหตุที่ผังเปลี่ยน - หน้าเว็บใช้ตัดสินว่าต้องบันทึกไหม (sync = มาจากเครื่องอื่น ไม่ต้องบันทึกซ้ำ) */
@@ -850,15 +850,198 @@ export class World {
   }
 
   /** สร้างแขกที่ประตูสวน - คืน id (สุ่มหน้าตาจากชื่อ จะได้คนเดิมหน้าเดิมถ้าถามซ้ำ) */
-  spawnVisitor(name: string, seed?: number): string {
-    const id = `visitor-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+  /**
+   * มอเตอร์ไซค์ของแมสเซนเจอร์ (ต่อคน) - ขี่เข้ามาจากขอบแผนที่ จอดหน้าตึก แล้วคนขี่ลงเดินเข้าไปส่ง ขากลับขี่ออก
+   * px/py = ตำแหน่งพิกเซล, tx/ty = ช่องที่จอด, rider = มีคนขี่อยู่ (วาดคนบนรถ), to = ปลายทางที่กำลังขี่ไป, done = เรียกเมื่อถึง
+   */
+  private bikes = new Map<string, { px: number; py: number; tx: number; ty: number; rider: Palette | null; to: { px: number; py: number } | null; queue: { px: number; py: number }[]; done: (() => void) | null; face: 'left' | 'right'; rev: number; puffT: number }>();
+  /** ควันท่อ (พิกเซล) - เกิดตอนเร่งเครื่อง/วิ่ง ลอยออกไปด้านหลังแล้วจาง */
+  private puffs: { x: number; y: number; vx: number; t: number }[] = [];
+
+  /**
+   * ที่จอดมอไซค์: ถ้าผู้ใช้วาง "ที่จอดมอไซค์" ไว้ในผัง ใช้อันที่ใกล้ประตูที่สุด (ต้องกลางแจ้งและมีแนวถนนถึงขอบ)
+   * ไม่มีก็ใช้ช่องกลางแจ้งว่างที่ใกล้ประตูที่สุด (รัศมี 2)
+   */
+  private parkingSpot(): Tile {
     const gate = this.gateTile();
+    const marked = this.lay.items.filter((i) => i.kind === 'parking' && !isIndoor(i.x, i.y) && this.ridePath({ x: i.x, y: i.y }))
+      .map((i) => ({ t: { x: i.x, y: i.y }, d: Math.abs(i.x - gate.x) + Math.abs(i.y - gate.y) }))
+      .sort((a, b) => a.d - b.d);
+    if (marked[0]) return marked[0].t;
+    const cands: { t: Tile; d: number }[] = [];
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const t = { x: gate.x + dx, y: gate.y + dy };
+      if ((dx === 0 && dy === 0) || t.x < 0 || t.y < 0 || t.x >= MW || t.y >= MH) continue;
+      if (isIndoor(t.x, t.y) || !tileFree(t.x, t.y) || this.lay.at(t.x, t.y)) continue;
+      if (!this.ridePath(t)) continue;
+      cands.push({ t, d: Math.abs(dx) + Math.abs(dy) + (dy < 0 ? 0.5 : 0) });
+    }
+    cands.sort((a, b) => a.d - b.d);
+    return cands[0]?.t ?? gate;
+  }
+  /** ช่องที่รถวิ่งผ่านได้: กลางแจ้ง เดินได้ และไม่มีของตั้งพื้น (ของบนพื้นอย่างพรม/ที่จอดขี่ทับได้) */
+  private rideOk(x: number, y: number): boolean {
+    if (x < 0 || y < 0 || x >= MW || y >= MH || isIndoor(x, y) || !tileFree(x, y)) return false;
+    const it = this.lay.at(x, y);
+    return !it || it.kind === 'parking' || !!FURN[it.kind].decal;
+  }
+  /**
+   * เส้นทางรถจาก "ขอบแผนที่" มาถึงช่องนี้ (BFS บนพื้นกลางแจ้ง เลี้ยวได้เหมือนคนเดิน) - คืนลำดับช่องจากขอบ -> ปลายทาง หรือ null
+   * จุดแรกคือช่องริมขอบ (รถจะโผล่จากนอกจอเลยช่องนั้นไปอีก 1 ช่อง)
+   */
+  private ridePath(t: Tile): Tile[] | null {
+    if (!this.rideOk(t.x, t.y) && !(this.lay.at(t.x, t.y)?.kind === 'parking')) return null;
+    const key = (x: number, y: number) => y * MW + x;
+    const prev = new Map<number, number>();
+    const q: Tile[] = [t];
+    prev.set(key(t.x, t.y), -1);
+    let edge: Tile | null = null;
+    while (q.length) {
+      const c = q.shift()!;
+      if (c.x === 0 || c.y === 0 || c.x === MW - 1 || c.y === MH - 1) { edge = c; break; }
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nx = c.x + dx, ny = c.y + dy;
+        if (prev.has(key(nx, ny)) || !this.rideOk(nx, ny)) continue;
+        prev.set(key(nx, ny), key(c.x, c.y));
+        q.push({ x: nx, y: ny });
+      }
+    }
+    if (!edge) return null;
+    const path: Tile[] = [];
+    let k: number | undefined = key(edge.x, edge.y);
+    while (k !== undefined && k !== -1) { path.push({ x: k % MW, y: Math.floor(k / MW) }); k = prev.get(k); }
+    return path; // เรียงจากขอบ -> ปลายทาง
+  }
+  /** จุดนอกจอถัดจากช่องริมขอบ (ให้รถโผล่/หายไปจริง ๆ) */
+  private offscreenOf(edge: Tile): { px: number; py: number } {
+    const px = edge.x * TS + 8, py = edge.y * TS + TS;
+    if (edge.x === MW - 1) return { px: px + TS * 1.5, py };
+    if (edge.x === 0) return { px: px - TS * 1.5, py };
+    if (edge.y === MH - 1) return { px, py: py + TS * 1.5 };
+    return { px, py: py - TS * 1.5 };
+  }
+  private toPx = (t: Tile) => ({ px: t.x * TS + 8, py: t.y * TS + TS });
+
+  /**
+   * แมสเซนเจอร์ขี่มอไซค์เข้ามาจากขอบแผนที่ (ฝั่งที่ใกล้ประตู) มาจอดหน้าตึก แล้วลงจากรถ
+   * resolve เป็น id ตัวละคร (ยืนอยู่ข้างรถ) - จากนั้นใช้ visitorApproach ต่อได้เลย
+   */
+  /** ที่จอดล่าสุดที่แมสเซนเจอร์เลือก + เหตุผล (ดีบัก/แถบสถานะ) */
+  lastParking: { x: number; y: number; marked: boolean } | null = null;
+  spawnCourierRideIn(name: string): Promise<string> {
+    const park = this.parkingSpot();
+    this.lastParking = { x: park.x, y: park.y, marked: this.lay.items.some((i) => i.kind === 'parking' && i.x === park.x && i.y === park.y) };
+    console.info('[courier] parking at', park, 'marked spots:', this.lay.items.filter((i) => i.kind === 'parking').map((i) => `${i.x},${i.y} indoor=${isIndoor(i.x, i.y)} path=${!!this.ridePath({ x: i.x, y: i.y })}`));
+    const s = Array.from(name).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) >>> 0, 7);
+    const pal: Palette = { ...makePalette(s, '#ffb000', false), helmet: '#e8622a' };
+    const id = `courier-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+    const path = this.ridePath(park) ?? [park];
+    const start = this.offscreenOf(path[0]);
+    const queue = path.map(this.toPx);
+    // กล้องตามรถตั้งแต่โผล่จากขอบ - จะได้เห็นวิ่งเข้ามาจอด (ซูมเข้าหน่อยเหมือนตอนตามแขก)
+    this.camTarget = null; this.follow = id;
+    if (this.cam.z < this.fitZ * 2) this.cam.z = this.fitZ * 2.5;
+    return new Promise((resolve) => {
+      this.bikes.set(id, {
+        px: start.px, py: start.py, tx: park.x, ty: park.y, rider: pal, to: queue.shift() ?? null, queue,
+        face: start.px > (queue[0]?.px ?? start.px) ? 'left' : 'right', rev: 0, puffT: 0,
+        done: () => {
+          // ถึงที่จอด - เร่งเครื่องแง๊น ๆ แป๊บนึง แล้วลงจากรถ (สร้างตัวละครยืนข้างรถ ถือซอง)
+          const b = this.bikes.get(id);
+          if (!b) return;
+          b.to = null; b.done = null; b.rev = 1.2;
+          window.setTimeout(() => {
+            b.rider = null;
+            const vid = this.spawnVisitor(name, s, { courier: true, at: park, bikeId: id });
+            resolve(vid);
+          }, 900);
+        },
+      });
+    });
+  }
+
+  /** แมสเซนเจอร์เดินกลับไปที่รถ ขึ้นรถ แล้วขี่ออกไปทางขอบแผนที่ */
+  async courierLeave(visitorId: string): Promise<void> {
+    const g = this.employees.find((x) => x.id === visitorId);
+    if (!g) return;
+    g.path = null; g.after = null;
+    const bikeId = this.bikeOf.get(visitorId);
+    const b = bikeId ? this.bikes.get(bikeId) : undefined;
+    const spot = b ? { x: b.tx, y: b.ty } : this.gateTile();
+    await this.walk(g, spot.x, spot.y);
+    this.employees = this.employees.filter((x) => x.id !== g.id);
+    if (this.selected?.id === g.id) this.selected = null;
+    if (this.follow === g.id) this.follow = null;
+    if (!b || !bikeId) return;
+    b.rider = g.pal;
+    const path = (this.ridePath({ x: b.tx, y: b.ty }) ?? [{ x: b.tx, y: b.ty }]).slice().reverse(); // ปลายทาง -> ขอบ
+    const out = [...path.slice(1).map(this.toPx), this.offscreenOf(path[path.length - 1])];
+    b.face = (out[0]?.px ?? b.px) < b.px ? 'left' : 'right';
+    this.camTarget = null; this.follow = bikeId; // กล้องตามตอนขี่ออก
+    b.rev = 0.8; // สตาร์ทเครื่อง แง๊น ๆ ก่อนออกตัว
+    await new Promise<void>((r) => window.setTimeout(r, 800));
+    await new Promise<void>((resolve) => { b.queue = out; b.to = b.queue.shift() ?? null; b.done = () => { this.bikes.delete(bikeId); resolve(); }; });
+    this.bikeOf.delete(visitorId);
+  }
+  /** ตัวละครแมสเซนเจอร์ -> รถของเขา */
+  private bikeOf = new Map<string, string>();
+  private riderAtlases = new Map<string, HTMLCanvasElement>();
+  private riderAtlas(pal: Palette): HTMLCanvasElement {
+    const k = JSON.stringify(pal);
+    let a = this.riderAtlases.get(k);
+    if (!a) { a = buildAtlas(pal); this.riderAtlases.set(k, a); }
+    return a;
+  }
+
+  /** ขยับมอไซค์ที่กำลังวิ่ง (เรียกจาก update ทุกเฟรม) */
+  private updateBikes(dt: number) {
+    this.bikes.forEach((b) => {
+      const back = b.face === 'left' ? 1 : -1; // ควันออกท้ายรถ (ด้านตรงข้ามกับที่หัน)
+      if (b.rev > 0) {
+        b.rev -= dt;
+        b.puffT -= dt;
+        if (b.puffT <= 0) { b.puffT = 0.12; this.puffs.push({ x: b.px + back * 8, y: b.py - 5, vx: back * 14, t: 0.7 }); }
+      }
+      if (!b.to) return;
+      const dx = b.to.px - b.px, dy = b.to.py - b.py;
+      const dist = Math.hypot(dx, dy);
+      // วิ่งช้าลงเมื่อใกล้ที่จอด (เหลือ 2 ช่องสุดท้าย) จะได้เห็นเบรก-เข้าซอง
+      const slow = b.queue.length === 0 && dist < TS * 2 ? 0.55 : 1;
+      const step = 64 * slow * dt;
+      b.puffT -= dt;
+      if (b.puffT <= 0) { b.puffT = 0.11; this.puffs.push({ x: b.px + back * 8 + (Math.random() * 2 - 1), y: b.py - 5, vx: back * 12, t: 0.7 }); }
+      if (dist <= step) {
+        b.px = b.to.px; b.py = b.to.py;
+        b.to = b.queue.shift() ?? null; // ช่องถัดไปในเส้นทาง
+        if (!b.to) { const f = b.done; b.done = null; f?.(); }
+        return;
+      }
+      b.px += (dx / dist) * step; b.py += (dy / dist) * step;
+      if (Math.abs(dx) > 0.5) b.face = dx < 0 ? 'left' : 'right';
+    });
+    for (const q of this.puffs) { q.t -= dt; q.x += q.vx * dt; q.y -= 6 * dt; }
+    this.puffs = this.puffs.filter((q) => q.t > 0);
+  }
+
+  spawnVisitor(name: string, seed?: number, opts: { courier?: boolean; at?: Tile; bikeId?: string } = {}): string {
+    const id = `visitor-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+    const gate = opts.at ?? this.gateTile();
     const s = seed ?? Array.from(name).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) >>> 0, 7);
     // เสื้อโทนอบอุ่นให้ต่างจากพนักงาน (พนักงานใส่สีแผนก) - ดูออกทันทีว่าเป็นคนนอก
     const shirts = ['#d9a066', '#c46b6b', '#7aa2c9', '#a08ad6', '#e0c060', '#8fbf7f'];
-    const pal = makePalette(s, shirts[s % shirts.length], s % 2 === 1);
+    // แมสเซนเจอร์: เสื้อกั๊กส้ม + หมวกกันน็อก + ถือซองเอกสาร และมีมอไซค์จอดข้างประตู
+    const pal = opts.courier
+      ? { ...makePalette(s, '#ffb000', false), helmet: '#e8622a' }
+      : makePalette(s, shirts[s % shirts.length], s % 2 === 1);
+    if (opts.courier && opts.bikeId) this.bikeOf.set(id, opts.bikeId);
+    else if (opts.courier) {
+      // เรียกตรง ๆ โดยไม่ได้ขี่เข้ามา - วางรถจอดไว้หน้าตึกให้เลย
+      const spot = this.parkingSpot();
+      this.bikes.set(`bike-${id}`, { px: spot.x * TS + 8, py: spot.y * TS + TS, tx: spot.x, ty: spot.y, rider: null, to: null, queue: [], done: null, face: 'left', rev: 0, puffT: 0 });
+      this.bikeOf.set(id, `bike-${id}`);
+    }
     this.employees.push({
-      id, name, title: 'ลูกค้า', deptId: '__visitor__', role: 'proposer', lens: '',
+      id, name, title: opts.courier ? 'แมสเซนเจอร์' : 'ลูกค้า', deptId: '__visitor__', role: 'proposer', lens: '',
       pal, atlas: buildAtlas(pal),
       seat: { ...gate },
       tx: gate.x, ty: gate.y, px: gate.x * TS + 8, py: gate.y * TS + TS,
@@ -868,10 +1051,18 @@ export class World {
       path: null, after: null,
       bubble: null, bubbleT: 0,
       sayFull: '', sayChars: 0, sayT: 0, sayPage: 0, sayHold: 0,
-      gadget: null,
+      gadget: opts.courier ? 'envelope' : null,
       busy: true, isVisitor: true, owner: 'sim',
     });
+    if (opts.courier) { const e = this.employees[this.employees.length - 1]; e.speed = 58; }
     return id;
+  }
+  /** แมสเซนเจอร์ยื่นซองให้แล้ว - ซองย้ายไปอยู่กับคนรับ (คนรับถือแฟ้ม/โน้ต) */
+  handOver(courierId: string, hostId: string) {
+    const c = this.employees.find((x) => x.id === courierId);
+    const h = this.employees.find((x) => x.id === hostId);
+    if (c) c.gadget = null;
+    if (h) { h.gadget = 'notes'; h.bubble = 'idea'; h.bubbleT = 2; }
   }
 
   /**
@@ -955,6 +1146,7 @@ export class World {
     g.path = null; g.after = null;
     const gate = this.gateTile();
     await this.walk(g, gate.x, gate.y);
+    const bk = this.bikeOf.get(g.id); if (bk) { this.bikes.delete(bk); this.bikeOf.delete(g.id); }
     this.employees = this.employees.filter((x) => x.id !== g.id);
     if (this.selected?.id === g.id) this.selected = null;
     if (this.follow === g.id) this.follow = null;
@@ -1161,6 +1353,7 @@ export class World {
      Update / Render
      ============================================================ */
   private update(dt: number) {
+    this.updateBikes(dt);
     for (const e of this.employees) {
       if (e.bubbleT > 0) { e.bubbleT -= dt; if (e.bubbleT <= 0) e.bubble = null; }
 
@@ -1322,8 +1515,30 @@ export class World {
     });
     this.employees.forEach((e) => list.push({ sort: e.py, kind: 'emp', e }));
     list.sort((a, b) => a.sort - b.sort);
+    // มอไซค์แมสเซนเจอร์ (วิ่งอยู่/จอดอยู่) - วาดตามตำแหน่งพิกเซล มีคนขี่ก็วาดคนซ้อนบนเบาะ
+    const drawBike = (b: { px: number; py: number; rider: Palette | null; face: 'left' | 'right'; rev: number; to: unknown }) => {
+      const s = objSprite({ type: 'bike', x: 0, y: 0 });
+      // เร่งเครื่อง = สั่นซ้ายขวา 1 พิกเซล / วิ่งอยู่ = กระเด้งขึ้นลงตามถนน
+      const jit = b.rev > 0 ? (Math.floor(performance.now() / 45) % 2 ? 1 : -1) : 0;
+      const bob = b.rev <= 0 && b.to ? (Math.floor(performance.now() / 90) % 2 ? -1 : 0) : 0;
+      const x = Math.round(b.px - 8 - (s.ox ?? 0)) + jit, y = Math.round(b.py - TS - s.oy) + bob;
+      if (b.rider) {
+        // คนขี่วาด "ก่อน" รถ: หัว-ลำตัวโผล่เหนือเบาะ ส่วนสะโพก/ขาโดนตัวถังบังไป = ดูเหมือนคร่อมรถจริง ๆ
+        const atlas = this.riderAtlas(b.rider);
+        const di = DIRS.indexOf(b.face);
+        ctx.drawImage(atlas, 4 * 16, di * 24, 16, 20, Math.round(b.px - 8) + jit, Math.round(b.py - 35) + bob, 16, 20);
+      }
+      ctx.save();
+      if (b.face === 'right') { ctx.translate(x + s.c.width, 0); ctx.scale(-1, 1); ctx.drawImage(s.c, 0, y); }
+      else ctx.drawImage(s.c, x, y);
+      ctx.restore();
+    };
+    const bikeItems: { sort: number; b: { px: number; py: number; rider: Palette | null; face: 'left' | 'right'; rev: number; to: unknown } }[] = [];
+    this.bikes.forEach((b) => bikeItems.push({ sort: b.py - 0.25, b }));
 
+    let bi = 0;
     for (const it of list) {
+      while (bi < bikeItems.length && bikeItems[bi].sort <= it.sort) drawBike(bikeItems[bi++].b);
       if (it.kind === 'obj') {
         const s = objSprite(it.o);
         ctx.drawImage(s.c, it.o.x * TS - (s.ox ?? 0), it.o.y * TS - s.oy);
@@ -1350,6 +1565,14 @@ export class World {
           ctx.strokeRect(((e.px - 8) + 0.5) | 0, ((e.py - 25) + 0.5) | 0, 15, 25);
         }
       }
+    }
+    while (bi < bikeItems.length) drawBike(bikeItems[bi++].b);
+    // ควันท่อ - ก้อนเทาเล็ก ๆ จางลงตามเวลา
+    for (const q of this.puffs) {
+      const a = Math.max(0, Math.min(1, q.t / 0.7));
+      ctx.fillStyle = `rgba(150,158,168,${(0.55 * a).toFixed(2)})`;
+      const r = q.t < 0.35 ? 2 : 1;
+      ctx.fillRect(Math.round(q.x) - r, Math.round(q.y) - r, r * 2, r * 2);
     }
 
     this.employees.forEach((e) => {
@@ -1661,7 +1884,7 @@ export class World {
       if (near) { this.cam = { ...this.camTarget }; this.camTarget = null; }
       this.clampCam();
     } else if (this.follow) {
-      const e = this.employees.find((x) => x.id === this.follow);
+      const e = this.employees.find((x) => x.id === this.follow) ?? this.bikes.get(this.follow);
       if (e) {
         const tx = e.px - this.canvas.width / this.cam.z / 2;
         const ty = e.py - this.canvas.height / this.cam.z / 2;

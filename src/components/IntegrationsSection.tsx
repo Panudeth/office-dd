@@ -12,6 +12,8 @@ import { Button } from '@/components/ui/button';
 import { InfoTip } from '@/components/ui/infotip';
 import { Field, Input } from '@/components/ui/input';
 import { Hint } from '@/components/ui/panel';
+import { LineInboundSection } from '@/components/DepartmentPanel';
+import { DEPARTMENTS } from '@/lib/departments';
 
 /* ============================================================
    การเชื่อมต่อภายนอก - token ของออฟฟิศสำหรับ MCP / API / LINE
@@ -29,7 +31,7 @@ interface TokenRow {
   last_used_at: string | null;
 }
 
-export default function IntegrationsSection({ office, onPolicy }: { office: Office; onPolicy?: (p: 'any' | 'local') => void }) {
+export default function IntegrationsSection({ office, onPolicy, part = 'in' }: { office: Office; onPolicy?: (p: 'any' | 'local') => void; part?: 'in' | 'out' | 'settings' }) {
   const [policy, setPolicy] = useState<'any' | 'local'>(office.llm_policy === 'local' ? 'local' : 'any');
   const [policyBusy, setPolicyBusy] = useState(false);
   const [policyErr, setPolicyErr] = useState<string | null>(null);
@@ -42,7 +44,17 @@ export default function IntegrationsSection({ office, onPolicy }: { office: Offi
   };
   const [rows, setRows] = useState<TokenRow[] | null>(null);
   const [name, setName] = useState('');
-  const [scope, setScope] = useState<'internal' | 'public'>('internal');
+  const [scope, setScope] = useState<'internal' | 'public' | 'inbox'>('inbox');
+  /** แผนกที่ token แบบ inbox ยิงเข้าได้ (เลือกตอนสร้าง - แก้ทีหลังได้ทั้งที่นี่และในแผนก) */
+  const [inboxDepts, setInboxDepts] = useState<string[]>([]);
+  const patchToken = async (id: string, patch: { deptIds?: string[]; name?: string }) => {
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch('/api/office/token', { method: 'PATCH', headers: await hdr(), body: JSON.stringify({ officeId: office.id, id, ...patch }) });
+      if (!res.ok) throw new Error(((await res.json()) as { error?: string }).error ?? `HTTP ${res.status}`);
+      await load();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  };
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   /** token ที่เพิ่งสร้าง - โชว์ครั้งเดียว */
@@ -85,12 +97,12 @@ export default function IntegrationsSection({ office, onPolicy }: { office: Offi
     setBusy(true); setErr(null); setFresh(null);
     try {
       const res = await fetch('/api/office/token', {
-        method: 'POST', headers: await hdr(), body: JSON.stringify({ officeId: office.id, name: name.trim() || 'token', scope }),
+        method: 'POST', headers: await hdr(), body: JSON.stringify({ officeId: office.id, name: name.trim() || 'token', scope, ...(scope === 'inbox' ? { deptIds: inboxDepts } : {}) }),
       });
       const data = (await res.json()) as { token?: string; error?: string };
       if (!res.ok || !data.token) throw new Error(data.error ?? `HTTP ${res.status}`);
       setFresh(data.token);
-      setName('');
+      setName(''); setInboxDepts([]);
       await load();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -125,11 +137,11 @@ export default function IntegrationsSection({ office, onPolicy }: { office: Offi
 
   return (
     <Field
-      label={<span className="flex items-center gap-1.5"><Plug className="size-3.5" /> การเชื่อมต่อภายนอก (MCP / API / LINE)</span>}
-      info="internal = agent ของเราเอง (ถามทุกแผนก ประชุม อ่านสมุดได้) public = ช่องทางลูกค้า (ถาม PR ได้อย่างเดียว ได้เฉพาะคำตอบที่กรองแล้ว ไม่เห็นสมุด) เก็บ token เหมือนรหัสผ่าน"
+      label={part === 'in' ? <span className="flex items-center gap-1.5"><Plug className="size-3.5" /> บัตรผ่านขาเข้าของออฟฟิศ - ใครยิงเข้ามาได้บ้าง</span> : undefined}
+      info={part === 'in' ? 'ที่นี่ = สร้าง "บัตรผ่าน" ให้ระบบข้างนอกยิงเข้าออฟฟิศ ทำครั้งเดียว ใช้ได้หลายแผนก (ต่างจากในหน้าแผนกที่แค่ติ๊กว่าแผนกนั้นรับจากบัตรไหน) · webhook เข้า = ระบบยิงข้อมูลให้แผนกที่เลือก · internal = agent ของเราเอง ถามทุกแผนก/ประชุม/อ่านสมุด (MCP/API) · public = ช่องทางลูกค้า ได้เฉพาะคำตอบที่กรองแล้ว · LINE OA = ลูกค้าทัก LINE แล้วแผนกที่เลือกตอบ · token โชว์ครั้งเดียว เก็บเหมือนรหัสผ่าน' : undefined}
     >
       <div className="flex flex-col gap-1.5">
-        {rows === null ? (
+        {part !== 'in' ? null : rows === null ? (
           <Hint className="flex items-center gap-1.5"><LoaderCircle className="size-3 animate-spin" /> กำลังโหลด</Hint>
         ) : rows.length === 0 ? (
           <Hint>ยังไม่มี token</Hint>
@@ -140,8 +152,23 @@ export default function IntegrationsSection({ office, onPolicy }: { office: Offi
                 <KeyRound className="size-3.5 shrink-0 text-dim" />
                 <span className="min-w-0 flex-1 truncate text-parchment">{r.name}</span>
                 <Badge variant={r.scope === 'public' ? 'brass' : r.scope === 'inbox' ? 'default' : 'good'}>
-                  {r.scope === 'public' ? 'public - ลูกค้า' : r.scope === 'inbox' ? `inbox - ${(r.dept_ids ?? []).join(', ')}` : 'internal - ทีมเรา'}
+                  {r.scope === 'public' ? 'public - ลูกค้า' : r.scope === 'inbox' ? 'webhook เข้า' : 'internal - ทีมเรา'}
                 </Badge>
+                {r.scope === 'inbox' && (
+                  <span className="flex flex-wrap items-center gap-1">
+                    <span className="text-[10px] text-dim">→ แผนก:</span>
+                    {DEPARTMENTS.map((d) => {
+                      const on = (r.dept_ids ?? []).includes(d.id);
+                      return (
+                        <button key={d.id} type="button" disabled={busy} title={d.nameTh}
+                          onClick={() => void patchToken(r.id, { deptIds: on ? (r.dept_ids ?? []).filter((x) => x !== d.id) : [...(r.dept_ids ?? []), d.id] })}
+                          className={`rounded-box border px-1.5 py-px text-[10px] ${on ? 'border-carpet bg-[#22401f] text-carpet-lite' : 'border-ink-500 bg-ink-800 text-dim hover:border-brass'}`}>
+                          {on ? '✓ ' : ''}{d.shortTh}
+                        </button>
+                      );
+                    })}
+                  </span>
+                )}
                 <span className="shrink-0 text-[10px] text-dim">
                   {r.last_used_at ? `ใช้ล่าสุด ${new Date(r.last_used_at).toLocaleString('th-TH')}` : 'ยังไม่เคยใช้'}
                 </span>
@@ -153,20 +180,38 @@ export default function IntegrationsSection({ office, onPolicy }: { office: Offi
           </ul>
         )}
 
+        {part === 'in' && (<>
         <div className="flex gap-1.5">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="ชื่อ token เช่น Claude Code / LINE bot" maxLength={60} />
-          <Select value={scope} onValueChange={(v) => setScope(v === 'public' ? 'public' : 'internal')}>
-            <SelectTrigger className="h-9 w-44 shrink-0 text-[11px]"><SelectValue /></SelectTrigger>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={scope === 'inbox' ? 'ชื่อระบบที่จะยิงเข้า เช่น gcp-billing' : 'ชื่อ token เช่น Claude Code / LINE bot'} maxLength={60} />
+          <Select value={scope} onValueChange={(v) => setScope(v === 'public' ? 'public' : v === 'inbox' ? 'inbox' : 'internal')}>
+            <SelectTrigger className="h-9 w-48 shrink-0 text-[11px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="internal">internal - agent ของเรา</SelectItem>
+              <SelectItem value="inbox">webhook เข้า - ระบบยิงข้อมูลให้แผนก</SelectItem>
+              <SelectItem value="internal">internal - agent ของเรา (MCP/API)</SelectItem>
               <SelectItem value="public">public - ช่องทางลูกค้า</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="primary" className="shrink-0" size="sm" disabled={busy} onClick={create}>
+          <Button variant="primary" className="shrink-0" size="sm" disabled={busy || (scope === 'inbox' && (!name.trim() || !inboxDepts.length))} onClick={create}
+            title={scope === 'inbox' && !name.trim() ? 'พิมพ์ชื่อระบบก่อน' : scope === 'inbox' && !inboxDepts.length ? 'เลือกแผนกที่จะรับอย่างน้อย 1' : undefined}>
             {busy ? <LoaderCircle className="animate-spin" /> : <Plus />} สร้าง token
           </Button>
         </div>
 
+        {scope === 'inbox' && (
+          <div className="flex flex-wrap items-center gap-1 text-[11px]">
+            <span className="text-dim">แผนกที่รับ:</span>
+            {DEPARTMENTS.map((d) => {
+              const on = inboxDepts.includes(d.id);
+              return (
+                <button key={d.id} type="button" onClick={() => setInboxDepts((l) => (on ? l.filter((x) => x !== d.id) : [...l, d.id]))}
+                  className={`rounded-box border px-2 py-0.5 ${on ? 'border-carpet bg-[#22401f] text-carpet-lite' : 'border-ink-500 bg-ink-800 text-dim hover:border-brass'}`}>{on ? '✓ ' : ''}{d.shortTh}</button>
+              );
+            })}
+            <InfoTip>ระบบนี้ยิงเข้าแผนกไหนได้บ้าง - เปลี่ยนทีหลังได้ทั้งที่นี่และในหน้าแผนก (แท็บ "ขาเข้า" ติ๊กรับ) · URL ที่ระบบต้องยิง: <code>{origin}/api/office/inbox/&lt;deptId&gt;</code></InfoTip>
+            {(!name.trim() || !inboxDepts.length) && <span className="text-[10px] text-brass">{!name.trim() ? 'พิมพ์ชื่อระบบ' : 'เลือกแผนกที่รับอย่างน้อย 1'} แล้วปุ่ม "สร้าง token" จะกดได้</span>}
+          </div>
+        )}
+        {err && <p className="rounded-box border border-rug-dark bg-[#3f2018] px-2 py-1 text-[11px] text-rug-lite">{err}</p>}
         {fresh && (
           <div className="rounded-box border-2 border-brass/60 bg-ink-900 p-2">
             <div className="mb-1 text-[11px] font-semibold text-brass">token ใหม่ - คัดลอกตอนนี้ จะไม่โชว์อีก</div>
@@ -202,6 +247,14 @@ export default function IntegrationsSection({ office, onPolicy }: { office: Offi
           </div>
         </details>
 
+        <div className="rounded-box border border-ink-600 bg-ink-700 p-2 text-[11px]">
+          <LineInboundSection officeId={office.id} deptId="*" canEdit />
+        </div>
+        </>)}
+
+
+
+        {part === 'settings' && (<>
         <div className="rounded-box border border-ink-600 bg-ink-700 p-2 text-[11px]">
           <div className="flex items-center gap-1.5">
             <Lock className="size-3.5 shrink-0 text-dim" />
@@ -261,6 +314,7 @@ export default function IntegrationsSection({ office, onPolicy }: { office: Offi
           )}
         </div>
 
+        </>)}
         {err && <p className="rounded-box border border-wood-dark bg-wood-deep/60 px-2 py-1 text-[11px] text-brass-lite">{err}</p>}
       </div>
     </Field>

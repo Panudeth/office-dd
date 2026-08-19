@@ -14,8 +14,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import RoutingTab from '@/components/RoutingTab';
 import {
-  DEPT_BY_ID, DEPT_ID_RE, MAX_PLAYBOOK_CHARS, MAX_SKILL_CHARS, PRESET_BY_ID, ROLES, ROLE_ORDER, sanitizeDeptDef,
+  DEPARTMENTS, DEPT_BY_ID, DEPT_ID_RE, MAX_PLAYBOOK_CHARS, MAX_SKILL_CHARS, PRESET_BY_ID, ROLES, ROLE_ORDER, sanitizeDeptDef,
   slugifyDeptId, type AgentRole, type DepartmentDef,
 } from '@/lib/departments';
 import {
@@ -49,6 +50,8 @@ interface Props {
   onDelete: (id: string) => Promise<void>;
   /** กลับไปหน้ารวมแผนก */
   onBack?: () => void;
+  /** แสดงในแท็บของแผงขวา (ไม่มี dialog/แถบข้าง) */
+  inline?: boolean;
 }
 
 const CHANNEL_LABEL: Record<ChannelKind, string> = {
@@ -62,7 +65,7 @@ const COLORS = ['#9a5fc0', '#3fa06a', '#4a7fd0', '#e0a13f', '#e07aa8', '#5cbcc8'
 
 const emptyDef = (): DepartmentDef => ({ id: '', nameTh: '', shortTh: '', color: COLORS[6], description: '', keywords: [], lenses: {}, skillText: '', playbook: '' });
 
-export default function DepartmentPanel({ open, onClose, deptId, officeId, canEdit, llmHeaders, headcount, onSave, onDelete, onBack }: Props) {
+export default function DepartmentPanel({ open, onClose, deptId, officeId, canEdit, llmHeaders, headcount, onSave, onDelete, onBack, inline = false }: Props) {
   const isNew = !deptId;
   const preset = deptId ? PRESET_BY_ID.get(deptId) : undefined;
   const [tab, setTab] = useState('main');
@@ -139,14 +142,14 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
   };
 
   const overrideOfPreset = !!preset;
-  return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent
-        icon={<Building2 />}
-        title={isNew ? 'สร้างแผนกใหม่' : `แผนก: ${def.nameTh || deptId}`}
-        description="ตั้งชื่อ หน้าที่ สกิล และช่องทางเข้า-ออกของแผนก"
-        wide
-      >
+  const body = (
+    <>
+        {inline && (
+          <div className="flex items-center gap-2 text-[12px] font-semibold text-parchment">
+            {onBack && <Button size="sm" variant="ghost" className="h-6 px-1.5" onClick={onBack} title="กลับไปรายการแผนก">←</Button>}
+            <Building2 className="size-3.5" /> {isNew ? 'สร้างแผนกใหม่' : `แผนก: ${def.nameTh || deptId}`}
+          </div>
+        )}
         {!canEdit && (
           <p className="rounded-box border border-ink-600 bg-ink-700 px-2 py-1 text-[11px] text-dim">อ่านได้อย่างเดียว - เจ้าของหรือ exec ของออฟฟิศเท่านั้นที่แก้แผนกได้</p>
         )}
@@ -154,13 +157,13 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
           <TabsList className="rounded-t-box border border-b-0 border-wood-deep">
             <TabsTrigger value="main"><Building2 /> แผนก</TabsTrigger>
             <TabsTrigger value="skill"><Sparkles /> สกิล</TabsTrigger>
-            <TabsTrigger value="inbox" disabled={isNew}><Inbox /> Webhook เข้า</TabsTrigger>
-            <TabsTrigger value="out" disabled={isNew}><Send /> ส่งออก</TabsTrigger>
+            <TabsTrigger value="inbox" disabled={isNew}><Inbox /> ขาเข้า</TabsTrigger>
+            <TabsTrigger value="out" disabled={isNew}><Send /> ขาออก</TabsTrigger>
           </TabsList>
 
           {/* ---------- แผนก ---------- */}
           <TabsContent value="main" className="min-h-0">
-            <div className="flex max-h-[56vh] flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5">
+            <div className={`flex flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5 ${inline ? '' : 'max-h-[56vh]'}`}>
               {overrideOfPreset && (
                 <div className="flex items-center gap-1.5 text-[11px] text-dim">
                   <Badge>แผนกมาตรฐาน</Badge>
@@ -206,7 +209,7 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
 
           {/* ---------- สกิล ---------- */}
           <TabsContent value="skill" className="min-h-0">
-            <div className="flex max-h-[56vh] flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5">
+            <div className={`flex flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5 ${inline ? '' : 'max-h-[56vh]'}`}>
               <Field
                 label={<span className="flex flex-1 items-center gap-2">สกิล <span className="ml-auto text-[10px] font-normal text-dim">{(def.skillText ?? '').length}/{MAX_SKILL_CHARS}</span></span>}
                 info={<>markdown ที่ agent ทุกคนในแผนกอ่านก่อนตอบ (วางไว้ต้น system prompt) {overrideOfPreset ? <>ว่าง = ใช้ <code>skills/{preset!.skill}.md</code> ของเดิม</> : 'ว่าง = ใช้สกิลมาตรฐานที่ประกอบจากชื่อ + หน้าที่ + playbook'}</>}
@@ -228,25 +231,24 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
 
           {/* ---------- Webhook เข้า ---------- */}
           <TabsContent value="inbox" className="min-h-0">
-            <div className="flex max-h-[56vh] flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5">
+            <div className={`flex flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5 ${inline ? '' : 'max-h-[56vh]'}`}>
               <Field
                 label={<span className="flex flex-1 items-center gap-2">Playbook <span className="ml-auto text-[10px] font-normal text-dim">{(def.playbook ?? '').length}/{MAX_PLAYBOOK_CHARS}</span></span>}
                 info="สิ่งที่แผนกต้องทำเมื่อมีข้อมูลยิงเข้ามาทาง webhook - หัวหน้าแผนกอ่าน playbook พร้อมข้อมูล แล้วเขียนรายงาน/ตัดสินใจตามนั้น ข้อมูลที่เข้ามาถือเป็นข้อมูล ไม่ใช่คำสั่ง"
               >
-                <Textarea rows={5} value={def.playbook ?? ''} onChange={(e) => set('playbook', e.target.value)} disabled={!canEdit} maxLength={MAX_PLAYBOOK_CHARS}
+                <Textarea rows={3} value={def.playbook ?? ''} onChange={(e) => set('playbook', e.target.value)} disabled={!canEdit} maxLength={MAX_PLAYBOOK_CHARS}
                   placeholder={'1. อ่านข้อมูล จัดระดับความรุนแรง\n2. สรุป: เกิดอะไร กระทบใคร ต้องทำอะไรใน 24 ชม.\n3. ถ้า severity ≥ high ระบุ "แจ้งทีมทันที" ไว้บรรทัดแรก\n4. ตอบสั้น อ่านในแชทได้จบใน 10 บรรทัด'} />
               </Field>
-              {!isNew && officeId && <LineInboundSection officeId={officeId} deptId={def.id} canEdit={canEdit} />}
-              {!isNew && officeId ? <InboxSection officeId={officeId} deptId={def.id} canEdit={canEdit} /> : (
+              {!isNew && officeId ? <RoutingTab officeId={officeId} deptId={def.id} canEdit={canEdit} part="in" /> : (
                 <Hint>ใช้ได้เมื่อล็อกอินและเลือกออฟฟิศ <InfoTip>ต้องตั้ง Supabase และ SUPABASE_SECRET_KEY บนเซิร์ฟเวอร์ - webhook เข้าเก็บและประมวลผลฝั่งเซิร์ฟเวอร์</InfoTip></Hint>
               )}
             </div>
           </TabsContent>
 
-          {/* ---------- ส่งออก ---------- */}
+          {/* ---------- ขาออก ---------- */}
           <TabsContent value="out" className="min-h-0">
-            <div className="flex max-h-[56vh] flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5">
-              {!isNew && officeId ? <ChannelSection officeId={officeId} deptId={def.id} canEdit={canEdit} /> : (
+            <div className={`flex flex-col gap-2 overflow-y-auto rounded-b-box border border-t-0 border-ink-600 bg-ink-800 p-2.5 ${inline ? '' : 'max-h-[56vh]'}`}>
+              {!isNew && officeId ? <RoutingTab officeId={officeId} deptId={def.id} canEdit={canEdit} part="out" /> : (
                 <Hint>ใช้ได้เมื่อล็อกอินและเลือกออฟฟิศ</Hint>
               )}
             </div>
@@ -257,7 +259,7 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
           <p className={`rounded-box border px-2 py-1 text-[11px] ${err ? 'border-rug-dark bg-[#3f2018] text-rug-lite' : 'border-carpet-dark bg-[#22401f] text-carpet-lite'}`}>{err ?? ok}</p>
         )}
         <div className="flex items-center gap-2 pt-1">
-          {onBack && <Button size="sm" variant="outline" onClick={onBack} title="กลับไปหน้ารวมแผนก">← แผนกทั้งหมด</Button>}
+          {onBack && !inline && <Button size="sm" variant="outline" onClick={onBack} title="กลับไปหน้ารวมแผนก">← แผนกทั้งหมด</Button>}
           {!isNew && canEdit && (
             <Button size="sm" variant="danger" onClick={remove} disabled={busy !== null || (!overrideOfPreset && headcount > 0)}
               title={!overrideOfPreset && headcount > 0 ? `มีพนักงาน ${headcount} คนอยู่ - เลิกจ้างก่อน` : overrideOfPreset ? 'ล้างค่าทับ กลับเป็นแผนกมาตรฐาน' : 'ลบแผนกนี้ (พร้อม channel/webhook ของมัน)'}>
@@ -265,11 +267,18 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
             </Button>
           )}
           <span className="flex-1" />
-          <Button size="sm" variant="outline" onClick={onClose}>ปิด</Button>
+          {!inline && <Button size="sm" variant="outline" onClick={onClose}>ปิด</Button>}
           <Button size="sm" variant="primary" onClick={save} disabled={!canSave}>
             {busy === 'save' ? <LoaderCircle className="animate-spin" /> : <Check />} {isNew ? 'สร้างแผนก' : 'บันทึก'}
           </Button>
         </div>
+    </>
+  );
+  if (inline) return open ? body : null;
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent icon={<Building2 />} title={isNew ? 'สร้างแผนกใหม่' : `แผนก: ${def.nameTh || deptId}`} description="ตั้งชื่อ หน้าที่ สกิล และช่องทางเข้า-ออกของแผนก" wide>
+        {body}
       </DialogContent>
     </Dialog>
   );
@@ -282,8 +291,11 @@ export default function DepartmentPanel({ open, onClose, deptId, officeId, canEd
    ============================================================ */
 interface InboundMasked { id: string; dept_id: string; kind: string; label: string; enabled: boolean; created_at: string; hasSecret: boolean; hasToken: boolean; ack: string }
 
-function LineInboundSection({ officeId, deptId, canEdit }: { officeId: string; deptId: string; canEdit: boolean }) {
+export function LineInboundSection({ officeId, deptId, canEdit }: { officeId: string; deptId: string; canEdit: boolean }) {
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  /** deptId '*' = โหมดออฟฟิศ (หน้า "เชื่อมต่อ"): เห็นทุก OA และเลือกแผนกที่ตอบได้ */
+  const all = deptId === '*';
+  const [pickDept, setPickDept] = useState<string>('');
   const [rows, setRows] = useState<InboundMasked[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<InboundMasked | null>(null);
@@ -301,7 +313,7 @@ function LineInboundSection({ officeId, deptId, canEdit }: { officeId: string; d
   };
   const load = async () => {
     try {
-      const res = await fetch(`/api/office/inbound?officeId=${officeId}&deptId=${deptId}`, { headers: await hdr() });
+      const res = await fetch(`/api/office/inbound?officeId=${officeId}${all ? '' : `&deptId=${deptId}`}`, { headers: await hdr() });
       const data = (await res.json()) as { inbound?: InboundMasked[]; error?: string };
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       setRows(data.inbound ?? []);
@@ -310,13 +322,15 @@ function LineInboundSection({ officeId, deptId, canEdit }: { officeId: string; d
   useEffect(() => { void load(); }, [officeId, deptId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reset = () => { setEditing(null); setLabel(''); setSecret(''); setToken(''); setAck(''); setOpen(false); };
-  const startEdit = (r: InboundMasked) => { setEditing(r); setLabel(r.label); setSecret(''); setToken(''); setAck(r.ack); setOpen(true); setErr(null); };
+  const startEdit = (r: InboundMasked) => { setEditing(r); setLabel(r.label); setSecret(''); setToken(''); setAck(r.ack); setPickDept(r.dept_id); setOpen(true); setErr(null); };
   const save = async () => {
+    const target = all ? pickDept : deptId;
+    if (!target) { setErr('เลือกแผนกที่จะตอบลูกค้าก่อน'); return; }
     setBusy('save'); setErr(null);
     try {
       const res = await fetch('/api/office/inbound', {
         method: 'POST', headers: await hdr(),
-        body: JSON.stringify({ officeId, deptId, ...(editing ? { id: editing.id } : {}), label, secret, token, ack }),
+        body: JSON.stringify({ officeId, deptId: target, ...(editing ? { id: editing.id } : {}), label, secret, token, ack }),
       });
       const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
@@ -327,7 +341,7 @@ function LineInboundSection({ officeId, deptId, canEdit }: { officeId: string; d
   const toggle = async (r: InboundMasked) => {
     setBusy(r.id); setErr(null);
     try {
-      const res = await fetch('/api/office/inbound', { method: 'POST', headers: await hdr(), body: JSON.stringify({ officeId, deptId, id: r.id, label: r.label, enabled: !r.enabled }) });
+      const res = await fetch('/api/office/inbound', { method: 'POST', headers: await hdr(), body: JSON.stringify({ officeId, deptId: r.dept_id, id: r.id, label: r.label, enabled: !r.enabled }) });
       if (!res.ok) throw new Error(((await res.json()) as { error?: string }).error ?? `HTTP ${res.status}`);
       await load();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(null); }
@@ -368,6 +382,7 @@ function LineInboundSection({ officeId, deptId, canEdit }: { officeId: string; d
             <div className="flex items-center gap-2">
               <Badge variant={r.enabled ? 'good' : 'default'}>LINE</Badge>
               <span className="text-parchment">{r.label}</span>
+              {all && <span className="text-[10px] text-dim">→ ตอบโดย {DEPT_BY_ID.get(r.dept_id)?.nameTh ?? r.dept_id}</span>}
               {(!r.hasSecret || !r.hasToken) && <Badge variant="bad">secret/token ไม่ครบ</Badge>}
               <span className="flex-1" />
               {canEdit && (
@@ -388,6 +403,16 @@ function LineInboundSection({ officeId, deptId, canEdit }: { officeId: string; d
       })}
       {open && canEdit && (
         <div className="flex flex-col gap-1.5 rounded-box border border-dashed border-ink-500 p-2">
+          {all && (
+            <Field label="แผนกที่ตอบลูกค้าจาก OA นี้">
+              <div className="flex flex-wrap gap-1">
+                {DEPARTMENTS.map((d) => (
+                  <button key={d.id} type="button" onClick={() => setPickDept(d.id)}
+                    className={`rounded-box border px-2 py-0.5 text-[11px] ${pickDept === d.id ? 'border-carpet bg-[#22401f] text-carpet-lite' : 'border-ink-500 bg-ink-800 text-dim hover:border-brass'}`}>{d.nameTh}</button>
+                ))}
+              </div>
+            </Field>
+          )}
           <div className="grid grid-cols-[1fr_1fr] gap-2">
             <Field label="ชื่อเรียก"><Input className="h-8" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="เช่น LINE ร้านหลัก" maxLength={80} /></Field>
             <Field label="ข้อความตอบรับทันที" info="ส่งกลับทันทีที่ลูกค้าทัก ระหว่างรอคำตอบจริง - ว่าง = ใช้ข้อความมาตรฐาน">
@@ -588,7 +613,24 @@ function InboxSection({ officeId, deptId, canEdit }: { officeId: string; deptId:
 /* ============================================================
    ส่งออก: channel ของแผนก
    ============================================================ */
-function ChannelSection({ officeId, deptId, canEdit }: { officeId: string; deptId: string; canEdit: boolean }) {
+export function ChannelSection({ officeId, deptId, canEdit, compact = false, onChanged, rowExtra }: {
+  officeId: string; deptId: string; canEdit: boolean; compact?: boolean; onChanged?: () => void;
+  /** เนื้อหาเพิ่มใต้แต่ละแถวช่อง (เช่น ชิป "รับจากแหล่งไหน") */
+  rowExtra?: (c: DeptChannel) => React.ReactNode;
+}) {
+  /** deptId '*' = คลังช่องส่งออกของออฟฟิศ (ทุกช่อง) - การผูกกับแผนก/แหล่งทำที่แท็บ "เข้า → ออก" ของแผนก */
+  const shared = deptId === '*';
+  const [sharedRows, setSharedRows] = useState<DeptChannel[]>([]);
+  const usedBy = (c: DeptChannel) => (c.config.depts ?? '').split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+  const toggleShared = async (c: DeptChannel) => {
+    setBusy(c.id); setErr(null);
+    try {
+      const list = usedBy(c);
+      const next = list.includes(deptId) ? list.filter((d) => d !== deptId) : [...list, deptId];
+      await saveChannel(officeId, { ...c, config: { ...c.config, depts: next.join(', ') } });
+      await load();
+    } catch (e) { setErr(sbError(e)); } finally { setBusy(null); }
+  };
   const [rows, setRows] = useState<DeptChannel[]>([]);
   const [kind, setKind] = useState<ChannelKind>('teams');
   const [label, setLabel] = useState('');
@@ -611,20 +653,26 @@ function ChannelSection({ officeId, deptId, canEdit }: { officeId: string; deptI
   const [msg, setMsg] = useState<string | null>(null);
 
   const load = async () => {
-    try { setRows((await listChannels(officeId)).filter((c) => c.dept_id === deptId)); } catch (e) { setErr(sbError(e)); }
+    try {
+      const all = await listChannels(officeId);
+      // คลัง (shared) = ทุกช่องในออฟฟิศไม่ว่าสร้างจากแผนกไหน
+      setRows(shared ? all : all.filter((c) => c.dept_id === deptId));
+      setSharedRows(shared ? [] : all.filter((c) => c.dept_id === '*'));
+      onChanged?.();
+    } catch (e) { setErr(sbError(e)); }
     // แหล่งที่เลือกได้ = ชื่อ token ขาเข้าของแผนกนี้ + แหล่งที่เคยยิงเข้ามาจริง (ไม่ต้องพิมพ์เอง)
     const found = new Set<string>();
     try {
       const t = await accessToken();
       const res = await fetch(`/api/office/token?officeId=${officeId}`, { headers: t ? { 'x-sb-token': t } : {} });
       const data = (await res.json()) as { tokens?: TokenRow[] };
-      for (const tk of data.tokens ?? []) if (tk.scope === 'inbox' && (tk.dept_ids ?? []).includes(deptId) && tk.name) found.add(tk.name.trim());
+      for (const tk of data.tokens ?? []) if (tk.scope === 'inbox' && (shared || (tk.dept_ids ?? []).includes(deptId)) && tk.name) found.add(tk.name.trim());
     } catch { /* ไม่มีสิทธิ์/ยังไม่มี */ }
-    try { for (const r of await listInbox(officeId, 200)) if (r.dept_id === deptId && r.source) found.add(r.source.trim()); } catch { /* ตารางยังไม่มี */ }
+    try { for (const r of await listInbox(officeId, 200)) if ((shared || r.dept_id === deptId) && r.source) found.add(r.source.trim()); } catch { /* ตารางยังไม่มี */ }
     // LINE OA ที่ผูกกับแผนกนี้ก็เป็นแหล่ง (บทสนทนาลูกค้าถูกส่งต่อในชื่อ OA)
     try {
       const t = await accessToken();
-      const res = await fetch(`/api/office/inbound?officeId=${officeId}&deptId=${deptId}`, { headers: t ? { 'x-sb-token': t } : {} });
+      const res = await fetch(`/api/office/inbound?officeId=${officeId}${shared ? '' : `&deptId=${deptId}`}`, { headers: t ? { 'x-sb-token': t } : {} });
       const data = (await res.json()) as { inbound?: { label: string }[] };
       for (const r of data.inbound ?? []) if (r.label) found.add(r.label.trim());
     } catch { /* ไม่มีสิทธิ์/ยังไม่มี */ }
@@ -649,6 +697,8 @@ function ChannelSection({ officeId, deptId, canEdit }: { officeId: string; deptI
           ? { url: url.trim(), ...(kind === 'webhook' && secret.trim() ? { secret: secret.trim() } : {}) }
           : { to: to.trim(), ...(token.trim() ? { token: token.trim() } : {}) }),
         ...(sources.trim() ? { sources: sources.split(/[,\n]/).map((s) => s.trim()).filter(Boolean).join(', ') } : {}),
+        // ช่องใหม่ของแผนก: รับทุกแหล่งของแผนกนี้ไว้ก่อน (ไปติ๊กจำกัดที่แถวแหล่งได้) - แก้ไขช่องเดิมคง routes เดิม
+        ...(editing ? (editing.config.routes ? { routes: editing.config.routes } : {}) : (!shared ? { routes: `${deptId}/*` } : {})),
       };
       const saved = await saveChannel(officeId, {
         ...(editing ? { id: editing.id } : {}),
@@ -689,23 +739,54 @@ function ChannelSection({ officeId, deptId, canEdit }: { officeId: string; deptI
 
   return (
     <div className="flex flex-col gap-2">
+      {!shared && !compact && (
+        <>
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-wall-mid">
+            ช่องกลางของออฟฟิศ
+            <InfoTip>ช่องที่ตั้งไว้ครั้งเดียวที่ปุ่ม "เชื่อมต่อ" (แถบบน) → ช่องส่งออกกลาง - ติ๊กเพื่อให้รายงานของแผนกนี้ไปช่องนั้นด้วย ไม่ต้องวาง URL ซ้ำทุกแผนก · แก้ URL/ทดสอบทำที่หน้าเชื่อมต่อ</InfoTip>
+          </div>
+          {sharedRows.length === 0 ? <Hint className="text-[10px]">ยังไม่มีช่องกลาง - ตั้งได้ที่ปุ่ม "เชื่อมต่อ" บนแถบบน</Hint> : (
+            <ul className="flex flex-col gap-1">
+              {sharedRows.map((c) => {
+                const on = usedBy(c).includes(deptId);
+                return (
+                  <li key={c.id} className={`flex items-center gap-2 rounded-box border bg-ink-700 px-2 py-1 text-[11px] ${on ? 'border-carpet' : 'border-ink-600'}`}>
+                    <button type="button" onClick={() => canEdit && void toggleShared(c)} disabled={!canEdit || busy !== null}
+                      className={`size-4 shrink-0 rounded-box border ${on ? 'border-carpet bg-carpet-dark' : 'border-ink-500 bg-ink-800'}`} aria-label="ใช้กับแผนกนี้">{on ? '✓' : ''}</button>
+                    <Badge variant={c.enabled ? 'good' : 'default'}>{c.kind}</Badge>
+                    <span className="truncate text-parchment">{c.label}</span>
+                    <span className="truncate text-dim">{c.kind === 'line' ? `→ ${c.config.to}` : c.config.url?.replace(/^https?:\/\//, '').slice(0, 32)}</span>
+                    <span className="flex-1" />
+                    <span className="shrink-0 text-[10px] text-dim">{on ? 'แผนกนี้ใช้อยู่' : 'ไม่ได้ใช้'}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
+      )}
       <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-wall-mid">
-        ช่องส่งออก
+        {shared ? 'ช่องส่งออกทั้งหมด' : 'ส่งออก - ช่องของแผนกนี้'}
         <InfoTip>
-          ทุกครั้งที่แผนกนี้ทำรายงานจาก webhook เข้า ผลจะถูกโพสต์ไปทุกช่องที่เปิดอยู่<br />
+          {shared
+            ? <>ที่เก็บ Teams/Slack/Discord/LINE/webhook ทั้งออฟฟิศ<br /></>
+            : <>Teams/Slack/Discord/LINE/webhook ที่แผนกนี้จะโพสต์รายงานไป - ช่องใหม่รับ "ทุกแหล่งของแผนกนี้" ก่อน แล้วไปติ๊กจำกัดที่แถวแหล่งด้านบนได้<br /></>}
           Teams: Workflows → "Post to a channel when a webhook request is received" แล้วเอา URL มาวาง<br />
           LINE: ต้องมี OA และ userId/groupId ปลายทาง (groupId ได้จาก join event ของ webhook)
         </InfoTip>
       </div>
-      {rows.length === 0 ? <Hint className="text-[10px]">ยังไม่มีช่องส่งออก</Hint> : (
+      {rows.length === 0 ? <Hint className="text-[10px]">{shared ? 'ยังไม่มีช่องกลาง' : 'ยังไม่มีช่องเฉพาะแผนก'}</Hint> : (
         <ul className="flex flex-col gap-1">
           {rows.map((c) => (
-            <li key={c.id} className={`flex items-center gap-2 rounded-box border bg-ink-700 px-2 py-1 text-[11px] ${editing?.id === c.id ? 'border-brass' : 'border-ink-600'}`}>
+            <li key={c.id} className={`flex flex-col gap-1 rounded-box border bg-ink-700 px-2 py-1 text-[11px] ${editing?.id === c.id ? 'border-brass' : 'border-ink-600'}`}>
+              <div className="flex items-center gap-2">
               <Webhook className="size-3 text-dim" />
               <Badge variant={c.enabled ? 'good' : 'default'}>{c.kind}</Badge>
               <span className="truncate text-parchment">{c.label}</span>
               <span className="truncate text-dim">{c.kind === 'line' ? `→ ${c.config.to}` : c.config.url?.replace(/^https?:\/\//, '').slice(0, 40)}</span>
-              <Badge className="max-w-40 shrink-0 truncate whitespace-nowrap" title={c.config.sources ? `รับจาก: ${c.config.sources}` : 'รับทุกแหล่ง'}>{c.config.sources ? `จาก ${c.config.sources}` : 'ทุกแหล่ง'}</Badge>
+              {compact
+                ? <Badge className="shrink-0 whitespace-nowrap" title={(c.config.routes ?? '') || 'ยังไม่มีแหล่งไหนส่งมาช่องนี้'}>{(c.config.routes ?? '').split(/[,\n]/).filter((x) => x.trim()).length || 'ยังไม่ผูก'}{(c.config.routes ?? '').trim() ? ' เส้นทาง' : ''}</Badge>
+                : <Badge className="max-w-40 shrink-0 truncate whitespace-nowrap" title={c.config.sources ? `รับจาก: ${c.config.sources}` : 'รับทุกแหล่ง'}>{c.config.sources ? `จาก ${c.config.sources}` : 'ทุกแหล่ง'}</Badge>}
               <span className="flex-1" />
               <Button size="sm" variant="outline" onClick={() => test(c.id)} disabled={busy !== null || !c.enabled} title="ส่งข้อความทดสอบไปที่ช่องนี้">
                 {busy === `test:${c.id}` ? <LoaderCircle className="animate-spin" /> : <Send />} ทดสอบ
@@ -717,6 +798,8 @@ function ChannelSection({ officeId, deptId, canEdit }: { officeId: string; deptI
                   <Button size="sm" variant="ghost" onClick={() => remove(c.id)} disabled={busy !== null} title="ลบ"><Trash2 /></Button>
                 </>
               )}
+              </div>
+              {rowExtra?.(c)}
             </li>
           ))}
         </ul>
@@ -753,7 +836,7 @@ function ChannelSection({ officeId, deptId, canEdit }: { officeId: string; deptI
               <Field label="channel access token" info="secret ของ Messaging API - ว่างไว้ = ใช้ LINE_CHANNEL_ACCESS_TOKEN ที่ตั้งบนเซิร์ฟเวอร์"><Input className="h-8" value={token} onChange={(e) => setToken(e.target.value)} type="password" /></Field>
             </div>
           )}
-          <Field label="รับรายงานจากแหล่งไหน" info="แหล่ง = token ขาเข้าที่ตั้งชื่อไว้ / LINE OA ที่ผูกกับแผนก (บทสนทนาลูกค้าจะถูกส่งต่อมาในชื่อ OA) / ค่า source ที่ระบบข้างนอกส่งมา - เลือกได้หลายอัน ช่องนี้จะได้เฉพาะรายงานจากแหล่งที่ติ๊ก · ทุกแหล่ง = ไม่กรอง (รวมแชท LINE ด้วย)">
+          {!compact && <Field label="รับรายงานจากแหล่งไหน" info="แหล่ง = token ขาเข้าที่ตั้งชื่อไว้ / LINE OA ที่ผูกกับแผนก (บทสนทนาลูกค้าจะถูกส่งต่อมาในชื่อ OA) / ค่า source ที่ระบบข้างนอกส่งมา - เลือกได้หลายอัน ช่องนี้จะได้เฉพาะรายงานจากแหล่งที่ติ๊ก · ทุกแหล่ง = ไม่กรอง (รวมแชท LINE ด้วย)">
             <div className="flex flex-wrap items-center gap-1">
               <button type="button" onClick={() => setSources('')}
                 className={`rounded-box border px-2 py-0.5 text-[11px] ${chosen.length === 0 ? 'border-carpet bg-[#22401f] text-carpet-lite' : 'border-ink-500 bg-ink-800 text-dim hover:border-brass'}`}>
@@ -771,7 +854,7 @@ function ChannelSection({ officeId, deptId, canEdit }: { officeId: string; deptI
               ))}
               {knownSources.length === 0 && <span className="text-[10px] text-dim">ยังไม่มีแหล่ง - ไปสร้าง token หรือผูก LINE OA ในแท็บ "Webhook เข้า" ก่อน</span>}
             </div>
-          </Field>
+          </Field>}
           <div className="flex items-center gap-2">
             <Button size="sm" variant="primary" onClick={add} disabled={busy !== null || !valid}>
               {busy === 'add' ? <LoaderCircle className="animate-spin" /> : editing ? <Check /> : <Plus />} {editing ? 'บันทึกการแก้ไข + ทดสอบ' : 'เพิ่มช่อง + ทดสอบ'}
@@ -789,9 +872,8 @@ function ChannelSection({ officeId, deptId, canEdit }: { officeId: string; deptI
 /* ============================================================
    ศูนย์รวมแผนก - ปุ่มบนแถบบน: เห็นทุกแผนกในที่เดียว กดตั้งค่า / สร้างใหม่ ไม่ต้องไปหาเฟืองในแผงจ้าง
    ============================================================ */
-export function DepartmentsHub({ open, onClose, officeId, roster, canEdit, onPick }: {
-  open: boolean;
-  onClose: () => void;
+/** รายการแผนก (ไม่มี dialog) - ใช้เป็นแท็บ "แผนก" ในหน้าต่างการเชื่อมต่อ */
+export function DepartmentsList({ officeId, roster, canEdit, onPick }: {
   officeId: string | null;
   roster: { deptId: string }[];
   canEdit: boolean;
@@ -800,17 +882,16 @@ export function DepartmentsHub({ open, onClose, officeId, roster, canEdit, onPic
 }) {
   const [channels, setChannels] = useState<Record<string, number>>({});
   useEffect(() => {
-    if (!open || !officeId) { setChannels({}); return; }
+    if (!officeId) { setChannels({}); return; }
     listChannels(officeId).then((rows) => {
       const m: Record<string, number> = {};
       for (const c of rows) if (c.enabled) m[c.dept_id] = (m[c.dept_id] ?? 0) + 1;
       setChannels(m);
     }).catch(() => setChannels({}));
-  }, [open, officeId]);
+  }, [officeId]);
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent icon={<Building2 />} title="แผนก & Webhook" description="ทุกแผนกของออฟฟิศ - ตั้งค่าสกิล webhook เข้า และช่องส่งออก" wide>
+    <>
         <div className="flex items-center gap-2">
           <span className="flex flex-1 items-center gap-1.5 text-[11px] text-dim">
             {DEPT_BY_ID.size} แผนก
@@ -841,6 +922,17 @@ export function DepartmentsHub({ open, onClose, officeId, roster, canEdit, onPic
             );
           })}
         </ul>
+    </>
+  );
+}
+
+export function DepartmentsHub({ open, onClose, officeId, roster, canEdit, onPick }: {
+  open: boolean; onClose: () => void; officeId: string | null; roster: { deptId: string }[]; canEdit: boolean; onPick: (id: string | null) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent icon={<Building2 />} title="แผนก" description="ทุกแผนกของออฟฟิศ" wide>
+        <DepartmentsList officeId={officeId} roster={roster} canEdit={canEdit} onPick={onPick} />
       </DialogContent>
     </Dialog>
   );

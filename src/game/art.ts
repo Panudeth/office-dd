@@ -764,6 +764,25 @@ function drawLogoStand(part: number): Sprite {
   P(g, L ? 2 : 0, 24, L ? 14 : 14, 1, 'rgba(0,0,0,0.25)');
   return { c: o.c, oy: 10 };
 }
+/** มอเตอร์ไซค์แมสเซนเจอร์จอดหน้าประตู - หันซ้าย ล้อสองล้อ ตัวถังส้ม กล่องท้าย */
+function drawBike(): Sprite {
+  const o = mk(22, 16), g = o.g;
+  const body = '#e8622a', bodyL = '#ff8a4d', dark = '#22262e', tire = '#2f343c', rim = '#9aa3ad', chrome = '#c9d4dc';
+  // เงา
+  P(g, 2, 14, 18, 1, 'rgba(0,0,0,0.25)');
+  // ล้อ
+  P(g, 2, 9, 6, 6, tire); P(g, 3, 10, 4, 4, rim); P(g, 4, 11, 2, 2, tire);
+  P(g, 14, 9, 6, 6, tire); P(g, 15, 10, 4, 4, rim); P(g, 16, 11, 2, 2, tire);
+  // ตัวถัง/ถัง/เบาะ
+  P(g, 6, 8, 10, 4, body); P(g, 7, 7, 6, 2, bodyL); P(g, 9, 5, 5, 3, dark); P(g, 9, 5, 5, 1, '#3a424c');
+  // แฮนด์ + ไฟหน้า (ซ้าย)
+  P(g, 3, 4, 2, 5, chrome); P(g, 2, 3, 3, 2, chrome); P(g, 1, 6, 2, 2, '#ffe9a8');
+  // กล่องท้ายส่งของ
+  P(g, 15, 3, 6, 6, '#3fa06a'); P(g, 15, 3, 6, 1, '#6bd095'); P(g, 16, 5, 4, 2, '#f4f1e8');
+  // ท่อไอเสีย
+  P(g, 12, 12, 7, 2, chrome);
+  return { c: o.c, oy: 6, ox: 3 };
+}
 function drawLamp(): Sprite {
   const o = mk(16, 30), g = o.g;
   P(g, 7, 8, 2, 19, '#4a5058'); P(g, 7, 8, 1, 19, '#68707a'); P(g, 5, 26, 6, 2, '#3a4048');
@@ -816,6 +835,7 @@ export function objSprite(o: MapObject): Sprite {
     case 'sign': s = drawSign(); break;
     case 'logostand': s = drawLogoStand(o.part ?? 0); break;
     case 'lamp': s = drawLamp(); break;
+    case 'bike': s = drawBike(); break;
     default: s = { c: mk(16, 16).c, oy: 0 };
   }
   objCache.set(key, s);
@@ -903,7 +923,7 @@ export function decorSprite(type: string): HTMLCanvasElement {
 const decalCache = new Map<string, HTMLCanvasElement>();
 
 export interface FloorDecal {
-  type: 'rug' | 'emblem' | 'mat' | 'logo';
+  type: 'rug' | 'emblem' | 'mat' | 'logo' | 'parking';
   x: number; y: number; w: number; h: number;
   color?: string;
 }
@@ -978,6 +998,12 @@ export function decalSprite(d: FloorDecal): HTMLCanvasElement {
     paintRug(g, w, h, d.color ?? '#7fb4d8');
   } else if (d.type === 'emblem') {
     paintEmblem(g, w, h);
+  } else if (d.type === 'parking') {
+    // ที่จอดมอไซค์: ช่องตีเส้นขาวบนพื้น มีตัว P เล็ก ๆ มุมบน และรูปล้อสองวงจาง ๆ
+    P(g, 0, 0, w, h, 'rgba(40,44,52,0.35)');
+    P(g, 0, 0, w, 1, '#e8e4d8'); P(g, 0, h - 1, w, 1, '#e8e4d8'); P(g, 0, 0, 1, h, '#e8e4d8'); P(g, w - 1, 0, 1, h, '#e8e4d8');
+    P(g, 2, 2, 1, 4, '#ffd166'); P(g, 3, 2, 2, 1, '#ffd166'); P(g, 4, 3, 1, 1, '#ffd166'); P(g, 3, 4, 2, 1, '#ffd166'); // P
+    P(g, 4, 11, 3, 3, 'rgba(255,255,255,0.35)'); P(g, 10, 11, 3, 3, 'rgba(255,255,255,0.35)'); P(g, 7, 12, 3, 1, 'rgba(255,255,255,0.35)'); // ล้อ+ตัวถัง
   } else if (d.type === 'logo') {
     // กรอบจาง ๆ ให้เห็นว่าโลโก้อยู่ตรงนี้ - รูปจริง world วาดทับ (มีรูปแล้วกรอบนี้จมหายไปเอง)
     P(g, 0, 0, w, 1, 'rgba(255,255,255,0.18)'); P(g, 0, h - 1, w, 1, 'rgba(0,0,0,0.18)');

@@ -233,11 +233,34 @@ export function matchesSource(ch: ChannelRow, source: string): boolean {
 }
 
 /** channel ของแผนกที่เปิดอยู่และรับ event นี้ */
+export const SHARED_DEPT = '*';
+/** ช่องกลางของออฟฟิศ (dept_id = '*') ใช้กับแผนกนี้ไหม - config.depts = รายชื่อ dept id คั่นจุลภาค */
+export function sharedUsedBy(ch: ChannelRow, deptId: string): boolean {
+  return ch.dept_id === SHARED_DEPT && (ch.config.depts ?? '').split(/[,\n]/).map((s) => s.trim()).filter(Boolean).includes(deptId);
+}
+
+const listOf = (s: string | undefined) => (s ?? '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
+/**
+ * ช่องนี้รับรายงานของ (แผนก, แหล่ง) นี้ไหม
+ *   แบบใหม่: config.routes = ["<dept>/<source>", "<dept>/*"] (ตั้งจากหน้า "เข้า → ออก" ของแผนก)
+ *   แบบเก่า (ยังไม่มี routes): ช่องของแผนกนั้น (dept_id) หรือช่องกลางที่ config.depts ระบุ + กรอง config.sources
+ */
+export function channelReceives(ch: ChannelRow, deptId: string, source: string): boolean {
+  const routes = listOf(ch.config.routes);
+  if (routes.length) {
+    const src = (source ?? '').trim();
+    return routes.includes(`${deptId}/*`) || (!!src && routes.some((r) => r.toLowerCase() === `${deptId}/${src}`.toLowerCase()));
+  }
+  if (ch.dept_id === SHARED_DEPT) return sharedUsedBy(ch, deptId) && matchesSource(ch, source);
+  return ch.dept_id === deptId && matchesSource(ch, source);
+}
+
+/** channel ทั้งออฟฟิศที่เปิดอยู่และรับ event นี้ (การกรองตามแผนก/แหล่งทำใน deliverReport ผ่าน channelReceives) */
 export async function loadDeptChannels(officeId: string, deptId: string, event = 'report'): Promise<ChannelRow[]> {
   const c = sbAdmin();
   if (!c) return [];
   const { data, error } = await c.from('office_dept_channel').select('id,dept_id,kind,label,config,events,enabled')
-    .eq('office_id', officeId).eq('dept_id', deptId).eq('enabled', true);
+    .eq('office_id', officeId).eq('enabled', true);
   if (error || !data) return [];
   return (data as ChannelRow[]).filter((r) => CHANNEL_KINDS.includes(r.kind) && (r.events ?? []).includes(event));
 }
@@ -249,8 +272,8 @@ export async function loadDeptChannels(officeId: string, deptId: string, event =
 export async function deliverReport(p: ReportPayload, only?: string[]): Promise<DeliveryResult[]> {
   let list = await loadDeptChannels(p.officeId, p.deptId);
   if (only?.length) list = list.filter((ch) => only.includes(ch.kind) || only.includes(ch.id) || only.includes(ch.label));
-  // ช่องที่ตั้ง "รับจากแหล่ง" ไว้ จะรับเฉพาะรายงานที่ source ตรง (ว่าง = ทุกแหล่ง) - ทำให้ GCP ไปช่องหนึ่ง logger ไปอีกช่องได้
-  list = list.filter((ch) => matchesSource(ch, p.source));
+  // เส้นทาง "แผนก/แหล่ง → ช่อง" (routes) - ไม่ผูกไว้ก็ไม่ส่ง
+  list = list.filter((ch) => channelReceives(ch, p.deptId, p.source));
   const out: DeliveryResult[] = [];
   for (const ch of list) {
     try {

@@ -115,7 +115,7 @@ export function avatarDataUri(pal: Palette, scale = 4): string {
 
 /** query string ของ palette สำหรับ /api/avatar (ใช้กับช่องที่ต้องการ URL จริง เช่น Slack/Discord) */
 export function paletteParam(pal: Palette): string {
-  const o = { skin: pal.skin, hair: pal.hair, shirt: pal.shirt, pants: pal.pants, shoes: pal.shoes, ...(pal.fem ? { fem: true } : {}) };
+  const o = { skin: pal.skin, hair: pal.hair, shirt: pal.shirt, pants: pal.pants, shoes: pal.shoes, ...(pal.fem ? { fem: true } : {}), ...(pal.helmet ? { helmet: pal.helmet } : {}) };
   return Buffer.from(JSON.stringify(o), 'utf8').toString('base64url');
 }
 export function parsePaletteParam(p: string): Palette | null {
@@ -124,6 +124,7 @@ export function parsePaletteParam(p: string): Palette | null {
     const hex = (v: unknown) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : null);
     const skin = hex(o.skin), hair = hex(o.hair), shirt = hex(o.shirt), pants = hex(o.pants), shoes = hex(o.shoes);
     if (!skin || !hair || !shirt || !pants || !shoes) return null;
-    return { skin, hair, shirt, pants, shoes, ...(o.fem ? { fem: true } : {}) };
+    const helmet = hex(o.helmet);
+    return { skin, hair, shirt, pants, shoes, ...(o.fem ? { fem: true } : {}), ...(helmet ? { helmet } : {}) };
   } catch { return null; }
 }

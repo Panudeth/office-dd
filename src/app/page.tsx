@@ -31,7 +31,7 @@ import {
   canEditOffice, deleteDepartment, loadDepartments, saveDepartment,
   type MeetingRow, type OAuthReturn, type Office, type User,
 } from '@/lib/supabase';
-import DepartmentPanel, { DepartmentsHub } from '@/components/DepartmentPanel';
+import DepartmentPanel, { DepartmentsList } from '@/components/DepartmentPanel';
 import { profileIsEmpty, type CompanyContext, type Product } from '@/lib/company';
 import { syncOfficeLlm } from '@/lib/office-llm-client';
 import type { EmployeeSnapshot } from '@/game/types';
@@ -136,7 +136,7 @@ export default function Page() {
   /* ---- แผนกของออฟฟิศ (สร้างเอง/ทับ preset) - ทะเบียนจริงอยู่ใน DEPARTMENTS (live) ตัวนี้เก็บนิยามไว้ส่งไป API + บังคับ re-render ---- */
   const [customDepts, setCustomDepts] = useState<DepartmentDef[]>([]);
   const [deptPanel, setDeptPanel] = useState<{ open: boolean; id: string | null }>({ open: false, id: null });
-  const [deptHubOpen, setDeptHubOpen] = useState(false);
+  const [integrationsTab, setIntegrationsTab] = useState<'depts' | 'in' | 'settings'>('depts');
   const [deptCanEdit, setDeptCanEdit] = useState(!supabaseConfigured);
   const [user, setUser] = useState<User | null>(null);
   // โหมดในเครื่องไม่มี session ให้รอ ถือว่ารู้คำตอบตั้งแต่แรก
@@ -165,7 +165,6 @@ export default function Page() {
   const [liveMsgId, setLiveMsgId] = useState<string | null>(null);
   const [liveQuestion, setLiveQuestion] = useState('');
   const [roomOpen, setRoomOpen] = useState(false);
-  const [integrationsOpen, setIntegrationsOpen] = useState(false);
   const [operatorOpen, setOperatorOpen] = useState(false);
   const [meetingsErr, setMeetingsErr] = useState<string | null>(null);
   const dragging = useRef(false);
@@ -728,7 +727,7 @@ export default function Page() {
      * คำถามจากคนนอก (LINE/MCP/API) ที่ถามแผนกตรง ๆ - ไม่ใช่ประชุม
      * ให้ "แขก" เดินเข้ามาหาคนตอบ คุยกันหน้าเคาน์เตอร์ แล้วเดินออก
      */
-    visitor?: { name: string };
+    visitor?: { name: string; courier?: boolean; source?: string };
   }
 
   interface Session {
@@ -995,6 +994,28 @@ export default function Page() {
 
     const stage = async () => {
       w.saveView();
+      if (init.visitor?.courier && direct) {
+        // แมสเซนเจอร์ขี่มอไซค์มาจอดหน้าประตู เดินเข้ามายื่นซองให้หัวหน้าแผนก แล้วขี่ออกไป - แผนกเอาเอกสารไปรายงานบอสต่อ
+        setPhase(`${init.visitor.name} ขี่มอไซค์มาส่งเอกสาร...`);
+        w.focusRect(w.bossRect());
+        const courierId = await w.spawnCourierRideIn(init.visitor.name);
+        if (w.lastParking) setPhase(`${init.visitor.name} จอดที่ (${w.lastParking.x},${w.lastParking.y})${w.lastParking.marked ? ' - ที่จอดมอไซค์' : ' - ไม่มีที่จอดที่ใช้ได้ จอดข้างประตู'}`);
+        w.focus(courierId);
+        await w.visitorApproach(courierId, owner.id);
+        w.say(courierId, `เอกสารจาก${init.visitor.source ? ` ${init.visitor.source}` : 'ข้างนอก'}มาส่งครับ เซ็นรับด้วยครับ`, 2.5, () => { w.faceToward(owner.id, courierId); });
+        await w.waitForSpeech();
+        w.handOver(courierId, owner.id);
+        w.say(owner.id, 'รับแล้วครับ ขอบคุณ', 1.5);
+        await w.waitForSpeech();
+        void w.courierLeave(courierId);
+        setPhase(`${owner.name} เปิดเอกสาร แล้วไปรายงาน...`);
+        // ต่อด้วยเส้นทางปกติของโหมดตอบตรง: หัวหน้าเดินไปรายงานที่โต๊ะบอส
+        w.focusRect(w.bossRect());
+        await w.report(owner.id);
+        w.say(w.bossId, question.length > 220 ? `${question.slice(0, 220)}...` : question, 3);
+        setPhase(`${owner.name} กำลังอ่านเอกสารและสรุป...`);
+        return;
+      }
       if (init.visitor && direct) {
         // แขกโผล่ที่ประตูสวน เดินมาหาคนตอบ (PR = หน้าเคาน์เตอร์ / แผนกอื่น = หน้าประตูห้อง)
         setPhase(`${init.visitor.name} กำลังเดินเข้ามา...`);
@@ -1054,6 +1075,7 @@ export default function Page() {
         setPhase(null);
         setBusy(false);
         busyRef.current = false;
+        drainRef.current(); // มีเรื่องรอคิวอยู่ (webhook ยิงติดกัน) ให้เล่นเรื่องถัดไป
       }
     };
 
@@ -1168,39 +1190,89 @@ export default function Page() {
   const remoteSessions = useRef<Map<string, Session>>(new Map());
   const localMeetingIds = useRef<Set<string>>(new Set());
   const busyRef = useRef(false);
+  /**
+   * คิวเรื่องที่เข้ามาตอนจอกำลังเล่นเรื่องอื่นอยู่ (เช่น webhook ยิงติดกัน 2 ที) - เก็บ event ทั้งหมดของเรื่องนั้นไว้
+   * พอเรื่องปัจจุบันจบ ค่อยเปิดเรื่องถัดไป เล่นฉากเข้า (แมสขี่มา/แขกเดินมา) ให้จบ แล้วรีเพลย์ event ที่ค้างไว้
+   */
+  const remoteQueue = useRef<{ meetingId: string; evs: AskEvent[] }[]>([]);
+  const drainRef = useRef<() => void>(() => {});
+  const stageRef = useRef<Promise<void>>(Promise.resolve()); // ฉากเข้าของเรื่องล่าสุด - เรื่องถัดไปต้องรอให้จบก่อน
   const onRemoteEvent = useCallback((meetingId: string, ev: AskEvent) => {
     if (localMeetingIds.current.has(meetingId)) return; // ของจอนี้เอง ได้ทาง SSE ไปแล้ว
     const w = worldRef.current;
     if (!w) return;
-    let s = remoteSessions.current.get(meetingId);
+    const s0 = remoteSessions.current.get(meetingId);
     if (ev.type === 'meeting') {
-      if (s || busyRef.current) return; // มีประชุมอยู่แล้ว - จอเดียวเล่นได้ทีละเรื่อง
-      const snap = w.roster();
-      // ผู้เข้าประชุมต้องอยู่ในออฟฟิศนี้จริง (roster โหลดจาก DB เดียวกัน) - ไม่เจอเลยก็ดูไม่ได้ ข้าม
-      const team = ev.agents.filter((a) => snap.some((r) => r.id === a.id));
-      if (!team.length) return;
-      const owner = team.find((a) => a.id === ev.chairId) ?? team.find((a) => a.deptId === ev.ownerDeptId) ?? team[0];
-      // คำถามตรงจากคนนอก = แขกเดินเข้ามา ไม่ใช่ประชุม (ประชุมข้ามแผนกยังเข้าห้องประชุมตามเดิม)
-      // ลูกค้า (audience customer) = "ลูกค้า (ช่องทาง)"  agent ภายในที่ถามผ่าน MCP/API = "Agent (ช่องทาง)"
-      const via = ev.source === 'line' ? 'LINE' : ev.source === 'mcp' ? 'MCP' : ev.source === 'api' ? 'API' : null;
-      // มีชื่อจริงจากช่องทาง (เช่นชื่อโปรไฟล์ LINE) ให้ตัวละครใช้ชื่อนั้น - ไม่มีค่อยเป็น "ลูกค้า (LINE)"
-      const visitorName = !via ? null
-        : ev.askedBy?.trim() ? ev.askedBy.trim()
-        : ev.audience === 'customer' ? `ลูกค้า (${via})` : `Agent (${via})`;
-      s = openSessionRef.current({
-        question: ev.question, mode: ev.mode, team, owner,
-        attendees: ev.attendees, source: 'remote', serverMeetingId: meetingId,
-        visitor: ev.mode === 'direct' && visitorName ? { name: visitorName } : undefined,
-      });
-      remoteSessions.current.set(meetingId, s);
-      void s.stage();
+      if (s0) return;
+      if (busyRef.current) {
+        // จอเดียวเล่นได้ทีละเรื่อง - ต่อคิวไว้ (เก็บสูงสุด 8 เรื่อง เกินนั้นข้าม ฝั่ง server ยังประมวลผล/ส่งรายงานครบ)
+        if (remoteQueue.current.length < 8) remoteQueue.current.push({ meetingId, evs: [ev] });
+        return;
+      }
+      startRemote(meetingId, ev);
       return;
     }
+    if (!s0) {
+      const q = remoteQueue.current.find((x) => x.meetingId === meetingId);
+      if (q) q.evs.push(ev);
+      return;
+    }
+    applyRemote(meetingId, ev);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  /** event ที่ไม่ใช่ 'meeting' ของเรื่องที่เปิดอยู่แล้ว */
+  const applyRemote = (meetingId: string, ev: AskEvent) => {
+    const s = remoteSessions.current.get(meetingId);
     if (!s) return;
     if (ev.type === 'error') { remoteSessions.current.delete(meetingId); void s.end(ev.message); return; }
     if (ev.type === 'done') { remoteSessions.current.delete(meetingId); void s.end(); return; }
     s.handle(ev);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  };
+  /** เปิดเรื่องจาก event 'meeting' - คืน promise ของฉากเข้า (null = เรื่องนี้ดูไม่ได้บนจอนี้) */
+  const startRemote = (meetingId: string, ev: Extract<AskEvent, { type: 'meeting' }>): Promise<void> | null => {
+    const w = worldRef.current;
+    if (!w) return null;
+    {
+      const snap = w.roster();
+      // ผู้เข้าประชุมต้องอยู่ในออฟฟิศนี้จริง (roster โหลดจาก DB เดียวกัน) - ไม่เจอเลยก็ดูไม่ได้ ข้าม
+      const team = ev.agents.filter((a) => snap.some((r) => r.id === a.id));
+      if (!team.length) return null;
+      const owner = team.find((a) => a.id === ev.chairId) ?? team.find((a) => a.deptId === ev.ownerDeptId) ?? team[0];
+      // คำถามตรงจากคนนอก = แขกเดินเข้ามา ไม่ใช่ประชุม (ประชุมข้ามแผนกยังเข้าห้องประชุมตามเดิม)
+      // ลูกค้า (audience customer) = "ลูกค้า (ช่องทาง)"  agent ภายในที่ถามผ่าน MCP/API = "Agent (ช่องทาง)"
+      const via = ev.source === 'line' ? 'LINE' : ev.source === 'mcp' ? 'MCP' : ev.source === 'api' ? 'API' : null;
+      // webhook เข้า (inbox) = แมสเซนเจอร์ขี่มอไซค์มาส่งเอกสารให้แผนก ไม่ใช่ลูกค้ามาถาม
+      const inboxSrc = ev.source === 'api' ? /^(.*)\s*\(inbox\)\s*$/.exec(ev.askedBy?.trim() ?? '')?.[1]?.trim() || (ev.askedBy?.trim() === 'inbox' ? '' : null) : null;
+      // มีชื่อจริงจากช่องทาง (เช่นชื่อโปรไฟล์ LINE) ให้ตัวละครใช้ชื่อนั้น - ไม่มีค่อยเป็น "ลูกค้า (LINE)"
+      const visitorName = inboxSrc !== null ? `แมสเซนเจอร์${inboxSrc ? ` (${inboxSrc})` : ''}`
+        : !via ? null
+        : ev.askedBy?.trim() ? ev.askedBy.trim()
+        : ev.audience === 'customer' ? `ลูกค้า (${via})` : `Agent (${via})`;
+      const s = openSessionRef.current({
+        question: ev.question, mode: ev.mode, team, owner,
+        attendees: ev.attendees, source: 'remote', serverMeetingId: meetingId,
+        visitor: ev.mode === 'direct' && visitorName ? { name: visitorName, ...(inboxSrc !== null ? { courier: true, source: inboxSrc } : {}) } : undefined,
+      });
+      remoteSessions.current.set(meetingId, s);
+      const p = s.stage().catch(() => {});
+      stageRef.current = p;
+      return p;
+    }
+  };
+  drainRef.current = () => {
+    if (busyRef.current) return;
+    // ถ้า 'done' มาก่อนฉากเข้าจะจบ (แมสยังขี่อยู่) รอให้ฉากจบก่อนค่อยเปิดเรื่องถัดไป
+    void stageRef.current.then(() => {
+      if (busyRef.current) return;
+      const next = remoteQueue.current.shift();
+      if (!next) return;
+      const [first, ...rest] = next.evs;
+      if (first.type !== 'meeting') { drainRef.current(); return; }
+      const stageP = startRemote(next.meetingId, first);
+      if (!stageP) { drainRef.current(); return; }
+      // ให้ฉากเข้าเล่นจบก่อน (แมสขี่มาจอด ยื่นซอง) แล้วค่อยรีเพลย์ event ที่เก็บไว้ - ไม่งั้นรายงานจะจบก่อนรถมาถึง
+      void stageP.then(() => { for (const e of rest) applyRemote(next.meetingId, e); });
+    });
+  };
 
   // subscribe event ของออฟฟิศนี้ - เปิดไว้ตลอดที่ล็อกอินและเลือกออฟฟิศอยู่
   useEffect(() => {
@@ -1306,7 +1378,7 @@ export default function Page() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setIntegrationsOpen(true)}
+              onClick={() => { setDeptPanel((d) => ({ ...d, open: false })); setIntegrationsTab('in'); setSideTab('connect'); }}
               title="token สำหรับ MCP / API / LINE - ให้ agent ข้างนอกหรือลูกค้าถามออฟฟิศนี้ได้"
               className="border-wood-deep text-parchment-2 hover:bg-wood-dark"
             >
@@ -1395,11 +1467,11 @@ export default function Page() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setDeptHubOpen(true)}
+            onClick={() => { setDeptPanel((d) => ({ ...d, open: false })); setIntegrationsTab('depts'); setSideTab('connect'); }}
             title="แผนกทั้งหมด - สร้างแผนกใหม่ ตั้งสกิล webhook รับข้อมูลเข้า และช่องส่งออกไป Teams/Slack/LINE"
             className="border-wood-deep text-parchment-2 hover:bg-wood-dark"
           >
-            <Building2 /> แผนก & Webhook
+            <Building2 /> แผนก
           </Button>
 
           {/* ข้อมูลบริษัท - ยังไม่ได้กรอกจะขึ้นเตือน เพราะไม่กรอก agent จะตอบแบบไม่รู้ว่าเราเป็นใคร */}
@@ -1626,8 +1698,33 @@ export default function Page() {
               onRoleLlm={setRoleLlm}
               llmActiveLabel={llm ? llm.label : 'คีย์ของเซิร์ฟเวอร์'}
               llmHeadLabel={llmHeadLabel}
-              onEditDept={(id) => setDeptPanel({ open: true, id })}
+              onEditDept={(id) => { setDeptPanel({ open: true, id }); setSideTab('connect'); }}
               deptCanEdit={deptCanEdit}
+              connectPanel={deptPanel.open ? (
+                <DepartmentPanel
+                  inline
+                  open={deptPanel.open}
+                  onClose={() => setDeptPanel((d) => ({ ...d, open: false }))}
+                  deptId={deptPanel.id}
+                  officeId={officeId}
+                  canEdit={deptCanEdit && !locked}
+                  llmHeaders={authHeaders(llm)}
+                  headcount={deptPanel.id ? roster.filter((r) => r.deptId === deptPanel.id).length : 0}
+                  onSave={saveDept}
+                  onDelete={deleteDept}
+                  onBack={() => { setDeptPanel((d) => ({ ...d, open: false })); setIntegrationsTab('depts'); }}
+                />
+              ) : (
+                <IntegrationsPanel
+                  inline
+                  open
+                  onClose={() => undefined}
+                  office={office}
+                  initialTab={integrationsTab}
+                  onPolicy={(p) => setOffice((o) => (o ? { ...o, llm_policy: p } : o))}
+                  depts={<DepartmentsList officeId={officeId} roster={roster} canEdit={deptCanEdit && !locked} onPick={(id) => setDeptPanel({ open: true, id })} />}
+                />
+              )}
               secretary={
                 <SecretaryTab
                   meetings={secretaryMeetings}
@@ -1733,7 +1830,7 @@ export default function Page() {
         blocked={secBlocked}
       />
 
-      <IntegrationsPanel open={integrationsOpen} onClose={() => setIntegrationsOpen(false)} office={office} onPolicy={(p) => setOffice((o) => (o ? { ...o, llm_policy: p } : o))} />
+
       <OperatorPanel
         open={operatorOpen}
         onClose={() => setOperatorOpen(false)}
@@ -1749,26 +1846,6 @@ export default function Page() {
         startedAt={meetingStart}
         phase={phase}
         activities={activities}
-      />
-      <DepartmentsHub
-        open={deptHubOpen}
-        onClose={() => setDeptHubOpen(false)}
-        officeId={officeId}
-        roster={roster}
-        canEdit={deptCanEdit && !locked}
-        onPick={(id) => { setDeptHubOpen(false); setDeptPanel({ open: true, id }); }}
-      />
-      <DepartmentPanel
-        open={deptPanel.open}
-        onClose={() => setDeptPanel((d) => ({ ...d, open: false }))}
-        deptId={deptPanel.id}
-        officeId={officeId}
-        canEdit={deptCanEdit && !locked}
-        llmHeaders={authHeaders(llm)}
-        headcount={deptPanel.id ? roster.filter((r) => r.deptId === deptPanel.id).length : 0}
-        onSave={saveDept}
-        onDelete={deleteDept}
-        onBack={() => { setDeptPanel((d) => ({ ...d, open: false })); setDeptHubOpen(true); }}
       />
       <KeyPanel
         open={keyOpen}

@@ -30,6 +30,8 @@ export interface Palette {
   shoes: string;
   /** ผู้หญิง = ผมยาว + กระโปรง (อ่านออกจากไกล ๆ ว่าใครเป็นใคร) - ไม่มีค่า = ผู้ชาย */
   fem?: boolean;
+  /** หมวกกันน็อก (สี) - แมสเซนเจอร์ที่มาส่งเอกสาร วาดทับผม + กระบังหน้าเข้ม */
+  helmet?: string;
 }
 
 export interface Tile { x: number; y: number }
@@ -82,7 +84,7 @@ export interface Employee {
   /** true = ถูกจองไว้ทำงานที่ผู้ใช้สั่ง - AI สุ่มพฤติกรรมจะไม่ยุ่ง */
   busy: boolean;
   /** ของที่ถือติดมือตอนไปประชุม (โน้ตบุ๊ก/แท็บเล็ต/สมุด) - null คือมือเปล่า */
-  gadget: 'laptop' | 'tablet' | 'notes' | null;
+  gadget: 'laptop' | 'tablet' | 'notes' | 'envelope' | null;
   /** ตัวผู้บริหาร (ตัวผู้ใช้) - นั่งหัวโต๊ะประชุม ไม่ใช่ agent ที่จ้างมา */
   isBoss?: boolean;
   /**

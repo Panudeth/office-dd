@@ -780,7 +780,7 @@ export interface InboxRow {
   status: string;
   meeting_id: string | null;
   answer: string;
-  delivered: { channelId: string; kind: string; ok: boolean; error?: string }[];
+  delivered: { channelId: string; kind: string; label?: string; ok: boolean; error?: string }[];
   error: string | null;
   created_at: string;
   finished_at: string | null;

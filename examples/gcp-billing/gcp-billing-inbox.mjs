@@ -79,17 +79,39 @@ const byService = [...svcCur.entries()].map(([service, cost]) => ({
   service, cost: r2(cost), prevMonth: r2(svcPrev.get(service) ?? 0), changePct: pct(cost, svcPrev.get(service) ?? 0),
 })).sort((a, b) => b.cost - a.cost);
 const projCur = sumBy(cur, 'project'), projPrev = sumBy(prev, 'project');
-const byProject = [...projCur.entries()].map(([project, cost]) => ({
-  project, cost: r2(cost), prevMonth: r2(projPrev.get(project) ?? 0), changePct: pct(cost, projPrev.get(project) ?? 0),
-})).sort((a, b) => b.cost - a.cost);
+// ต่อโปรเจกต์: ยอดรวม + แตกย่อยเป็นรายบริการ (เดือนนี้ vs เดือนก่อน)
+const svcOfProject = (month, project) => {
+  const m = new Map();
+  for (const r of rows) {
+    if (r.month !== inv(month) || (r.project ?? '(none)') !== project) continue;
+    m.set(r.service, (m.get(r.service) ?? 0) + num(r.cost) + num(r.credits));
+  }
+  return m;
+};
+const byProject = [...projCur.entries()].map(([project, cost]) => {
+  const sc = svcOfProject(cur, project), sp = svcOfProject(prev, project);
+  const services = [...sc.entries()].map(([service, c]) => ({
+    service, cost: r2(c), prevMonth: r2(sp.get(service) ?? 0), changePct: pct(c, sp.get(service) ?? 0),
+  })).filter((s) => Math.abs(s.cost) >= 0.01 || s.prevMonth >= 0.01).sort((a, b) => b.cost - a.cost);
+  return { project, cost: r2(cost), prevMonth: r2(projPrev.get(project) ?? 0), changePct: pct(cost, projPrev.get(project) ?? 0), services };
+}).sort((a, b) => b.cost - a.cost);
 const spikes = byService.filter((s) => s.changePct >= alertPct && s.cost >= 1);
 
 const payload = {
   title: `บิล GCP เดือน ${cur}`,
   source: 'gcp-billing',
   intent: 'task',
-  ask: `สรุปค่าใช้จ่าย GCP เดือน ${cur} ให้ผู้บริหาร: ยอดรวมเทียบเดือน ${prev} (เปลี่ยนกี่ %) บริการ/โปรเจกต์ที่กินมากสุด 5 อันดับ ` +
-    `รายการที่พุ่งเกิน ${alertPct}% (ถ้ามีให้ขึ้นบรรทัดแรกว่าต้องดู) และเสนอจุดที่น่าจะประหยัดได้ 3 ข้อ ตอบสั้นอ่านในแชทได้จบ`,
+  ask: `สรุปค่าใช้จ่าย GCP เดือน ${cur} ให้ผู้บริหาร โครงนี้:
+` +
+    `1) ยอดรวมทุกโปรเจกต์ เทียบเดือน ${prev} (บาท/สกุลเงินที่ให้ และ % เปลี่ยน)
+` +
+    `2) ตารางต่อโปรเจกต์: ชื่อโปรเจกต์ - ยอดเดือนนี้ - เดือนก่อน - % เปลี่ยน แล้ว "แตกย่อยรายบริการ" ใต้แต่ละโปรเจกต์ (บริการ - ยอด - % เปลี่ยน) เอาเฉพาะบริการที่มีนัยสำคัญ (รวมกัน ≥ 90% ของโปรเจกต์นั้น)
+` +
+    `3) รายการที่พุ่งเกิน ${alertPct}% (ถ้ามี ให้ขึ้นบรรทัดแรกสุดว่า "ต้องดู") บอกว่าโปรเจกต์ไหน บริการไหน
+` +
+    `4) จุดที่น่าจะประหยัดได้ 3 ข้อ อิงจากตัวเลขจริง
+` +
+    `ใช้ตัวเลขจาก data เท่านั้น ห้ามประมาณเพิ่ม กระชับ อ่านในแชทได้จบ`,
   idempotencyKey: `gcp-billing-${cur}-${now.toISOString().slice(0, 10)}`,
   wait,
   data: {
@@ -98,7 +120,8 @@ const payload = {
     note: cur === `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}` ? `เดือนปัจจุบันยังไม่จบ - ข้อมูลถึงวันที่ ${now.toISOString().slice(0, 10)}` : 'เดือนเต็ม',
     alertPct, spikes,
     byService: byService.slice(0, 25),
-    byProject: byProject.slice(0, 15),
+    // โปรเจกต์รวม + แตกย่อยรายบริการ (มากสุด 15 โปรเจกต์ × 12 บริการ)
+    byProject: byProject.slice(0, 15).map((p) => ({ ...p, services: p.services.slice(0, 12) })),
   },
 };
 
@@ -109,5 +132,9 @@ const out = await fetch(inboxUrl, {
 });
 const body = await out.json().catch(() => ({}));
 console.log(`GCP ${cur}: รวม ${payload.data.total} ${currency} (เดือนก่อน ${payload.data.prevTotal}, ${payload.data.changePct}%) พุ่ง ${spikes.length} รายการ`);
+for (const p of payload.data.byProject) {
+  console.log(`  ${p.project}: ${p.cost} (${p.changePct >= 0 ? '+' : ''}${p.changePct}%)`);
+  for (const s of p.services.slice(0, 5)) console.log(`     - ${s.service}: ${s.cost}`);
+}
 console.log(out.status, JSON.stringify(body, null, 2));
 if (!out.ok) process.exit(1);

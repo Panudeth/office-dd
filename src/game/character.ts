@@ -73,6 +73,22 @@ export function drawChar(g: G, pal: Palette, dir: Dir, pose: Pose, frame: number
     P(g, 10, 10 + dy, 2, 1, shade(sk, 0.72));
   }
 
+  /* ---- หมวกกันน็อก (แมสเซนเจอร์) - ครอบหัวทับผม + กระบังหน้าเข้ม ---- */
+  if (pal.helmet) {
+    const hm = pal.helmet, hmL = shade(hm, 1.25), hmD = shade(hm, 0.55);
+    if (d === 'up') {
+      P(g, 3, 1 + dy, 10, 9, hmD); P(g, 4, 2 + dy, 8, 7, hm); P(g, 4, 2 + dy, 8, 1, hmL); P(g, 5, 3 + dy, 2, 2, hmL);
+    } else if (d === 'down') {
+      P(g, 3, 1 + dy, 10, 6, hmD); P(g, 4, 2 + dy, 8, 4, hm); P(g, 4, 2 + dy, 8, 1, hmL); P(g, 5, 3 + dy, 2, 1, hmL);
+      P(g, 3, 6 + dy, 1, 4, hmD); P(g, 12, 6 + dy, 1, 4, hmD);
+      P(g, 4, 6 + dy, 8, 3, '#22262e'); P(g, 5, 6 + dy, 6, 1, '#4a5a70'); // กระบังหน้า
+    } else {
+      P(g, 3, 1 + dy, 10, 6, hmD); P(g, 4, 2 + dy, 8, 4, hm); P(g, 4, 2 + dy, 8, 1, hmL); P(g, 5, 3 + dy, 2, 1, hmL);
+      P(g, 3, 6 + dy, 2, 4, hmD); P(g, 4, 6 + dy, 1, 3, hm);
+      P(g, 8, 6 + dy, 5, 3, '#22262e'); P(g, 9, 6 + dy, 3, 1, '#4a5a70'); // กระบังหน้าด้านข้าง
+    }
+  }
+
   /* ---- ลำตัว ---- */
   P(g, 3, 11 + dy, 10, 8, OUT_B);
   P(g, 4, 12 + dy, 8, 6, sh);
@@ -175,7 +191,7 @@ export function drawChar(g: G, pal: Palette, dir: Dir, pose: Pose, frame: number
  * แต่ละคนถือไม่เหมือนกัน กำหนดจาก seed จะได้ไม่เปลี่ยนไปมาระหว่างเดิน
  *   laptop = โน้ตบุ๊กพับครึ่งถือแนบตัว   tablet = แท็บเล็ตถือมือเดียว   notes = สมุดกับปากกา
  */
-export type Gadget = 'laptop' | 'tablet' | 'notes';
+export type Gadget = 'laptop' | 'tablet' | 'notes' | 'envelope';
 export const GADGETS: Gadget[] = ['laptop', 'tablet', 'notes'];
 
 export function drawGadget(g: G, gadget: Gadget, dir: Dir, pose: Pose, frame: number) {
@@ -191,7 +207,7 @@ export function drawGadget(g: G, gadget: Gadget, dir: Dir, pose: Pose, frame: nu
 
   if (d === 'up') {
     // หันหลัง - ของอยู่หลังตัว มองไม่เห็น วาดแค่ขอบโผล่ข้างเอวนิดเดียว
-    if (gadget !== 'notes') { P(g, 2, 14 + dy, 1, 4, '#3a424c'); P(g, 13, 14 + dy, 1, 4, '#3a424c'); }
+    if (gadget !== 'notes' && gadget !== 'envelope') { P(g, 2, 14 + dy, 1, 4, '#3a424c'); P(g, 13, 14 + dy, 1, 4, '#3a424c'); }
     g.restore();
     return;
   }
@@ -204,6 +220,8 @@ export function drawGadget(g: G, gadget: Gadget, dir: Dir, pose: Pose, frame: nu
       P(g, 3, 19 + dy, 10, 2, '#4a545e'); P(g, 4, 19 + dy, 8, 1, '#8a96a2');
     } else if (gadget === 'tablet') {
       P(g, 4, 15 + dy, 8, 5, '#2a3038'); P(g, 5, 16 + dy, 6, 3, '#6fa8d0'); P(g, 5, 16 + dy, 6, 1, '#a8d4f0');
+    } else if (gadget === 'envelope') {
+      P(g, 4, 16 + dy, 8, 5, '#c9a35a'); P(g, 4, 16 + dy, 8, 1, '#e8c46a'); P(g, 5, 17 + dy, 6, 1, '#a07c34'); P(g, 7, 18 + dy, 2, 1, '#a07c34');
     } else {
       P(g, 4, 16 + dy, 7, 4, '#f4f0e0'); P(g, 4, 16 + dy, 7, 1, '#ffffff'); P(g, 5, 17 + dy, 5, 1, '#b9b3a2'); P(g, 5, 18 + dy, 4, 1, '#b9b3a2');
       P(g, 11, 15 + dy, 1, 4, '#d9534f'); P(g, 11, 15 + dy, 1, 1, '#2f3742');
@@ -218,6 +236,9 @@ export function drawGadget(g: G, gadget: Gadget, dir: Dir, pose: Pose, frame: nu
       P(g, 9, 13 + dy + walkSwing, 5, 6, '#2a3038'); P(g, 10, 14 + dy + walkSwing, 3, 4, '#3a424c'); P(g, 11, 15 + dy + walkSwing, 1, 1, '#5c6a78');
     } else if (gadget === 'tablet') {
       P(g, 10, 13 + dy + walkSwing, 4, 6, '#2a3038'); P(g, 11, 14 + dy + walkSwing, 2, 4, '#6fa8d0');
+    } else if (gadget === 'envelope') {
+      // ซองเอกสารสีน้ำตาลอ่อน มีเส้นฝาซอง
+      P(g, 9, 14 + dy + walkSwing, 6, 4, '#c9a35a'); P(g, 9, 14 + dy + walkSwing, 6, 1, '#e8c46a'); P(g, 10, 15 + dy + walkSwing, 4, 1, '#a07c34');
     } else {
       P(g, 10, 14 + dy + walkSwing, 4, 5, '#f4f0e0'); P(g, 10, 14 + dy + walkSwing, 4, 1, '#ffffff'); P(g, 11, 16 + dy + walkSwing, 2, 1, '#b9b3a2');
     }
@@ -227,6 +248,8 @@ export function drawGadget(g: G, gadget: Gadget, dir: Dir, pose: Pose, frame: nu
       P(g, 10, 14 + dy + walkSwing, 5, 5, '#2a3038'); P(g, 11, 15 + dy + walkSwing, 3, 3, '#3a424c');
     } else if (gadget === 'tablet') {
       P(g, 11, 13 + dy + walkSwing, 3, 6, '#2a3038'); P(g, 12, 14 + dy + walkSwing, 1, 4, '#6fa8d0');
+    } else if (gadget === 'envelope') {
+      P(g, 11, 14 + dy + walkSwing, 5, 4, '#c9a35a'); P(g, 11, 14 + dy + walkSwing, 5, 1, '#e8c46a'); P(g, 12, 15 + dy + walkSwing, 3, 1, '#a07c34');
     } else {
       P(g, 11, 14 + dy + walkSwing, 4, 5, '#f4f0e0'); P(g, 11, 14 + dy + walkSwing, 4, 1, '#ffffff'); P(g, 12, 16 + dy + walkSwing, 2, 1, '#b9b3a2');
     }

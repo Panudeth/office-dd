@@ -328,12 +328,14 @@ office ไม่รู้จัก vendor: adapter ทั้งหมดอย�
 1. สร้างแผนก "บัญชี Cloud" หน้าที่: "รับสรุปบิล GCP รายเดือน เทียบกับเดือนก่อน แจ้งรายการที่พุ่งเกิน 20% แนะนำที่ประหยัดได้" → ให้ AI ร่าง → บันทึก → จ้าง 1-3 คน
 2. แท็บ "ส่งออก" → เพิ่ม Teams webhook → ทดสอบ
 3. แท็บ "Webhook เข้า" → สร้าง token → ก็อป curl
-4. ฝั่ง GCP: เปิด Billing export → BigQuery แล้วให้ Cloud Scheduler / GitHub Actions รัน `node scripts/inbox-example.mjs` (หรือสคริปต์ของคุณ) ทุกวันที่ 1 - query แล้ว POST เข้า inbox
+4. ฝั่ง GCP (ฝั่งผู้ใช้ - office ไม่เกี่ยว): เปิด Billing export → BigQuery แล้วให้ cron/GitHub Actions/Cloud Scheduler รันตัวดึงของคุณเอง POST เข้า inbox - ตัวอย่างอยู่ที่ `examples/gcp-billing/`
 5. เดือนถัดไป agent จะเห็นบิลเดือนก่อนในเอกสารของแผนกเอง
 
 เคส "IT Support รับ bug จาก logger แล้วแจ้ง Teams" ใช้โครงเดียวกัน - ต่างแค่ playbook กับ URL ที่ logger ยิงมา
 
-### บิล GCP -> แผนก (ละเอียด): เปิด Billing export แล้วรัน `scripts/gcp-billing-inbox.mjs`
+### บิล GCP -> แผนก (ละเอียด): เปิด Billing export แล้วรัน `examples/gcp-billing/gcp-billing-inbox.mjs`
+
+> หลักคิด: **office ให้แค่ webhook** (URL ต่อแผนก + token ต่อแหล่ง + สัญญา JSON หลวม ๆ) ใครจะเอาข้อมูลมาจากไหน (GCP/AWS/Sentry/CRM/n8n/cron) เป็นเรื่องฝั่งผู้ใช้ - โฟลเดอร์ `examples/` คือตัวอย่างฝั่งนั้น ไม่ใช่ส่วนของ office
 
 1. **สร้าง dataset** ใน BigQuery: console.cloud.google.com/bigquery → โปรเจกต์ที่จะเก็บ → Create dataset → id เช่น `billing` (region ใกล้ตัว เช่น asia-southeast1) - ปิด table expiration
 2. **เปิด export**: console.cloud.google.com/billing → เลือก Billing account → **Billing export** → แท็บ *BigQuery export* → **Standard usage cost** → Edit settings → เลือกโปรเจกต์ + dataset `billing` → Save
@@ -343,10 +345,10 @@ office ไม่รู้จัก vendor: adapter ทั้งหมดอย�
 5. ในออฟฟิศ: สร้างแผนก (เช่น "บัญชี Cloud") → จ้าง 1 คน → แท็บ *Webhook เข้า* สร้าง token ชื่อ **`gcp-billing`** → แท็บ *ส่งออก* เพิ่ม Teams แล้วติ๊กแหล่ง `gcp-billing`
 6. รันสคริปต์ (ในเครื่องต้อง `gcloud auth login` ก่อน):
    ```
-   GCP_PROJECT=my-proj BQ_TABLE=my-proj.billing.gcp_billing_export_v1_XXXX    OFFICE_INBOX_URL=https://<โดเมน>/api/office/inbox/<deptId> OFFICE_INBOX_TOKEN=vc_...    node scripts/gcp-billing-inbox.mjs
+   GCP_PROJECT=my-proj BQ_TABLE=my-proj.billing.gcp_billing_export_v1_XXXX    OFFICE_INBOX_URL=https://<โดเมน>/api/office/inbox/<deptId> OFFICE_INBOX_TOKEN=vc_...    node examples/gcp-billing/gcp-billing-inbox.mjs
    ```
    สคริปต์ query ยอดสุทธิ (cost + credits) แยกบริการ/โปรเจกต์ เดือนนี้เทียบเดือนก่อน หา "พุ่งเกิน ALERT_PCT (20%)" แล้ว POST เข้า inbox พร้อม `ask` ให้แผนกสรุป - มี idempotencyKey ต่อวัน ยิงซ้ำในวันเดียวกันไม่เปิดงานซ้ำ
-7. **ตั้งเวลา**: GitHub Actions cron (`schedule: - cron: '0 2 * * *'` + auth ด้วย `google-github-actions/auth` แบบ Workload Identity แล้ว `run: node scripts/gcp-billing-inbox.mjs`) หรือ Cloud Scheduler → Cloud Run Job ที่มีสคริปต์นี้ · เดือนถัดไป agent จะเห็นบิลเดือนก่อนในเอกสารของแผนกเอง
+7. **ตั้งเวลา**: GitHub Actions cron (`schedule: - cron: '0 2 * * *'` + auth ด้วย `google-github-actions/auth` แบบ Workload Identity แล้ว `run: node examples/gcp-billing/gcp-billing-inbox.mjs`) หรือ Cloud Scheduler → Cloud Run Job ที่มีสคริปต์นี้ · เดือนถัดไป agent จะเห็นบิลเดือนก่อนในเอกสารของแผนกเอง
 
 ## โครงไฟล์
 
