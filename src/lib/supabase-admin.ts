@@ -1,5 +1,6 @@
 import 'server-only';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { publicRuntimeEnv } from '@/lib/public-env';
 
 /* ============================================================
    Supabase ฝั่งเซิร์ฟเวอร์ - ใช้ secret key ข้าม RLS ได้ทั้งหมด
@@ -9,7 +10,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
    ไม่ตั้งค่าก็รันได้ - แอปจะทำงานแบบเดิม (เบราว์เซอร์บันทึกเอง ไม่มี headless)
    ============================================================ */
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+const url = publicRuntimeEnv().supabaseUrl;
 // รับทั้งชื่อใหม่ (sb_secret_...) และชื่อเก่า (service_role JWT)
 const secret = process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
 

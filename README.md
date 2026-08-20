@@ -21,6 +21,17 @@ npm run dev
 
 Open http://localhost:3210, click the key button in the top bar, and paste a Claude or Gemini key (or point it at a local Ollama). Without a key it still runs in demo mode — full animation, placeholder answers.
 
+**Docker** (no Node needed):
+
+```bash
+docker run -p 3210:3210 --env-file .env ghcr.io/onedd-digital/officedd:latest
+# or build from source: docker compose up -d
+```
+
+Supabase config is read at runtime, so the prebuilt image works with your own project — just put the values in `.env`. If you use Ollama, run it on the host as usual and point the app at `http://host.docker.internal:11434/v1` (the compose file does this by default).
+
+**Vercel**: [Deploy to Vercel](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fonedd-digital%2FOfficeDD) — set the Supabase variables in the project settings. Note that webhooks/MCP/LINE need `SUPABASE_SECRET_KEY`, and local models are not reachable from Vercel.
+
 That is enough to play. No database needed — but nothing is saved between refreshes. To keep your office, staff, and documents, set up the database (5 minutes, free): see [Database](#database-optional).
 
 ## Optional pieces

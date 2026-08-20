@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Docker: .next/standalone มี server.js + node_modules เท่าที่ใช้จริง - image เล็กและ start ได้โดยไม่ต้อง npm install
+  output: 'standalone',
   // มี package-lock.json อยู่ที่ C:\Users\panud ด้วย Next เลยเดา root ผิดไปเป็นโฟลเดอร์นั้น
   // ถ้าไม่ปักหมุดไว้ ตอน build จะไล่เก็บไฟล์ผิดที่และขึ้น warning ทุกครั้ง
   outputFileTracingRoot: dirname(fileURLToPath(import.meta.url)),

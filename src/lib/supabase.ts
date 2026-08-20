@@ -3,6 +3,7 @@
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
 import type { Palette } from '@/game/types';
 import type { Product } from '@/lib/company';
+import { windowEnv } from '@/lib/public-env';
 
 /* ============================================================
    เฟส 1 ใช้ client ฝั่งเบราว์เซอร์อย่างเดียว - ไม่มี SSR auth ไม่มี middleware
@@ -18,10 +19,11 @@ import type { Product } from '@/lib/company';
  * NEXT_PUBLIC_* ถูก inline ตอน build - อ้างชื่อเต็มตรง ๆ เท่านั้น
  * เขียนเป็น process.env[ตัวแปร] จะได้ undefined
  */
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL || windowEnv().supabaseUrl || '';
 const anonKey =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  windowEnv().supabaseKey ||
   '';
 
 export const supabaseConfigured = Boolean(url && anonKey);

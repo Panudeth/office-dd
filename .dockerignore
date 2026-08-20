@@ -1,0 +1,12 @@
+node_modules
+.next
+.next-test
+.git
+.env
+.env.*
+!.env.example
+*.log
+.claude
+examples/**/*.log
+Dockerfile
+docker-compose.yml
