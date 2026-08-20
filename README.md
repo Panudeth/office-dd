@@ -21,7 +21,7 @@ npm run dev
 
 Open http://localhost:3210, click the key button in the top bar, and paste a Claude or Gemini key (or point it at a local Ollama). Without a key it still runs in demo mode — full animation, placeholder answers.
 
-That is enough to play. Everything below is optional.
+That is enough to play. No database needed — but nothing is saved between refreshes. To keep your office, staff, and documents, set up the database (5 minutes, free): see [Database](#database-optional).
 
 ## Optional pieces
 
@@ -35,6 +35,27 @@ That is enough to play. Everything below is optional.
 | Run models locally | Ollama on the same machine; pick it in the key panel or set `OPENAI_BASE_URL=http://localhost:11434/v1` |
 
 Copy `.env.example` to `.env` and fill in only what you use. Each variable is documented there.
+
+## Database (optional)
+
+Everything persistent runs on Supabase (free tier is enough):
+
+1. Create a project at [supabase.com](https://supabase.com).
+2. Open **SQL Editor**, paste the whole of [`supabase/schema.sql`](supabase/schema.sql), and run it. The file is idempotent — when the schema changes in a later version, run it again to migrate.
+3. In **Project Settings → API keys**, copy two values into `.env`:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+```
+
+4. Restart the dev server, sign in, and create your office.
+
+For webhooks, MCP, and LINE the server also needs the secret key (never expose it to the browser):
+
+```env
+SUPABASE_SECRET_KEY=sb_secret_...
+```
 
 ## How it works
 
