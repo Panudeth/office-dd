@@ -23,7 +23,7 @@ jobs:
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: ghcr.io/${{ github.repository_owner }}/officedd
+          images: ghcr.io/${{ github.repository_owner }}/office-dd
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}

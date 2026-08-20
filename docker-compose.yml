@@ -4,7 +4,7 @@ services:
   app:
     build: .
     # ใช้ image สำเร็จรูปแทนการ build เอง: คอมเมนต์บรรทัด build แล้วเปิดบรรทัดล่าง
-    # image: ghcr.io/onedd-digital/officedd:latest
+    # image: ghcr.io/panudeth/office-dd:latest
     ports:
       - '3210:3210'
     env_file:
