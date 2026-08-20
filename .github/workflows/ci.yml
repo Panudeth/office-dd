@@ -1,0 +1,21 @@
+# ตรวจทุก PR และทุก push ขึ้น main: typecheck + build ต้องผ่าน
+# fork PR ได้แค่สิทธิ์อ่าน (ไม่เห็น secret ของ repo) - ปลอดภัยที่จะรันอัตโนมัติ
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
