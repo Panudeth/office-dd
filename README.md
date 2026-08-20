@@ -8,7 +8,7 @@ It is not a workflow builder. There is nothing to wire. You hire a department an
 
 Thai documentation (full detail): [README.th.md](README.th.md)
 
-<!-- screenshot / gif here -->
+![OfficeDD - a pixel-art office where every employee is an AI agent](docs/screenshot.png)
 
 ## Quick start
 
