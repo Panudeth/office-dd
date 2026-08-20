@@ -424,6 +424,16 @@ export class World {
     return cache.by[deptId];
   }
 
+  /** เปลี่ยนชื่อพนักงาน (เฉพาะ staff - บอส/เลขาฯ/แขกไม่ได้) - ชื่อโชว์ทันทีเฟรมถัดไป */
+  rename(id: string, name: string): boolean {
+    const nm = name.trim().slice(0, 24);
+    if (!nm) return false;
+    const e = this.staff.find((x) => x.id === id);
+    if (!e) return false;
+    e.name = nm;
+    return true;
+  }
+
   hire(dept: Department): Employee | null {
     if (this.staff.length >= MAX_STAFF) return null;
     const id = crypto.randomUUID(); // ใช้เป็น primary key ใน DB ด้วย

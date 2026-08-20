@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  AlertTriangle, Cpu, Crown, LayoutGrid, List, Lock, Minus, NotebookPen, Plug, Plus, Settings2, UserPlus, Users, Wrench,
+  AlertTriangle, Cpu, Crown, LayoutGrid, List, Lock, Minus, NotebookPen, Pencil, Plug, Plus, Settings2, UserPlus, Users, Wrench,
 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { DEPARTMENTS } from '@/lib/departments';
@@ -53,6 +53,8 @@ interface Props {
   roomLeft: Record<string, number>;
   onHire: (deptId: string, count: number) => void;
   onFire: (deptId: string) => void;
+  /** เปลี่ยนชื่อพนักงาน - ไม่ส่งมาถือว่าเปลี่ยนไม่ได้ (เช่นยังไม่ล็อกอิน) */
+  onRename?: (id: string, name: string) => void;
   onFocus: (id: string | null) => void;
   disabled: boolean;
   /** ถ้ามีค่า แปลว่ายังจ้างไม่ได้ - text บอกเหตุผล action คือป้ายบนปุ่มที่พาไปแก้ */
@@ -94,7 +96,7 @@ const VIEW_KEY = 'visual-company.staffview';
 type StaffView = 'card' | 'list';
 
 export default function HirePanel({
-  roster, seatsLeft, roomLeft, onHire, onFire, onFocus, disabled, lock, onUnlock,
+  roster, seatsLeft, roomLeft, onHire, onFire, onRename, onFocus, disabled, lock, onUnlock,
   tab, onTab: setTab, secretary, meetingCount, layoutPanel, connectPanel,
   llmOptions = [], llmOf, llmDefaultLabel = t('ค่าเริ่มต้น'), onLlm,
   roleLlm, onRoleLlm, llmActiveLabel = t('คีย์ของเซิร์ฟเวอร์'), llmHeadLabel = llmDefaultLabel,
@@ -103,6 +105,37 @@ export default function HirePanel({
   const off = disabled || !!lock;
 
   const [view, setViewState] = useState<StaffView>('card');
+  // เปลี่ยนชื่อ: คลิกดินสอ -> ช่องพิมพ์แทนชื่อ Enter บันทึก Esc ยกเลิก
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const renameBox = (m: { id: string; name: string }) => (
+    <input
+      autoFocus
+      value={renaming?.name ?? ''}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => setRenaming({ id: m.id, name: e.target.value })}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); if (renaming?.name.trim()) { onRename?.(m.id, renaming.name.trim()); } setRenaming(null); }
+        if (e.key === 'Escape') setRenaming(null);
+      }}
+      onBlur={() => setRenaming(null)}
+      maxLength={24}
+      className="w-24 rounded-box border border-brass bg-ink-800 px-1 py-0 text-[11px] text-parchment outline-none"
+      aria-label={t('เปลี่ยนชื่อพนักงาน')}
+    />
+  );
+  const renameBtn = (m: { id: string; name: string }) => onRename && (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={(e) => { e.stopPropagation(); e.preventDefault(); setRenaming({ id: m.id, name: m.name }); }}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); setRenaming({ id: m.id, name: m.name }); } }}
+      title={t('เปลี่ยนชื่อ')}
+      className="shrink-0 cursor-pointer rounded p-0.5 text-dim/60 hover:text-brass"
+    >
+      <Pencil className="size-3" />
+    </span>
+  );
   // localStorage อ่านได้เฉพาะฝั่ง client - โหลดหลัง mount ไม่งั้น SSR ไม่ตรง
   useEffect(() => {
     try {
@@ -325,7 +358,8 @@ export default function HirePanel({
                               >
                                 <Portrait palette={m.palette} size={1} className="block shrink-0" />
                                 {isHead && <Crown className="size-3 shrink-0 text-brass" aria-label={t('หัวหน้าแผนก')} />}
-                                <span className="truncate text-[11px] font-semibold text-parchment">{m.name}</span>
+                                {renaming?.id === m.id ? renameBox(m) : <span className="truncate text-[11px] font-semibold text-parchment">{m.name}</span>}
+                                {renaming?.id !== m.id && renameBtn(m)}
                                 <span className="hidden truncate text-[10px] text-dim sm:inline">{t(m.title)}</span>
                                 <span className={`ml-auto shrink-0 text-[10px] ${working ? 'text-brass' : 'text-carpet-lite'}`}>
                                   {t(STATE_TH[m.state])}
@@ -356,7 +390,8 @@ export default function HirePanel({
                               <span className="min-w-0 flex-1">
                                 <span className="flex items-center gap-1 text-[11px] font-semibold text-parchment">
                                   {isHead && <Crown className="size-3 shrink-0 text-brass" aria-label={t('หัวหน้าแผนก')} />}
-                                  <span className="truncate">{m.name}</span>
+                                  {renaming?.id === m.id ? renameBox(m) : <span className="truncate">{m.name}</span>}
+                                  {renaming?.id !== m.id && renameBtn(m)}
                                 </span>
                                 <span className="block truncate text-[10px] text-dim">
                                   {t(m.title)}

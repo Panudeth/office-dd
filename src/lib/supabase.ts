@@ -294,6 +294,14 @@ export async function saveEmployee(row: EmployeeRow): Promise<void> {
   if (error) throw new Error(sbError(error));
 }
 
+/** เปลี่ยนชื่อพนักงาน */
+export async function updateEmployeeName(id: string, name: string): Promise<void> {
+  const c = sb();
+  if (!c) return;
+  const { error } = await c.from('employee').update({ name }).eq('id', id);
+  if (error) throw new Error(sbError(error));
+}
+
 /** ย้ายที่นั่ง (ผังเปลี่ยน/สลับโต๊ะ) - seat ในแถวพนักงานเป็นสำเนาของผัง ให้ระบบอื่นอ่านง่าย */
 export async function updateEmployeeSeat(id: string, seat: { x: number; y: number }): Promise<void> {
   const c = sb();

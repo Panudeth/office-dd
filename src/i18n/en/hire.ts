@@ -1,5 +1,7 @@
 /** คำแปลอังกฤษ - key = ไทยต้นฉบับ (HirePanel / MeetingStatus / OperatorPanel / ui) */
 const d: Record<string, string> = {
+  'เปลี่ยนชื่อ': 'Rename',
+  'เปลี่ยนชื่อพนักงาน': 'Rename staff member',
   // ---- HirePanel: agent states (STATE_TH) ----
   'นั่งทำงาน': 'Working at desk',
   'กำลังเดิน': 'Walking',

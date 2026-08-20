@@ -27,7 +27,7 @@ import {
   accountAvatar, accountName, deleteEmployee, deleteMeeting, listMeetings, listOffices,
   listProducts, loadDeptNotesFull, loadEmployees, loadProfile, matchChunks, readOAuthReturn, rememberOffice,
   rememberedOfficeId, sb, saveEmployee, saveMeeting, sbError, supabaseConfigured, updateMeetingMinutes,
-  accessToken, loadLayout, saveLayout, updateEmployeeSeat,
+  accessToken, loadLayout, saveLayout, updateEmployeeName, updateEmployeeSeat,
   canEditOffice, deleteDepartment, loadDepartments, saveDepartment,
   type MeetingRow, type OAuthReturn, type Office, type User,
 } from '@/lib/supabase';
@@ -635,6 +635,13 @@ export default function Page() {
         }).catch((err) => setSaveErr(sbError(err)));
       }
     }
+    syncRoster();
+  };
+
+  const rename = (id: string, name: string) => {
+    const w = worldRef.current;
+    if (!w || !w.rename(id, name)) return;
+    if (office) updateEmployeeName(id, name.trim().slice(0, 24)).catch((err) => setSaveErr(sbError(err)));
     syncRoster();
   };
 
@@ -1693,6 +1700,7 @@ export default function Page() {
               roomLeft={roomLeft}
               onHire={hire}
               onFire={fire}
+              onRename={rename}
               onFocus={(id) => worldRef.current?.focus(id)}
               disabled={busy}
               lock={lock}
