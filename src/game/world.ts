@@ -1,7 +1,7 @@
 import { DEPT_BY_ID, ROLES, ROLE_ORDER, type Department } from '@/lib/departments';
 import { decalSprite, decorSprite, drawBubble, mk, objSprite, shade, tileSprite, type Surface } from './art';
 import { DIRS, GADGETS, buildAtlas, drawGadget, makePalette } from './character';
-import { t } from '@/lib/i18n';
+import { getLang, t } from '@/lib/i18n';
 import {
   BH, BOSS_HOME, BW, GROUND, MAX_STAFF, MH, MW, SECRETARY_NAME, SECRETARY_PAL, SECRETARY_TITLE, SEC_HOME,
   TS, findPath, tileFree, type MapObject,
@@ -52,6 +52,12 @@ const NAMES = [
 ];
 /** ชื่อเล่นที่อ่านเป็นผู้หญิง - ให้หน้าตาตรงกับชื่อ (ผมยาว กระโปรง) พนักงานเก่าที่ยังไม่มี fem ใน palette ก็ใช้ตัวนี้ */
 const FEM_NAMES = new Set(['แนน', 'ฟ้า', 'มิ้น', 'ปอ', 'นุ่น', 'พลอย', 'ใบเตย', 'กิ๊ฟ', 'ตูน']);
+/** ชื่อเล่นอังกฤษ - ใช้ตอนภาษา UI เป็น EN คนจ้างใหม่จะได้ชื่อจากชุดนี้ (คนเก่าชื่อเดิม ไม่แปลง) */
+const NAMES_EN = [
+  'Ton', 'Nan', 'Earth', 'Fah', 'Boss', 'Mint', 'Guy', 'Por', 'Jack', 'Noon',
+  'Oat', 'Ploy', 'Bass', 'Baitoey', 'Gift', 'Toon',
+];
+const FEM_NAMES_EN = new Set(['Nan', 'Fah', 'Mint', 'Por', 'Noon', 'Ploy', 'Baitoey', 'Gift', 'Toon']);
 
 const STATE_TH: Record<AgentState, string> = {
   work: 'ทำงาน', walk: 'กำลังเดิน', meet: 'ประชุม', think: 'กำลังถกกัน',
@@ -426,8 +432,12 @@ export class World {
 
     const n = this.headcount(dept.id);
     const usedNames = new Set(this.staff.map((e) => e.name));
-    const name = NAMES.find((nm) => !usedNames.has(nm)) ?? `พนักงาน${this.nextId}`;
-    const pal = makePalette(this.nextId++ * 17 + dept.id.length, dept.color, FEM_NAMES.has(name));
+    // ชุดชื่อตามภาษา UI ตอนกดจ้าง - ชื่อเป็นข้อมูลถาวร (ลง DB) ไม่ใช่คำแปล สลับภาษาทีหลังคนเดิมชื่อเดิม
+    const en = getLang() === 'en';
+    const pool = en ? NAMES_EN : NAMES;
+    const fems = en ? FEM_NAMES_EN : FEM_NAMES;
+    const name = pool.find((nm) => !usedNames.has(nm)) ?? (en ? `Staff ${this.nextId}` : `พนักงาน${this.nextId}`);
+    const pal = makePalette(this.nextId++ * 17 + dept.id.length, dept.color, fems.has(name));
     // คนที่ 1 = ผู้เสนอ, 2 = ผู้ค้าน, 3 = ผู้ตรวจสอบ, 4 = ผู้ดูความเป็นไปได้ แล้ววนใหม่
     const role = ROLE_ORDER[n % ROLE_ORDER.length];
 

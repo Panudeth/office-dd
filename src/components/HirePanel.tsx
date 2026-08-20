@@ -326,7 +326,7 @@ export default function HirePanel({
                                 <Portrait palette={m.palette} size={1} className="block shrink-0" />
                                 {isHead && <Crown className="size-3 shrink-0 text-brass" aria-label={t('หัวหน้าแผนก')} />}
                                 <span className="truncate text-[11px] font-semibold text-parchment">{m.name}</span>
-                                <span className="hidden truncate text-[10px] text-dim sm:inline">{m.title}</span>
+                                <span className="hidden truncate text-[10px] text-dim sm:inline">{t(m.title)}</span>
                                 <span className={`ml-auto shrink-0 text-[10px] ${working ? 'text-brass' : 'text-carpet-lite'}`}>
                                   {t(STATE_TH[m.state])}
                                 </span>
@@ -359,7 +359,7 @@ export default function HirePanel({
                                   <span className="truncate">{m.name}</span>
                                 </span>
                                 <span className="block truncate text-[10px] text-dim">
-                                  {m.title}
+                                  {t(m.title)}
                                 </span>
                                 <span
                                   className={`block truncate text-[10px] ${
@@ -474,7 +474,7 @@ export default function HirePanel({
                           >
                             <Portrait palette={m.palette} size={1} className="block shrink-0" />
                             <b className="font-semibold text-parchment">{m.name}</b>
-                            <span className="text-dim">{m.title}</span>
+                            <span className="text-dim">{t(m.title)}</span>
                           </button>
                         ))}
                       </div>
